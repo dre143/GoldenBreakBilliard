@@ -1,0 +1,20 @@
+{
+  "name": "golden-break-pos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Golden Break Billiard Hall — POS & inventory (vanilla JS + Firebase)",
+  "type": "module",
+  "scripts": {
+    "start": "node dev-server.mjs 5173",
+    "test": "npm run test:unit && npm run test:rules",
+    "test:unit": "node --test \"tests/unit/*.test.mjs\"",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-goldenbreak \"node --test tests/rules/*.test.mjs\"",
+    "deploy:rules": "firebase deploy --only firestore:rules",
+    "deploy": "firebase deploy"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
+    "firebase": "^12.19.0",
+    "firebase-tools": "^15.30.1"
+  }
+}
