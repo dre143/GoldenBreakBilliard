@@ -72,7 +72,7 @@ function applyPatch(target, patch) {
 
 function applyWrite([op, col, id, value], cols) {
   const bucket = (data[col] ||= {});
-  value = clone(resolveTimes(value));
+  if (value !== undefined) value = clone(resolveTimes(value)); // a remove carries no value
   if (op === 'update') {
     if (!bucket[id]) throw new Error(`Document ${col}/${id} not found`);
     applyPatch(bucket[id], value);
@@ -162,7 +162,7 @@ export const auth = {
   resetDemo() {
     localStorage.removeItem(KEY);
     sessionStorage.removeItem(SESSION_KEY);
-    channel?.postMessage(['tables', 'products', 'users', 'restocks', 'transactions']);
+    channel?.postMessage(['tables', 'products', 'users', 'restocks', 'transactions', 'expenses']);
     location.reload();
   },
 };
@@ -320,5 +320,20 @@ function seed() {
     };
   }
 
-  return { users, products, tables, restocks, transactions, meta: { setup: { ownerId: 'u-owner', createdAt: now } } };
+  // Cash paid out of the drawer by whoever was on duty: a few small expenses most days.
+  const EXPENSES = [['Drinking water refill', 60], ['Ice', 80], ['Tricycle fare (supplies)', 40], ['Cleaning supplies', 150], ['Chalk (market)', 120], ['LPG refill', 950]];
+  const expenses = {};
+  for (let d = 13; d >= 0; d--) {
+    const start = new Date(today0); start.setDate(start.getDate() - d);
+    const n = Math.floor(rnd() * 3);
+    for (let i = 0; i < n; i++) {
+      const createdAt = start.getTime() + 10 * H + Math.floor(rnd() * 13 * H);
+      if (createdAt > now) continue;
+      const [description, amount] = EXPENSES[Math.floor(rnd() * EXPENSES.length)];
+      const [cashierId, cashierName] = cashiers[Math.floor(rnd() * cashiers.length)];
+      expenses[`e-${d}-${i}`] = { description, amount, cashierId, cashierName, createdAt };
+    }
+  }
+
+  return { users, products, tables, restocks, transactions, expenses, meta: { setup: { ownerId: 'u-owner', createdAt: now } } };
 }

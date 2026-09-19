@@ -744,6 +744,22 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 .report-range__dates .field { width: 170px; }
 .report-range__note { flex-basis: 100%; font-size: 13px; color: var(--ink-soft); }
 .report-hint { font-size: 14px; color: var(--ink-soft); max-width: 72ch; }
+.shift-date { width: 170px; }
+.shift-toggle { min-height: 40px; }
+
+/* ---------- shift report: expense form ---------- */
+
+.expense-lines { display: flex; flex-direction: column; gap: 10px; }
+.expense-line { display: grid; grid-template-columns: minmax(0, 1fr) 140px auto; align-items: end; gap: 10px; }
+.expense-line__remove { align-self: end; }
+.expense-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
+.expense-foot__total { margin-left: auto; font-size: 14px; color: var(--ink-soft); }
+.expense-foot__total strong { font-size: 20px; font-weight: 600; color: var(--ink); margin-left: 6px; }
+@media (max-width: 560px) {
+  .expense-line { grid-template-columns: minmax(0, 1fr) 104px auto; }
+  .expense-foot .btn--primary { width: 100%; }
+  .expense-foot__total { margin-left: 0; }
+}
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; }
 .tab {
@@ -1112,7 +1128,7 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 @media print {
   body { background: #fff; font-size: 12px; }
   .sidebar, .topbar, .scrim, .skip-link, .toasts, .page-head__actions, .report-range .seg,
-  .tabs, .data-table .btn, .data-table th:last-child:has(.sr-only), dialog { display: none !important; }
+  .tabs, .data-table .btn, .data-table th:last-child:has(.sr-only), dialog, .no-print { display: none !important; }
   .shell { display: block; }
   .main { padding: 0; }
   .card, .stat { break-inside: avoid; border-color: #bbb; }

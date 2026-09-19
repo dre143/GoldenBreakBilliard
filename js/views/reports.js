@@ -2,14 +2,16 @@ import { db } from '../db.js';
 import * as rep from '../reporting.js';
 import { barChart } from './charts.js';
 import { receiptDialog } from '../dialogs.js';
+import * as svc from '../services.js';
 import {
-  esc, icon, peso, fmtTime, fmtDateTime, METHOD_LABEL, pageHeader, loadingBlock, emptyBlock, toast,
+  esc, icon, peso, fmtTime, fmtDateTime, METHOD_LABEL, pageHeader, loadingBlock, emptyBlock, toast, openDialog,
 } from '../ui.js';
 
 const TABS = [
   { key: 'sales', label: 'Sales' },
   { key: 'payments', label: 'Payments' },
-  { key: 'shifts', label: 'Shifts' },
+  { key: 'shifts', label: 'By cashier' },
+  { key: 'expenses', label: 'Expenses' },
 ];
 
 const PRESETS = [
@@ -28,6 +30,7 @@ export function mount(el, ctx) {
   let [fromKey, toKey] = [today, today];
   let tab = 'sales';
   let txs = null;
+  let expenses = null;
   let unsubs = [];
 
   const timeLabel = (h, m) => new Date(2000, 0, 1, h, m).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
@@ -79,12 +82,15 @@ export function mount(el, ctx) {
   function subscribe() {
     unsubs.forEach((off) => off());
     txs = null;
+    expenses = null;
     render();
     const start = rep.keyToStart(fromKey);
     const end = rep.keyToStart(rep.shiftKey(toKey, 1));
+    const range = { where: [['createdAt', '>=', start], ['createdAt', '<', end]] };
     const onError = (err) => toast(err.message, 'error');
     unsubs = [
-      db.listen('transactions', (rows) => { txs = rows; render(); }, { where: [['createdAt', '>=', start], ['createdAt', '<', end]] }, onError),
+      db.listen('transactions', (rows) => { txs = rows; render(); }, range, onError),
+      db.listen('expenses', (rows) => { expenses = rows.sort((a, b) => b.createdAt - a.createdAt); render(); }, range, onError),
     ];
   }
 
@@ -119,8 +125,8 @@ export function mount(el, ctx) {
     </article>`;
 
   function renderSales(target) {
-    const t = rep.totals(txs);
-    const days = rep.byDay(txs, fromKey, toKey);
+    const t = rep.totals(txs, expenses);
+    const days = rep.byDay(txs, fromKey, toKey, expenses);
     const products = rep.topProducts(txs);
     const many = days.length > 14;
     const chartDays = days.map((d, i) => ({
@@ -136,6 +142,12 @@ export function mount(el, ctx) {
         ${stat('Table revenue', peso(t.tableFee), `${hours(t.durationMs)} played · ${t.rounds} rounds`)}
         ${stat('Product sales', peso(t.productTotal), `${t.items} items sold`)}
         ${stat('Daily average', peso(t.total / days.length), `over ${days.length} business day${days.length === 1 ? '' : 's'}`)}
+      </div>
+      <div class="stats">
+        ${stat('Expenses', peso(t.expenses), `${t.expenseCount} item${t.expenseCount === 1 ? '' : 's'} paid from the drawer`, t.expenses ? 'stat--danger' : '')}
+        ${stat('Net sales', peso(t.net), 'Gross sales − expenses', 'stat--dark')}
+        ${stat('Cash collected', peso(t.cash), `GCash ${peso(t.gcash)}`)}
+        ${stat('Cash on hand', peso(t.cashToCount), 'Cash collected − expenses')}
       </div>
       ${days.length > 1 ? `
       <section class="card" aria-labelledby="rep-chart-title">
@@ -160,17 +172,21 @@ export function mount(el, ctx) {
               <th scope="col" class="t-right">Table revenue</th>
               <th scope="col" class="t-right">Product sales</th>
               <th scope="col" class="t-right">Total</th>
+              <th scope="col" class="t-right">Expenses</th>
+              <th scope="col" class="t-right">Net</th>
             </tr></thead>
             <tbody>
               ${days.map((d) => `
-              <tr class="${d.count ? '' : 'row-muted'}">
+              <tr class="${d.count || d.expenseCount ? '' : 'row-muted'}">
                 <th scope="row" class="cell-nowrap">${rep.keyLabel(d.key)}</th>
                 <td class="t-right num cell-num">${d.count}</td>
                 <td class="t-right num cell-num">${hours(d.durationMs)}</td>
                 <td class="t-right num cell-num">${d.rounds}</td>
                 <td class="t-right num cell-num">${peso(d.tableFee)}</td>
                 <td class="t-right num cell-num">${peso(d.productTotal)}</td>
-                <td class="t-right num cell-num cell-total">${peso(d.total)}</td>
+                <td class="t-right num cell-num">${peso(d.total)}</td>
+                <td class="t-right num cell-num">${peso(d.expenses)}</td>
+                <td class="t-right num cell-num cell-total">${peso(d.net)}</td>
               </tr>`).join('')}
             </tbody>
             <tfoot><tr>
@@ -180,7 +196,9 @@ export function mount(el, ctx) {
               <td class="t-right num cell-num">${t.rounds}</td>
               <td class="t-right num cell-num">${peso(t.tableFee)}</td>
               <td class="t-right num cell-num">${peso(t.productTotal)}</td>
-              <td class="t-right num cell-num cell-total">${peso(t.total)}</td>
+              <td class="t-right num cell-num">${peso(t.total)}</td>
+              <td class="t-right num cell-num">${peso(t.expenses)}</td>
+              <td class="t-right num cell-num cell-total">${peso(t.net)}</td>
             </tr></tfoot>
           </table>
         </div>
@@ -254,9 +272,9 @@ export function mount(el, ctx) {
   }
 
   function renderPayments(target) {
-    const t = rep.totals(txs);
+    const t = rep.totals(txs, expenses);
     const m = rep.byMethod(txs);
-    const days = rep.byDay(txs, fromKey, toKey);
+    const days = rep.byDay(txs, fromKey, toKey, expenses);
     const methodRows = [
       ['Cash', m.cash],
       ['GCash', m.gcash],
@@ -314,15 +332,19 @@ export function mount(el, ctx) {
               <th scope="col" class="t-right">Cash</th>
               <th scope="col" class="t-right">GCash</th>
               <th scope="col" class="t-right">Total</th>
+              <th scope="col" class="t-right">Expenses</th>
+              <th scope="col" class="t-right">Cash on hand</th>
             </tr></thead>
             <tbody>
               ${days.map((d) => `
-              <tr class="${d.count ? '' : 'row-muted'}">
+              <tr class="${d.count || d.expenseCount ? '' : 'row-muted'}">
                 <th scope="row" class="cell-nowrap">${rep.keyLabel(d.key)}</th>
                 <td class="t-right num cell-num">${d.count}</td>
                 <td class="t-right num cell-num">${peso(d.cash)}</td>
                 <td class="t-right num cell-num">${peso(d.gcash)}</td>
-                <td class="t-right num cell-num cell-total">${peso(d.total)}</td>
+                <td class="t-right num cell-num">${peso(d.total)}</td>
+                <td class="t-right num cell-num">${peso(d.expenses)}</td>
+                <td class="t-right num cell-num cell-total">${peso(d.cashToCount)}</td>
               </tr>`).join('')}
             </tbody>
             <tfoot><tr>
@@ -330,7 +352,9 @@ export function mount(el, ctx) {
               <td class="t-right num cell-num">${t.count}</td>
               <td class="t-right num cell-num">${peso(t.cash)}</td>
               <td class="t-right num cell-num">${peso(t.gcash)}</td>
-              <td class="t-right num cell-num cell-total">${peso(t.total)}</td>
+              <td class="t-right num cell-num">${peso(t.total)}</td>
+              <td class="t-right num cell-num">${peso(t.expenses)}</td>
+              <td class="t-right num cell-num cell-total">${peso(t.cashToCount)}</td>
             </tr></tfoot>
           </table>
         </div>
@@ -338,17 +362,17 @@ export function mount(el, ctx) {
   }
 
   function renderShifts(target) {
-    const rows = rep.byShift(txs);
-    const t = rep.totals(txs);
+    const rows = rep.byShift(txs, expenses);
+    const t = rep.totals(txs, expenses);
     const cashiers = new Set(rows.map((r) => r.cashierId)).size;
     target.innerHTML = `
       <div class="stats">
         ${stat('Shifts', rows.length, `${cashiers} cashier${cashiers === 1 ? '' : 's'}`, 'stat--dark')}
         ${stat('Cash sales', peso(t.cash), 'Includes the cash part of splits')}
-        ${stat('GCash sales', peso(t.gcash), 'Includes the GCash part of splits')}
-        ${stat('Average per shift', peso(rows.length ? t.total / rows.length : 0), `${peso(t.total)} total`)}
+        ${stat('Expenses', peso(t.expenses), 'Paid from the drawer')}
+        ${stat('Cash to hand over', peso(t.cashToCount), 'Cash sales − expenses')}
       </div>
-      <p class="report-hint">A shift is one cashier’s sales within one business day.</p>
+      <p class="report-hint">One row per cashier per business day: what they collected, what they paid out of the drawer, and the cash they should hand over.</p>
       <section class="card card--flush" aria-labelledby="rep-shifts-title">
         <div class="toolbar"><h2 class="card-title" id="rep-shifts-title">Shift report</h2></div>
         <div class="table-wrap">
@@ -363,6 +387,8 @@ export function mount(el, ctx) {
               <th scope="col" class="t-right">Cash</th>
               <th scope="col" class="t-right">GCash</th>
               <th scope="col" class="t-right">Total</th>
+              <th scope="col" class="t-right">Expenses</th>
+              <th scope="col" class="t-right">Cash to hand over</th>
             </tr></thead>
             <tbody>
               ${rows.map((r) => `
@@ -377,7 +403,9 @@ export function mount(el, ctx) {
                 <td class="t-right num cell-num">${peso(r.productTotal)}</td>
                 <td class="t-right num cell-num">${peso(r.cash)}</td>
                 <td class="t-right num cell-num">${peso(r.gcash)}</td>
-                <td class="t-right num cell-num cell-total">${peso(r.total)}</td>
+                <td class="t-right num cell-num">${peso(r.total)}</td>
+                <td class="t-right num cell-num">${peso(r.expenses)}</td>
+                <td class="t-right num cell-num cell-total">${peso(r.cashToCount)}</td>
               </tr>`).join('')}
             </tbody>
             <tfoot><tr>
@@ -388,20 +416,81 @@ export function mount(el, ctx) {
               <td class="t-right num cell-num">${peso(t.productTotal)}</td>
               <td class="t-right num cell-num">${peso(t.cash)}</td>
               <td class="t-right num cell-num">${peso(t.gcash)}</td>
-              <td class="t-right num cell-num cell-total">${peso(t.total)}</td>
+              <td class="t-right num cell-num">${peso(t.total)}</td>
+              <td class="t-right num cell-num">${peso(t.expenses)}</td>
+              <td class="t-right num cell-num cell-total">${peso(t.cashToCount)}</td>
             </tr></tfoot>
-          </table>` : emptyBlock('No shifts in this period.', 'Shifts appear once a cashier completes a sale.')}
+          </table>` : emptyBlock('No shifts in this period.', 'Shifts appear once a cashier completes a sale or logs an expense.')}
         </div>
       </section>`;
+  }
+
+  /** Every expense in the period, newest first. The owner can remove one that was logged by mistake. */
+  function renderExpenses(target) {
+    const t = rep.totals(txs, expenses);
+    const days = rep.dayKeys(fromKey, toKey).length;
+    const biggest = expenses.reduce((m, e) => (!m || e.amount > m.amount ? e : m), null);
+    target.innerHTML = `
+      <div class="stats">
+        ${stat('Total expenses', peso(t.expenses), `${t.expenseCount} item${t.expenseCount === 1 ? '' : 's'}`, 'stat--dark')}
+        ${stat('Daily average', peso(t.expenses / days), `over ${days} business day${days === 1 ? '' : 's'}`)}
+        ${stat('Largest', biggest ? peso(biggest.amount) : '—', biggest ? esc(biggest.description) : 'No expenses')}
+        ${stat('Net sales', peso(t.net), `${peso(t.total)} sales − expenses`)}
+      </div>
+      <section class="card card--flush" aria-labelledby="rep-exp-title">
+        <div class="toolbar"><h2 class="card-title" id="rep-exp-title">Expenses</h2></div>
+        <div class="table-wrap">
+          ${expenses.length ? `
+          <table class="data-table">
+            <thead><tr>
+              <th scope="col">Date &amp; time</th>
+              <th scope="col">What for</th>
+              <th scope="col">Logged by</th>
+              <th scope="col" class="t-right">Amount</th>
+              <th scope="col"><span class="sr-only">Remove</span></th>
+            </tr></thead>
+            <tbody>
+              ${expenses.map((e) => `
+              <tr>
+                <td class="cell-nowrap">${fmtDateTime(e.createdAt)}</td>
+                <th scope="row" class="cell-strong">${esc(e.description)}</th>
+                <td>${esc(e.cashierName)}</td>
+                <td class="t-right num cell-num">${peso(e.amount)}</td>
+                <td class="t-right"><button type="button" class="btn btn--danger-ghost btn--sm" data-remove-expense="${esc(e.id)}" aria-label="Remove expense: ${esc(e.description)}">Remove</button></td>
+              </tr>`).join('')}
+            </tbody>
+            <tfoot><tr>
+              <th scope="row" colspan="3">Total</th>
+              <td class="t-right num cell-num cell-total">${peso(t.expenses)}</td>
+              <td></td>
+            </tr></tfoot>
+          </table>` : emptyBlock('No expenses in this period.', 'Cashiers log expenses from the Shift Report page.')}
+        </div>
+      </section>`;
+  }
+
+  function confirmRemoveExpense(expense) {
+    openDialog({
+      title: 'Remove expense?',
+      body: `<p><strong>${esc(expense.description)}</strong>, ${peso(expense.amount)}, logged by ${esc(expense.cashierName)} on ${fmtDateTime(expense.createdAt)}.</p>
+        <p class="muted small">Remove it only if it was entered by mistake. It will no longer be subtracted from that shift's cash.</p>`,
+      submitLabel: 'Remove expense',
+      submitClass: 'btn--danger',
+      onSubmit: async () => {
+        await svc.removeExpense(expense.id);
+        toast('Expense removed.');
+      },
+    });
   }
 
   function render() {
     $('[data-region=range-label]').textContent = rangeLabel();
     const target = panel(tab);
-    if (!txs) { target.innerHTML = loadingBlock('Loading report…'); return; }
+    if (!txs || !expenses) { target.innerHTML = loadingBlock('Loading report…'); return; }
     if (tab === 'sales') renderSales(target);
     if (tab === 'payments') renderPayments(target);
     if (tab === 'shifts') renderShifts(target);
+    if (tab === 'expenses') renderExpenses(target);
   }
 
   function selectTab(key, focus = false) {
@@ -420,13 +509,20 @@ export function mount(el, ctx) {
 
   function csvRows() {
     const range = [`Golden Break Billiard Hall ${TABS.find((t) => t.key === tab).label} report`, `${fromKey} to ${toKey}`];
-    const t = rep.totals(txs);
-    if (tab === 'sales') {
-      const days = rep.byDay(txs, fromKey, toKey);
+    const t = rep.totals(txs, expenses);
+    if (tab === 'expenses') {
       return [range, [],
-        ['Business day', 'Transactions', 'Hours played', 'Rounds', 'Table revenue', 'Product sales', 'Total'],
-        ...days.map((d) => [d.key, d.count, (d.durationMs / 3600000).toFixed(2), d.rounds, d.tableFee, d.productTotal, d.total]),
-        ['Total', t.count, (t.durationMs / 3600000).toFixed(2), t.rounds, t.tableFee, t.productTotal, t.total],
+        ['Date', 'Time', 'What for', 'Logged by', 'Amount'],
+        ...expenses.map((e) => [rep.dayKey(e.createdAt), fmtTime(e.createdAt), e.description, e.cashierName, e.amount]),
+        ['Total', '', '', '', t.expenses],
+        [], ['Gross sales', t.total], ['Expenses', t.expenses], ['Net sales', t.net]];
+    }
+    if (tab === 'sales') {
+      const days = rep.byDay(txs, fromKey, toKey, expenses);
+      return [range, [],
+        ['Business day', 'Transactions', 'Hours played', 'Rounds', 'Table revenue', 'Product sales', 'Total', 'Expenses', 'Net'],
+        ...days.map((d) => [d.key, d.count, (d.durationMs / 3600000).toFixed(2), d.rounds, d.tableFee, d.productTotal, d.total, d.expenses, d.net]),
+        ['Total', t.count, (t.durationMs / 3600000).toFixed(2), t.rounds, t.tableFee, t.productTotal, t.total, t.expenses, t.net],
         [], ['Rank', 'Product', 'Category', 'Qty sold', 'Revenue'],
         ...rep.topProducts(txs, 1000).map((p, i) => [i + 1, p.name, p.category, p.qty, p.revenue]),
         [], ['Table fee voids'], ['Voided', 'Table', 'Cashier', 'Reason', 'Note', 'Refunded'],
@@ -438,17 +534,18 @@ export function mount(el, ctx) {
         ['Method', 'Transactions', 'Cash', 'GCash', 'Total'],
         ...[['cash', m.cash], ['gcash', m.gcash], ['split', m.split], ['other', m.other]].map(([k, r]) => [METHOD_LABEL[k] || 'Other', r.count, r.cash, r.gcash, r.total]),
         ['Total', t.count, t.cash, t.gcash, t.total],
-        [], ['Business day', 'Transactions', 'Cash', 'GCash', 'Total'],
-        ...rep.byDay(txs, fromKey, toKey).map((d) => [d.key, d.count, d.cash, d.gcash, d.total])];
+        [], ['Business day', 'Transactions', 'Cash', 'GCash', 'Total', 'Expenses', 'Cash on hand'],
+        ...rep.byDay(txs, fromKey, toKey, expenses).map((d) => [d.key, d.count, d.cash, d.gcash, d.total, d.expenses, d.cashToCount]),
+        ['Total', t.count, t.cash, t.gcash, t.total, t.expenses, t.cashToCount]];
     }
     return [range, [],
-      ['Business day', 'Cashier', 'First sale', 'Last sale', 'Transactions', 'Items sold', 'Table revenue', 'Product sales', 'Cash', 'GCash', 'Total'],
-      ...rep.byShift(txs).map((r) => [r.day, r.cashierName, fmtTime(r.firstAt), fmtTime(r.lastAt), r.count, r.items, r.tableFee, r.productTotal, r.cash, r.gcash, r.total]),
-      ['Total', '', '', '', t.count, t.items, t.tableFee, t.productTotal, t.cash, t.gcash, t.total]];
+      ['Business day', 'Cashier', 'First activity', 'Last activity', 'Transactions', 'Items sold', 'Table revenue', 'Product sales', 'Cash', 'GCash', 'Total', 'Expenses', 'Cash to hand over'],
+      ...rep.byShift(txs, expenses).map((r) => [r.day, r.cashierName, fmtTime(r.firstAt), fmtTime(r.lastAt), r.count, r.items, r.tableFee, r.productTotal, r.cash, r.gcash, r.total, r.expenses, r.cashToCount]),
+      ['Total', '', '', '', t.count, t.items, t.tableFee, t.productTotal, t.cash, t.gcash, t.total, t.expenses, t.cashToCount]];
   }
 
   function exportCsv() {
-    if (!txs) return;
+    if (!txs || !expenses) return;
     const blob = new Blob(['﻿', rep.toCsv(csvRows())], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = Object.assign(document.createElement('a'), { href: url, download: `golden-break-${tab}-${fromKey}_to_${toKey}.csv` });
@@ -485,6 +582,9 @@ export function mount(el, ctx) {
     const voidBtn = e.target.closest('[data-void-id]');
     const tx = voidBtn && txs?.find((x) => x.id === voidBtn.dataset.voidId);
     if (tx) receiptDialog(tx);
+    const removeBtn = e.target.closest('[data-remove-expense]');
+    const expense = removeBtn && expenses?.find((x) => x.id === removeBtn.dataset.removeExpense);
+    if (expense) confirmRemoveExpense(expense);
   });
 
   subscribe();

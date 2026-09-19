@@ -44,6 +44,47 @@ export function dayKeys(fromKey, toKey) {
 export const keyLabel = (key, opts = { weekday: 'short', month: 'short', day: 'numeric' }) =>
   new Date(keyToStart(key)).toLocaleDateString('en-PH', opts);
 
+/* ---------- cashier shifts ---------- */
+
+/**
+ * The business day splits into two fixed cashier shifts: Day (6:00 AM to 6:00 PM) and Night
+ * (6:00 PM to 6:00 AM the next morning). Boundaries are half-open, so a sale at 5:59:59 PM is on the
+ * day shift and one at exactly 6:00:00 PM is on the night shift. Shifts never overlap or leave a gap.
+ * "Full day" is the whole business day (both shifts).
+ */
+export const SHIFT_SPLIT_HOUR = 18;
+export const SHIFTS = ['full', 'day', 'night'];
+
+const hourLabel = (h) => new Date(2000, 0, 1, h).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
+export const SHIFT_LABEL = {
+  full: 'Full day',
+  day: `Day shift (${hourLabel(BUSINESS_DAY_START_HOUR)}–${hourLabel(SHIFT_SPLIT_HOUR)})`,
+  night: `Night shift (${hourLabel(SHIFT_SPLIT_HOUR)}–${hourLabel(BUSINESS_DAY_START_HOUR)})`,
+};
+export const SHIFT_SHORT = { full: 'Full day', day: 'Day', night: 'Night' };
+
+function splitAt(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d, SHIFT_SPLIT_HOUR, 0, 0, 0).getTime();
+}
+
+/** [start, end) timestamps of a shift on business day `key`. */
+export function shiftRange(key, shift = 'full') {
+  const start = keyToStart(key);
+  const end = keyToStart(shiftKey(key, 1));
+  if (shift === 'day') return [start, splitAt(key)];
+  if (shift === 'night') return [splitAt(key), end];
+  return [start, end];
+}
+
+/** 'day' or 'night' for the moment ts. */
+export const shiftOf = (ts) => (ts < splitAt(dayKey(ts)) ? 'day' : 'night');
+
+/* ---------- expenses ---------- */
+
+/** Cash taken out of the drawer (water, fare, supplies…), logged by the cashier on duty. */
+export const expenseTotal = (expenses) => round2((expenses || []).reduce((s, e) => s + (e.amount || 0), 0));
+
 /** Money received per channel. Older records without `payments` are inferred from `method`. */
 export function paymentsOf(tx) {
   if (tx.payments) return { cash: tx.payments.cash || 0, gcash: tx.payments.gcash || 0, other: 0 };
@@ -55,7 +96,14 @@ export function paymentsOf(tx) {
 const emptyTotals = () => ({
   count: 0, durationMs: 0, rounds: 0, items: 0,
   tableFee: 0, productTotal: 0, total: 0, cash: 0, gcash: 0, other: 0,
+  expenses: 0, expenseCount: 0,
 });
+
+function addExpense(acc, e) {
+  acc.expenses += e.amount || 0;
+  acc.expenseCount += 1;
+  return acc;
+}
 
 function add(acc, tx) {
   const p = paymentsOf(tx);
@@ -72,21 +120,35 @@ function add(acc, tx) {
   return acc;
 }
 
+/**
+ * Rounds the money fields and derives the two end-of-shift figures:
+ *   net         = sales − expenses
+ *   cashToCount = cash collected − expenses (expenses are paid out of the cash drawer)
+ * A table-fee void already subtracts its refund from the sale's payments, so no further adjustment is needed.
+ */
 function rounded(acc) {
-  for (const k of ['tableFee', 'productTotal', 'total', 'cash', 'gcash', 'other']) acc[k] = round2(acc[k]);
+  for (const k of ['tableFee', 'productTotal', 'total', 'cash', 'gcash', 'other', 'expenses']) acc[k] = round2(acc[k]);
+  acc.net = round2(acc.total - acc.expenses);
+  acc.cashToCount = round2(acc.cash - acc.expenses);
   return acc;
 }
 
-export function totals(txs) {
-  return rounded(txs.reduce(add, emptyTotals()));
+export function totals(txs, expenses = []) {
+  const acc = txs.reduce(add, emptyTotals());
+  for (const e of expenses) addExpense(acc, e);
+  return rounded(acc);
 }
 
 /** One row per business day in the range (days with no sales included as zeros). */
-export function byDay(txs, fromKey, toKey) {
+export function byDay(txs, fromKey, toKey, expenses = []) {
   const map = new Map(dayKeys(fromKey, toKey).map((k) => [k, emptyTotals()]));
   for (const tx of txs) {
     const acc = map.get(dayKey(tx.createdAt));
     if (acc) add(acc, tx);
+  }
+  for (const e of expenses) {
+    const acc = map.get(dayKey(e.createdAt));
+    if (acc) addExpense(acc, e);
   }
   return [...map].map(([key, acc]) => ({ key, ...rounded(acc) }));
 }
@@ -113,21 +175,25 @@ export function topProducts(txs, limit = 10) {
     .slice(0, limit);
 }
 
-/** A shift = one cashier's sales within one business day. */
-export function byShift(txs) {
+/**
+ * One cashier's sales and expenses within one business day: what they collected, what they paid
+ * out of the drawer, and the cash they should hand over (cashToCount).
+ */
+export function byShift(txs, expenses = []) {
   const map = new Map();
-  for (const tx of txs) {
-    const key = dayKey(tx.createdAt);
-    const id = shiftId(key, tx.cashierId);
+  const rowFor = (at, cashierId, cashierName) => {
+    const key = dayKey(at);
+    const id = shiftId(key, cashierId);
     const row = map.get(id) || {
-      id, day: key, cashierId: tx.cashierId, cashierName: tx.cashierName,
-      firstAt: tx.createdAt, lastAt: tx.createdAt, ...emptyTotals(),
+      id, day: key, cashierId, cashierName, firstAt: at, lastAt: at, ...emptyTotals(),
     };
-    add(row, tx);
-    row.firstAt = Math.min(row.firstAt, tx.createdAt);
-    row.lastAt = Math.max(row.lastAt, tx.createdAt);
+    row.firstAt = Math.min(row.firstAt, at);
+    row.lastAt = Math.max(row.lastAt, at);
     map.set(id, row);
-  }
+    return row;
+  };
+  for (const tx of txs) add(rowFor(tx.createdAt, tx.cashierId, tx.cashierName), tx);
+  for (const e of expenses) addExpense(rowFor(e.createdAt, e.cashierId, e.cashierName), e);
   return [...map.values()].map(rounded).sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : a.cashierName.localeCompare(b.cashierName)));
 }
 

@@ -242,5 +242,32 @@ service cloud.firestore {
         && tableFeeVoidOk();
       allow delete: if false;
     }
+
+    // Hall-wide settings (e.g. settings/shifts: whether the hall runs one shift or Day + Night).
+    match /settings/{id} {
+      allow read: if isStaff();
+      allow write: if isOwner();
+    }
+
+    // ---------------- expenses ----------------
+    // Cash taken from the drawer. Any staff member logs expenses under their own name, stamped with
+    // server time so each one lands on the shift that was actually on duty. Nobody can edit a logged
+    // expense. Only the owner can remove a mistaken one, so the shift report stays an audit trail.
+    match /expenses/{id} {
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly(['description', 'amount', 'cashierId', 'cashierName', 'createdAt'])
+        && request.resource.data.description is string
+        && request.resource.data.description.size() > 0
+        && request.resource.data.description.size() <= 120
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.amount <= 1000000
+        && request.resource.data.cashierId == request.auth.uid
+        && request.resource.data.cashierName is string
+        && request.resource.data.createdAt == request.time;
+      allow update: if false;
+      allow delete: if isOwner();
+    }
   }
 }

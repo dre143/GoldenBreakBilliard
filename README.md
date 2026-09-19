@@ -34,6 +34,8 @@ account on the sign-in screen. "Reset demo data" puts the seed data back.
 | Quick Sale (walk-in items, no table) | ✓ | ✓ |
 | Inventory | view only | add products, edit, add stock |
 | Transactions | ✓ | ✓ |
+| Shift Report (sales, cash to count), log expenses | ✓ | ✓ |
+| Remove a mistaken expense, turn Day/Night shifts on or off | — | ✓ |
 | Void the table fee (session used ≤5 min) | own sales | any sale |
 | Owner Dashboard | — | ✓ |
 | Reports (sales, payments, shifts) | — | ✓ |
@@ -54,8 +56,28 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
 - `restocks/{id}` — restock log (feeds "Restocked this week")
 - `transactions/{id}` — `tableId`/`tableName`, `startedAt`/`endedAt`/`durationMs` copied from the session, `mode` (open | timed), `plannedMs`, `billedMs`, `pricing` used, table fee, rounds, line items, totals, `method` (cash | gcash | split), `payments {cash, gcash}`, cashier, `createdAt` (server time); a table-fee-voided sale also carries `tableFeeVoided`, `voidReason`, `voidNote`, `tableFeeVoidedBy…`, `originalTableFee`, `originalTotal`, `refundAmount`, `refundMethod`. A **Quick Sale** (walk-in) has `tableId: null` and no table-session fields — see below.
 - `users/{uid}` — `name, email, role, active, online, lastSeen`
+- `expenses/{id}` — `description, amount, cashierId, cashierName, createdAt` (server time). Cash taken from the drawer. Nobody edits one; only the owner can delete one.
+- `settings/shifts` — `twoShifts` (owner-only). Off by default: one shift per business day.
 - `meta/setup` — marks that the first owner exists
 - `clock/{uid}` — private server-clock probe (lets each device show accurate timers)
+
+## Shift Report & expenses
+
+Adapted from the Marimar Inn daily sales report. **Shift Report** (all staff) lists every sale and expense for a business
+day (6:00 AM to 6:00 AM) and reconciles the drawer:
+
+- **Cash to count** = cash collected − expenses (expenses are paid out of the cash drawer)
+- **Net sales** = sales − expenses
+
+The cashier on duty logs expenses (several lines at once) from the same page. Each one is stamped with server time, so it
+lands on the shift that was actually working. Export CSV and Print produce the end-of-shift sheet.
+
+The hall runs **one shift** per business day. When a second shift starts, the owner ticks *Split the day into Day and Night
+shifts* on the Shift Report page. The report then offers Day (6:00 AM–6:00 PM), Night (6:00 PM–6:00 AM) and Full day.
+`SHIFT_SPLIT_HOUR` in `js/reporting.js` sets the split.
+
+Reports (owner) show expenses and net on every tab: Sales (expenses, net sales, cash on hand), Payments (cash on hand per
+day), By cashier (cash to hand over per cashier per day) and a new Expenses tab.
 
 ## Table rate
 

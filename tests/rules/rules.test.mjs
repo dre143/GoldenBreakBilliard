@@ -4,7 +4,7 @@ import { before, after, beforeEach, test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertSucceeds, assertFails } from '@firebase/rules-unit-testing';
 import {
-  doc, setDoc, updateDoc, writeBatch, serverTimestamp, Timestamp,
+  doc, setDoc, updateDoc, deleteDoc, getDoc, writeBatch, serverTimestamp, Timestamp,
 } from 'firebase/firestore';
 import { tableFee, PRICING } from '../../js/billing.js';
 
@@ -390,6 +390,42 @@ test('table-fee void has no "reopen": can’t restore the old session stamps, an
     voidPatch('joy', sale, { payments: { cash: sale.productTotal, gcash: 0 }, voidReopenedTable: false })));
   await assertFails(updateDoc(doc(joy, 'transactions/sale1'),
     voidPatch('joy', sale, { payments: { cash: sale.productTotal, gcash: 0 }, reopenedFromVoid: 'sale1' })));
+});
+
+/* ---------------- expenses ---------------- */
+
+const expense = (uid, name, extra = {}) => ({
+  description: 'Drinking water', amount: 60, cashierId: uid, cashierName: name, createdAt: serverTimestamp(), ...extra,
+});
+
+test('expenses: staff log their own, server-stamped, with a description and a positive amount', async () => {
+  const joy = as('joy');
+  await assertSucceeds(setDoc(doc(joy, 'expenses/e1'), expense('joy', 'Joy')));
+  await assertSucceeds(setDoc(doc(as('owner'), 'expenses/e2'), expense('owner', 'Marco', { amount: 12.5 })));
+  await assertFails(setDoc(doc(joy, 'expenses/e3'), expense('bea', 'Bea')), 'under someone else’s name');
+  await assertFails(setDoc(doc(joy, 'expenses/e4'), expense('joy', 'Joy', { createdAt: ts(Date.now() - 12 * 60 * MIN) })), 'backdated to another shift');
+  await assertFails(setDoc(doc(joy, 'expenses/e5'), expense('joy', 'Joy', { amount: 0 })));
+  await assertFails(setDoc(doc(joy, 'expenses/e6'), expense('joy', 'Joy', { amount: -50 })));
+  await assertFails(setDoc(doc(joy, 'expenses/e7'), expense('joy', 'Joy', { amount: '60' })));
+  await assertFails(setDoc(doc(joy, 'expenses/e8'), expense('joy', 'Joy', { description: '' })));
+  await assertFails(setDoc(doc(joy, 'expenses/e9'), expense('joy', 'Joy', { description: 'x'.repeat(121) })));
+  await assertFails(setDoc(doc(joy, 'expenses/e10'), expense('joy', 'Joy', { approved: true })), 'unknown fields');
+  await assertFails(setDoc(doc(env.unauthenticatedContext().firestore(), 'expenses/e11'), expense('joy', 'Joy')));
+});
+
+test('expenses: nobody edits one; only the owner can remove a mistaken one', async () => {
+  await seed({ 'expenses/e1': { description: 'Ice', amount: 80, cashierId: 'joy', cashierName: 'Joy', createdAt: ts(Date.now()) } });
+  await assertSucceeds(getDoc(doc(as('bea'), 'expenses/e1')));
+  await assertFails(updateDoc(doc(as('joy'), 'expenses/e1'), { amount: 8 }));
+  await assertFails(updateDoc(doc(as('owner'), 'expenses/e1'), { amount: 8 }));
+  await assertFails(deleteDoc(doc(as('joy'), 'expenses/e1')), 'the cashier who logged it');
+  await assertSucceeds(deleteDoc(doc(as('owner'), 'expenses/e1')));
+});
+
+test('settings: staff read, only the owner switches Day/Night shifts', async () => {
+  await assertFails(setDoc(doc(as('joy'), 'settings/shifts'), { twoShifts: true }));
+  await assertSucceeds(setDoc(doc(as('owner'), 'settings/shifts'), { twoShifts: true }));
+  await assertSucceeds(getDoc(doc(as('joy'), 'settings/shifts')));
 });
 
 /* ---------------- clock & presence ---------------- */

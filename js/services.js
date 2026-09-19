@@ -268,6 +268,40 @@ export function voidTableFee(txId, { reason, note = '', refundMethod } = {}, use
   });
 }
 
+/* ---------- expenses ---------- */
+
+export const EXPENSE_DESCRIPTION_MAX = 120;
+
+/**
+ * Log cash taken from the drawer: one or more { description, amount } lines, saved together.
+ * Each is stamped with server time, so it lands on the shift that is actually on duty. Expenses can't
+ * be edited afterwards; only the owner can remove a mistaken one (see firestore.rules).
+ */
+export function recordExpenses(lines, user) {
+  const items = (lines || []).map((l) => ({ description: String(l.description || '').trim(), amount: round2(Number(l.amount)) }));
+  if (!items.length) return Promise.reject(new Error('Add at least one expense.'));
+  for (const i of items) {
+    if (!i.description) return Promise.reject(new Error('Say what each expense was for.'));
+    if (i.description.length > EXPENSE_DESCRIPTION_MAX) return Promise.reject(new Error(`Keep each description under ${EXPENSE_DESCRIPTION_MAX} characters.`));
+    if (!Number.isFinite(i.amount) || i.amount <= 0) return Promise.reject(new Error('Enter an amount greater than zero.'));
+  }
+  return db.transaction(async (tx) => {
+    for (const i of items) {
+      tx.set('expenses', db.newId('expenses'), {
+        description: i.description, amount: i.amount,
+        cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
+      });
+    }
+    return items.length;
+  });
+}
+
+export const removeExpense = (id) => db.remove('expenses', id);
+
+/** Owner switch: one shift per business day (default), or split into Day and Night shifts. */
+export const setTwoShifts = (on) =>
+  db.set('settings', 'shifts', { twoShifts: !!on, updatedAt: SERVER_TIME }, { merge: true }).then(() => !!on);
+
 /* ---------- tables (owner) ---------- */
 
 export function addTable({ name, number }) {

@@ -12,6 +12,7 @@ import * as transactionsView from './views/transactions.js';
 import * as dashboardView from './views/dashboard.js';
 import * as staffView from './views/staff.js';
 import * as reportsView from './views/reports.js';
+import * as shiftView from './views/shift.js';
 
 const root = document.getElementById('root');
 
@@ -21,6 +22,7 @@ const ROUTES = {
   checkout: { label: 'Checkout', icon: 'receipt', view: checkoutView },
   'quick-sale': { label: 'Quick Sale', icon: 'bag', view: quickSaleView },
   transactions: { label: 'Transactions', icon: 'list', view: transactionsView },
+  shift: { label: 'Shift Report', icon: 'wallet', view: shiftView },
   dashboard: { label: 'Owner Dashboard', icon: 'chart', view: dashboardView, owner: true },
   reports: { label: 'Reports', icon: 'report', view: reportsView, owner: true },
   staff: { label: 'Staff & Accounts', icon: 'users', view: staffView, owner: true },
@@ -100,6 +102,7 @@ function startData() {
     db.listen('products', (rows) => set('products', rows.sort(byName)), {}, onDataError),
     db.listen('users', (rows) => set('users', rows.sort(byName)), {}, onDataError),
     db.listen('restocks', (rows) => set('restocks', rows), { where: [['createdAt', '>=', addDays(Date.now(), -7)]] }, onDataError),
+    db.listenDoc('settings', 'shifts', (doc) => set('settings', { ...state.settings, twoShifts: !!doc?.twoShifts }), onDataError),
   ];
   const beat = () => state.user && svc.setPresence(state.user.uid, true).catch(() => {});
   beat();
@@ -164,7 +167,7 @@ function renderShell() {
       <aside class="sidebar" id="sidebar">
         ${brand()}
         <nav class="nav" aria-label="Primary">
-          ${['tables', 'inventory', 'checkout', 'quick-sale', 'transactions'].map(link).join('')}
+          ${['tables', 'inventory', 'checkout', 'quick-sale', 'transactions', 'shift'].map(link).join('')}
           ${owner ? `<p class="nav__label">Owner</p>${['dashboard', 'reports', 'staff'].map(link).join('')}` : ''}
         </nav>
         <div class="sidebar__spacer"></div>
