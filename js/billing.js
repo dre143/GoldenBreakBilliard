@@ -83,33 +83,37 @@ export const itemsTotal = (items) =>
 
 export const itemsCount = (items) => (items || []).reduce((n, i) => n + i.qty, 0);
 
+/** Table fee for a session: the rate on billable time, or ₱0 once the game was cancelled (see below). */
+export const sessionFee = (session, elapsed) => (session?.cancelled ? 0 : tableFee(billableMs(session, elapsed)));
+
 export function currentBill(table, now = serverNow()) {
   if (!table?.session) return 0;
-  return round2(tableFee(billableMs(table.session, elapsedMs(table, now))) + itemsTotal(table.session.items));
+  return round2(sessionFee(table.session, elapsedMs(table, now)) + itemsTotal(table.session.items));
 }
 
 export const isLowStock = (p) => Number(p.stock) <= Number(p.reorderLevel);
 
-/* ---------- table-fee void ----------
- * A customer who decides not to play after all shouldn't be charged the table fee — but anything
- * they already bought (drinks, snacks) is still owed regardless. So "void" here only ever waives the
- * table portion of a sale; items and their stock are never touched.
- *
- * Eligibility is based on how long the table was actually used (session duration), not on how much
- * time has passed since checkout: if they played 5 minutes or less before changing their mind, the
- * table fee can be waived; past that, the table was genuinely used and the charge stands for good.
+/* ---------- cancel game ----------
+ * A customer who changes their mind within the first 5 minutes isn't charged the table fee. The
+ * cashier cancels the game from the table itself, before anyone pays: the clock stops and the table
+ * fee becomes ₱0. Anything already on the bill (drinks, snacks) is still owed and is paid at checkout.
+ * After 5 minutes the table was genuinely used, so there is no cancel and the fee stands.
+ * firestore.rules enforces the same 5 minutes against server time.
  */
-export const VOID_ELIGIBLE_DURATION_MS = 5 * 60 * 1000;
+export const CANCEL_WINDOW_MS = 5 * 60 * 1000;
 
-/** The cashier who rang the sale or the owner may waive the table fee, once, if play was this short. */
-export function canVoidTableFee(tx, user) {
-  // Quick Sale (walk-in) transactions have no table and no table fee, so there's nothing to void.
-  if (!tx || !user || tx.tableFeeVoided || !tx.tableId) return false;
-  if (user.role !== 'owner' && tx.cashierId !== user.uid) return false;
-  return (tx.durationMs || 0) <= VOID_ELIGIBLE_DURATION_MS;
+/** A game can be cancelled while it has run for CANCEL_WINDOW_MS or less (stopped or still running). */
+export function canCancelGame(table, now = serverNow()) {
+  const s = table?.session;
+  if (!s || s.cancelled) return false;
+  return elapsedMs(table, now) <= CANCEL_WINDOW_MS;
 }
 
-export const VOID_REASONS = [
+/** How long is left to cancel, in ms (0 once the window has passed). */
+export const cancelTimeLeft = (table, now = serverNow()) =>
+  table?.session ? Math.max(0, CANCEL_WINDOW_MS - elapsedMs(table, now)) : 0;
+
+export const CANCEL_REASONS = [
   'Customer decided not to play',
   'Started the wrong table',
   'Table was not actually used',

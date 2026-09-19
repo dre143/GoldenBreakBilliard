@@ -6,8 +6,8 @@
 // firestore.rules re-computes and verifies it, so changing a till's clock can't change a bill.
 import { db, auth } from './db.js';
 import {
-  elapsedMs, tableFee, round2, itemsTotal, canVoidTableFee, VOID_REASONS, PRICING,
-  billableMs, plannedMs, BOOKING_STEP_MS,
+  elapsedMs, round2, itemsTotal, CANCEL_REASONS, CANCEL_WINDOW_MS, PRICING,
+  billableMs, sessionFee, plannedMs, BOOKING_STEP_MS,
 } from './billing.js';
 import { SERVER_TIME, serverNow } from './clock.js';
 
@@ -60,6 +60,31 @@ export function endSession(tableId) {
   });
 }
 
+/**
+ * Cancel a game within the first CANCEL_WINDOW_MS (5 minutes): the customer changed their mind, so
+ * the table fee is ₱0. A running clock stops in the same write (server-stamped); a clock that was
+ * already stopped must have run 5 minutes or less. firestore.rules checks the window against server
+ * time. Items already on the bill are still owed and are paid at checkout.
+ */
+export function cancelGame(tableId, { reason, note = '' } = {}, user) {
+  if (!CANCEL_REASONS.includes(reason)) return Promise.reject(new Error('Choose a reason for cancelling.'));
+  if (reason === 'Other' && !note.trim()) return Promise.reject(new Error('Add a note explaining why.'));
+  return db.transaction(async (tx) => {
+    const t = await tx.get('tables', tableId);
+    const s = t?.session;
+    if (!s) throw new Error('This table has no open session.');
+    if (s.cancelled) throw new Error('This game has already been cancelled.');
+    if (elapsedMs(t, serverNow()) > CANCEL_WINDOW_MS) {
+      throw new Error('This game has run for more than 5 minutes, so it can no longer be cancelled.');
+    }
+    const cancelled = { reason, note: note.trim(), byId: user.uid, byName: user.name, at: SERVER_TIME };
+    tx.update('tables', tableId, s.ended
+      ? { 'session.cancelled': cancelled, updatedAt: SERVER_TIME }
+      : { 'session.ended': true, 'session.endedAt': SERVER_TIME, 'session.cancelled': cancelled, updatedAt: SERVER_TIME });
+    return { tableName: t.name, hasItems: (s.items || []).length > 0 };
+  });
+}
+
 /** Per-session game counter (a running count of racks played). */
 export function logRound(tableId, delta = 1) {
   return db.transaction(async (tx) => {
@@ -99,6 +124,18 @@ export function changeItem(tableId, productId, delta) {
 
 export const PAYMENT_METHODS = ['cash', 'gcash', 'split'];
 
+/**
+ * GCash reference: the cashier types the last 5 digits of the customer's GCash reference number for
+ * any payment with a GCash part (GCash or Split), so the owner can match it to the GCash history.
+ * Returns the 5 digits, or null when nothing was paid by GCash.
+ */
+export function gcashRefFor(method, ref) {
+  if (method !== 'gcash' && method !== 'split') return null;
+  const digits = String(ref ?? '').replace(/\D/g, '');
+  if (digits.length !== 5) throw new Error('Enter the last 5 digits of the GCash reference number.');
+  return digits;
+}
+
 /** Thrown when stopping the clock changed the amount due from what the cashier was looking at. */
 export class TotalChangedError extends Error {
   constructor(total, durationMs) {
@@ -117,8 +154,9 @@ export class TotalChangedError extends Error {
  * expectedTotal: the total the cashier saw; if the final total differs, nothing is saved and
  * TotalChangedError tells the UI to show the final amount (the clock stays stopped).
  */
-export async function completeCheckout(tableId, { method, tendered, cashPart, expectedTotal = null }, user) {
-  if (!PAYMENT_METHODS.includes(method)) throw new Error('Choose a payment method.');
+export async function completeCheckout(tableId, { method, tendered, cashPart, gcashRef, expectedTotal = null }, user) {
+  if (!PAYMENT_METHODS.includes(method) && method !== 'none') throw new Error('Choose a payment method.');
+  gcashRefFor(method, gcashRef); // check before the clock is stopped
   await endSession(tableId);
 
   return db.transaction(async (tx) => {
@@ -135,16 +173,24 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, ex
     });
 
     const durationMs = s.endedAt - s.startedAt;
-    const billedMs = billableMs(s, durationMs); // booked hours are the minimum charge
-    const fee = tableFee(billedMs);
+    const cancelled = s.cancelled || null;
+    // Booked hours are the minimum charge, except on a cancelled game, which has no table fee.
+    const billedMs = cancelled ? durationMs : billableMs(s, durationMs);
+    const fee = sessionFee(s, durationMs);
     const lines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
     const productTotal = itemsTotal(items);
     const total = round2(fee + productTotal);
     if (expectedTotal != null && round2(expectedTotal) !== total) throw new TotalChangedError(total, durationMs);
 
+    // Nothing to pay (a cancelled game with no items): no payment method is recorded.
+    if (total === 0) method = 'none';
+    else if (method === 'none') throw new Error('Choose a payment method.');
+
     let paid = null;
     let payments;
-    if (method === 'cash') {
+    if (method === 'none') {
+      payments = { cash: 0, gcash: 0 };
+    } else if (method === 'cash') {
       paid = tendered == null ? total : round2(tendered);
       if (paid < total) throw new Error('Cash tendered is less than the total.');
       payments = { cash: total, gcash: 0 };
@@ -167,7 +213,12 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, ex
       rounds: s.rounds || 0,
       tableFee: fee, items: lines, productTotal, total, method, payments,
       tendered: paid, change: paid == null ? null : round2(paid - total),
+      gcashRef: gcashRefFor(method, gcashRef),
       cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
+      ...(cancelled ? {
+        gameCancelled: true, cancelReason: cancelled.reason, cancelNote: cancelled.note || '',
+        cancelledById: cancelled.byId, cancelledByName: cancelled.byName,
+      } : {}),
     };
     tx.set('transactions', id, record);
     tx.update('tables', tableId, { status: 'available', session: null, lastTxId: id, updatedAt: SERVER_TIME });
@@ -180,9 +231,10 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, ex
  * view until checkout — stock is checked and deducted here, in the same transaction as the sale,
  * exactly like a table checkout, so two terminals still can't oversell stock.
  */
-export function completeQuickSale({ items, method, tendered, cashPart }, user) {
+export function completeQuickSale({ items, method, tendered, cashPart, gcashRef }, user) {
   if (!PAYMENT_METHODS.includes(method)) throw new Error('Choose a payment method.');
   if (!items || !items.length) throw new Error('Add at least one item to the sale.');
+  const ref = gcashRefFor(method, gcashRef);
 
   return db.transaction(async (tx) => {
     const products = await Promise.all(items.map((i) => tx.get('products', i.productId)));
@@ -220,6 +272,7 @@ export function completeQuickSale({ items, method, tendered, cashPart }, user) {
       plannedMs: null, billedMs: null, mode: null, rounds: 0,
       tableFee: 0, items: lines, productTotal, total, method, payments,
       tendered: paid, change: paid == null ? null : round2(paid - total),
+      gcashRef: ref,
       cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
     };
     tx.set('transactions', id, record);
@@ -227,46 +280,67 @@ export function completeQuickSale({ items, method, tendered, cashPart }, user) {
   });
 }
 
+/* ---------- expenses ---------- */
+
+export const EXPENSE_DESCRIPTION_MAX = 120;
+
 /**
- * Waive the table fee on a completed sale, once, if the table was used for
- * billing.VOID_ELIGIBLE_DURATION_MS (5 minutes) or less — e.g. the customer decided not to play
- * after all. Items on the sale are never touched: no stock is returned, and their charge stays owed.
- * The waived amount is refunded through whichever payment channel (cash/GCash) covers it; for a
- * split payment the caller picks the channel (refundMethod), otherwise it's inferred.
+ * Log cash taken from the drawer: one or more { description, amount } lines, saved together.
+ * Each is stamped with server time, so it lands on the shift that is actually on duty. Expenses can't
+ * be edited afterwards; only the owner can remove a mistaken one (see firestore.rules).
  */
-export function voidTableFee(txId, { reason, note = '', refundMethod } = {}, user) {
-  if (!VOID_REASONS.includes(reason)) return Promise.reject(new Error('Choose a reason for the void.'));
-  if (reason === 'Other' && !note.trim()) return Promise.reject(new Error('Add a note explaining the void.'));
+export function recordExpenses(lines, user) {
+  const items = (lines || []).map((l) => ({ description: String(l.description || '').trim(), amount: round2(Number(l.amount)) }));
+  if (!items.length) return Promise.reject(new Error('Add at least one expense.'));
+  for (const i of items) {
+    if (!i.description) return Promise.reject(new Error('Say what each expense was for.'));
+    if (i.description.length > EXPENSE_DESCRIPTION_MAX) return Promise.reject(new Error(`Keep each description under ${EXPENSE_DESCRIPTION_MAX} characters.`));
+    if (!Number.isFinite(i.amount) || i.amount <= 0) return Promise.reject(new Error('Enter an amount greater than zero.'));
+  }
   return db.transaction(async (tx) => {
-    const sale = await tx.get('transactions', txId);
-    if (!sale) throw new Error('Transaction not found.');
-    if (sale.tableFeeVoided) throw new Error('The table fee for this sale has already been voided.');
-    if (user.role !== 'owner' && sale.cashierId !== user.uid) {
-      throw new Error('Only the cashier who completed this sale or the owner can void the table fee.');
+    for (const i of items) {
+      tx.set('expenses', db.newId('expenses'), {
+        description: i.description, amount: i.amount,
+        cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
+      });
     }
-    if (!canVoidTableFee(sale, user)) {
-      throw new Error('The table was used for more than 5 minutes, so the table fee can no longer be voided.');
-    }
-
-    const refund = sale.tableFee;
-    const payments = { cash: sale.payments?.cash || 0, gcash: sale.payments?.gcash || 0 };
-    const method = refundMethod || (payments.cash >= refund ? 'cash' : 'gcash');
-    if (method !== 'cash' && method !== 'gcash') throw new Error('Choose how the refund was given.');
-    if (round2(payments[method]) < round2(refund)) {
-      throw new Error(`Not enough was paid via ${method === 'cash' ? 'cash' : 'GCash'} to refund ₱${refund.toFixed(2)} that way.`);
-    }
-    payments[method] = round2(payments[method] - refund);
-
-    tx.update('transactions', txId, {
-      tableFeeVoided: true, tableFeeVoidedAt: SERVER_TIME, tableFeeVoidedById: user.uid, tableFeeVoidedByName: user.name,
-      voidReason: reason, voidNote: note.trim(),
-      originalTableFee: sale.tableFee, originalTotal: sale.total,
-      tableFee: 0, total: round2(sale.productTotal || 0),
-      payments, refundAmount: round2(refund), refundMethod: method,
-    });
-    return { tableName: sale.tableName, refund: round2(refund), method };
+    return items.length;
   });
 }
+
+export const removeExpense = (id) => db.remove('expenses', id);
+
+/* ---------- cash drawer PIN (Marimar Inn) ----------
+ * The owner sets a PIN; a cashier types it to open the drawer outside a sale (e.g. to count cash).
+ * Only a SHA-256 hash is stored (settings/cashDrawer.pinHash), never the PIN. A short numeric PIN isn't
+ * strong security, it just stops the drawer being opened without the code the owner gave out.
+ */
+
+/** Digits only, including full-width digits some tablet keyboards type. */
+export const normalizePin = (pin) => String(pin ?? '').normalize('NFKC').replace(/\D/g, '');
+
+async function hashPin(pin) {
+  if (!globalThis.crypto?.subtle) throw new Error('This device can’t check a PIN. Open the app in Chrome.');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function setDrawerPin(pin) {
+  const digits = normalizePin(pin);
+  if (digits.length < 4) throw new Error('Use at least 4 digits.');
+  await db.set('settings', 'cashDrawer', { pinHash: await hashPin(digits), updatedAt: SERVER_TIME }, { merge: true });
+}
+
+export async function verifyDrawerPin(pin) {
+  const digits = normalizePin(pin);
+  if (!digits) return false;
+  const stored = (await db.get('settings', 'cashDrawer'))?.pinHash;
+  return Boolean(stored) && (await hashPin(digits)) === stored;
+}
+
+/** Owner switch: one shift per business day (default), or split into Day and Night shifts. */
+export const setTwoShifts = (on) =>
+  db.set('settings', 'shifts', { twoShifts: !!on, updatedAt: SERVER_TIME }, { merge: true }).then(() => !!on);
 
 /* ---------- tables (owner) ---------- */
 

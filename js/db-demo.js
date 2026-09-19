@@ -72,7 +72,7 @@ function applyPatch(target, patch) {
 
 function applyWrite([op, col, id, value], cols) {
   const bucket = (data[col] ||= {});
-  value = clone(resolveTimes(value));
+  if (value !== undefined) value = clone(resolveTimes(value)); // a remove carries no value
   if (op === 'update') {
     if (!bucket[id]) throw new Error(`Document ${col}/${id} not found`);
     applyPatch(bucket[id], value);
@@ -159,10 +159,18 @@ export const auth = {
   async isSetupDone() { return true; },
   async createOwner() { return newId(); },
   async createAccount() { return `u-${newId()}`; },
+  /** Start from zero: no sales, expenses or restocks, every table free. Staff, tables and products stay. */
+  clearDemoSales() {
+    data.transactions = {};
+    data.expenses = {};
+    data.restocks = {};
+    for (const t of Object.values(data.tables || {})) Object.assign(t, { status: 'available', session: null, light: false, lastTxId: null });
+    commit(new Set(['tables', 'restocks', 'transactions', 'expenses']));
+  },
   resetDemo() {
     localStorage.removeItem(KEY);
     sessionStorage.removeItem(SESSION_KEY);
-    channel?.postMessage(['tables', 'products', 'users', 'restocks', 'transactions']);
+    channel?.postMessage(['tables', 'products', 'users', 'restocks', 'transactions', 'expenses']);
     location.reload();
   },
 };
@@ -298,27 +306,39 @@ function seed() {
     }
   }
 
-  // One table-fee-voided sale from yesterday, so Transactions and Reports show how it appears:
-  // a customer bought a bottled water, then decided not to play after all. The ₱200 table fee is
-  // waived and refunded in cash; the water is still sold and still counted.
+  // One game cancelled yesterday within its first 5 minutes, so Transactions and Reports show how it
+  // appears: the customer bought a bottled water, then decided not to play. No table fee; the water
+  // is still sold and paid for.
   {
     const createdAt = today0 - D + 19 * H + 12 * MIN;
     const durationMs = 3 * MIN + 10000; // under the 5-minute limit
     const productTotal = 30; // 1x Bottled Water
-    const originalTotal = round2(200 + productTotal); // what was actually paid, before the void
-    transactions['x-void-sample'] = {
+    transactions['x-cancel-sample'] = {
       tableId: 't-05', tableName: 'Table 05', pricing: { ...PRICING },
       startedAt: createdAt - durationMs, endedAt: createdAt, durationMs,
       plannedMs: 0, billedMs: durationMs, mode: 'open', rounds: 0,
       tableFee: 0, items: [{ productId: 'p-water', name: 'Bottled Water 500ml', category: 'Beverages', price: 30, qty: 1, total: 30 }],
       productTotal, total: productTotal, method: 'cash', payments: { cash: productTotal, gcash: 0 },
-      tendered: originalTotal, change: 0, // untouched historical checkout fields; the void only adjusts tableFee/total/payments
+      tendered: productTotal, change: 0,
       cashierId: 'u-joy', cashierName: 'Joy Santos', createdAt,
-      tableFeeVoided: true, tableFeeVoidedAt: createdAt + 2 * MIN, tableFeeVoidedById: 'u-joy', tableFeeVoidedByName: 'Joy Santos',
-      voidReason: 'Customer decided not to play', voidNote: '',
-      originalTableFee: 200, originalTotal, refundAmount: 200, refundMethod: 'cash',
+      gameCancelled: true, cancelReason: 'Customer decided not to play', cancelNote: '',
+      cancelledById: 'u-joy', cancelledByName: 'Joy Santos',
     };
   }
+  // Cash paid out of the drawer by whoever was on duty: a few small expenses most days.
+  const EXPENSES = [['Drinking water refill', 60], ['Ice', 80], ['Tricycle fare (supplies)', 40], ['Cleaning supplies', 150], ['Chalk (market)', 120], ['LPG refill', 950]];
+  const expenses = {};
+  for (let d = 13; d >= 0; d--) {
+    const start = new Date(today0); start.setDate(start.getDate() - d);
+    const n = Math.floor(rnd() * 3);
+    for (let i = 0; i < n; i++) {
+      const createdAt = start.getTime() + 10 * H + Math.floor(rnd() * 13 * H);
+      if (createdAt > now) continue;
+      const [description, amount] = EXPENSES[Math.floor(rnd() * EXPENSES.length)];
+      const [cashierId, cashierName] = cashiers[Math.floor(rnd() * cashiers.length)];
+      expenses[`e-${d}-${i}`] = { description, amount, cashierId, cashierName, createdAt };
+    }
+  }
 
-  return { users, products, tables, restocks, transactions, meta: { setup: { ownerId: 'u-owner', createdAt: now } } };
+  return { users, products, tables, restocks, transactions, expenses, meta: { setup: { ownerId: 'u-owner', createdAt: now } } };
 }

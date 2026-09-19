@@ -12,8 +12,14 @@ import * as transactionsView from './views/transactions.js';
 import * as dashboardView from './views/dashboard.js';
 import * as staffView from './views/staff.js';
 import * as reportsView from './views/reports.js';
+import * as printer from './printer.js';
+import { startTimeAlerts } from './time-alerts.js';
+import { printerDialog, cashDrawerDialog } from './dialogs.js';
 
 const root = document.getElementById('root');
+
+// Offline safety net (sw.js): lets the app reopen from its saved copy when the tablet has no internet.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 
 const ROUTES = {
   tables: { label: 'Tables', icon: 'tables', view: tablesView },
@@ -22,12 +28,13 @@ const ROUTES = {
   'quick-sale': { label: 'Quick Sale', icon: 'bag', view: quickSaleView },
   transactions: { label: 'Transactions', icon: 'list', view: transactionsView },
   dashboard: { label: 'Owner Dashboard', icon: 'chart', view: dashboardView, owner: true },
-  reports: { label: 'Reports', icon: 'report', view: reportsView, owner: true },
+  reports: { label: 'Reports', icon: 'report', view: reportsView },
   staff: { label: 'Staff & Accounts', icon: 'users', view: staffView, owner: true },
 };
 
 let sessionCleanups = [];
 let viewCleanup = null;
+let printerCleanup = null;
 let heartbeat = null;
 
 setInterval(() => emit('tick'), 1000);
@@ -100,7 +107,11 @@ function startData() {
     db.listen('products', (rows) => set('products', rows.sort(byName)), {}, onDataError),
     db.listen('users', (rows) => set('users', rows.sort(byName)), {}, onDataError),
     db.listen('restocks', (rows) => set('restocks', rows), { where: [['createdAt', '>=', addDays(Date.now(), -7)]] }, onDataError),
+    db.listenDoc('settings', 'shifts', (doc) => set('settings', { ...state.settings, twoShifts: !!doc?.twoShifts }), onDataError),
+    db.listenDoc('settings', 'cashDrawer', (doc) => set('settings', { ...state.settings, drawerPinSet: !!doc?.pinHash }), onDataError),
   ];
+  printer.tryReconnect(); // quietly reconnect the last thermal printer, if the browser kept permission
+  dataCleanups.push(startTimeAlerts()); // 15- and 5-minutes-left chimes for booked tables
   const beat = () => state.user && svc.setPresence(state.user.uid, true).catch(() => {});
   beat();
   syncClock();
@@ -164,11 +175,20 @@ function renderShell() {
       <aside class="sidebar" id="sidebar">
         ${brand()}
         <nav class="nav" aria-label="Primary">
-          ${['tables', 'inventory', 'checkout', 'quick-sale', 'transactions'].map(link).join('')}
-          ${owner ? `<p class="nav__label">Owner</p>${['dashboard', 'reports', 'staff'].map(link).join('')}` : ''}
+          ${['tables', 'inventory', 'checkout', 'quick-sale', 'transactions', 'reports'].map(link).join('')}
+          ${owner ? `<p class="nav__label">Owner</p>${['dashboard', 'staff'].map(link).join('')}` : ''}
         </nav>
         <div class="sidebar__spacer"></div>
-        ${mode === 'demo' ? '<p class="demo-note">Demo mode · data is stored in this browser</p>' : ''}
+        ${mode === 'demo' ? `<div class="demo-note">Demo mode · data is stored in this browser
+          <button type="button" class="demo-note__btn" data-action="clear-demo">${icon('x')}Clear all sales</button></div>` : ''}
+        <button type="button" class="printer-btn" data-action="printer">
+          ${icon('print')}<span class="printer-btn__text">Thermal printer</span>
+          <span class="printer-dot" data-region="printer-dot" aria-hidden="true"></span>
+          <span class="sr-only" data-region="printer-state"></span>
+        </button>
+        <button type="button" class="printer-btn printer-btn--drawer" data-action="drawer">
+          ${icon('box')}<span class="printer-btn__text">Cash drawer</span>
+        </button>
         <div class="user-chip">
           <span class="avatar" aria-hidden="true">${esc(initials(u.name))}</span>
           <span class="user-chip__text">
@@ -185,6 +205,20 @@ function renderShell() {
   const shell = root.querySelector('.shell');
   const toggle = root.querySelector('[data-action=toggle-nav]');
   root.querySelector('[data-action=sign-out]').addEventListener('click', (e) => signOut(e.currentTarget));
+  root.querySelector('[data-action=printer]').addEventListener('click', () => { setNav(false); printerDialog(); });
+  root.querySelector('[data-action=drawer]').addEventListener('click', () => { setNav(false); cashDrawerDialog(); });
+  printerCleanup?.();
+  printerCleanup = printer.subscribePrinter((s) => {
+    const dot = root.querySelector('[data-region=printer-dot]');
+    if (!dot) return;
+    dot.classList.toggle('is-on', Boolean(s.kind));
+    root.querySelector('[data-region=printer-state]').textContent = s.kind ? `, connected: ${s.name}` : ', not connected';
+  });
+  root.querySelector('[data-action=clear-demo]')?.addEventListener('click', () => {
+    if (!confirm('Clear all demo sales, expenses and open tables? Staff, tables and products stay.')) return;
+    auth.clearDemoSales();
+    toast('All demo sales cleared. Everything starts at zero.');
+  });
   toggle.addEventListener('click', () => setNav(!shell.classList.contains('nav-open')));
   root.querySelector('[data-action=close-nav]').addEventListener('click', () => setNav(false));
   shell.addEventListener('keydown', (e) => { if (e.key === 'Escape' && shell.classList.contains('nav-open')) { setNav(false); toggle.focus(); } });

@@ -1,16 +1,20 @@
+// Transactions: find one sale, reprint its receipt, or void a short game's table fee.
+// Money totals (sales, expenses, cash to count) live in Reports, so this page is only a searchable list.
 import { db } from '../db.js';
-import { canVoidTableFee } from '../billing.js';
-import { receiptDialog, voidTableFeeDialog } from '../dialogs.js';
+import { CANCEL_WINDOW_MS } from '../billing.js';
+import { receiptDialog } from '../dialogs.js';
 import {
-  esc, icon, peso, fmtDateTime, fmtDuration, startOfDay, addDays, METHOD_LABEL,
+  esc, peso, fmtTime, fmtDate, fmtHuman, startOfDay, addDays, METHOD_LABEL,
   pageHeader, searchField, loadingBlock, emptyBlock, toast,
 } from '../ui.js';
 
 const RANGES = [
   { key: 'today', label: 'Today', since: () => startOfDay() },
-  { key: '7d', label: '7 days', since: () => addDays(startOfDay(), -6) },
-  { key: '30d', label: '30 days', since: () => addDays(startOfDay(), -29) },
+  { key: '7d', label: 'Last 7 days', since: () => addDays(startOfDay(), -6) },
+  { key: '30d', label: 'Last 30 days', since: () => addDays(startOfDay(), -29) },
 ];
+
+const CANCEL_MINUTES = CANCEL_WINDOW_MS / 60000;
 
 export function mount(el, ctx) {
   let range = 'today';
@@ -21,77 +25,70 @@ export function mount(el, ctx) {
   el.innerHTML = `
     ${pageHeader({
       title: 'Transactions',
-      subtitle: 'Completed table sessions and product sales',
-      actions: `
-        ${searchField('tx-search', 'Search transactions', 'Table, cashier, product')}
-        <div class="seg seg--inline" role="radiogroup" aria-label="Date range">
-          ${RANGES.map((r) => `
-            <label class="seg__opt">
-              <input type="radio" name="tx-range" value="${r.key}" ${r.key === range ? 'checked' : ''}>
-              <span>${r.label}</span>
-            </label>`).join('')}
-        </div>`,
+      subtitle: 'Find a sale and reprint its receipt. For totals and cash to count, see Reports.',
     })}
-    <ul class="chips" data-region="chips" aria-label="Totals for this range"></ul>
-    <section class="card card--flush" aria-label="Transactions">
+    <div class="report-controls">
+      <div class="report-controls__fields">
+        ${searchField('tx-search', 'Search transactions', 'Table, cashier, item, or GCash ref')}
+        <div class="field report-controls__shift">
+          <label for="tx-range" class="sr-only">Date range</label>
+          <select id="tx-range">
+            ${RANGES.map((r) => `<option value="${r.key}" ${r.key === range ? 'selected' : ''}>${r.label}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <p class="muted small" data-region="count"></p>
+    </div>
+    <p class="tx-rule">To cancel a game with no table fee, open the table and use <strong>Cancel game</strong> in its first
+      ${CANCEL_MINUTES} minutes, before paying. After ${CANCEL_MINUTES} minutes there is no cancel, and a paid sale can't be changed.</p>
+    <section class="card" aria-label="Transactions">
       <div class="table-wrap" data-region="table"></div>
     </section>`;
 
-  const chips = el.querySelector('[data-region=chips]');
   const wrap = el.querySelector('[data-region=table]');
+  const count = el.querySelector('[data-region=count]');
 
   function filtered() {
     if (!query) return rows;
-    return rows.filter((r) => `${r.tableId ? r.tableName : 'Walk-in'} ${r.cashierName} ${METHOD_LABEL[r.method]} ${(r.items || []).map((i) => i.name).join(' ')}`
+    return rows.filter((r) => `${r.tableId ? r.tableName : 'Walk-in'} ${r.cashierName} ${METHOD_LABEL[r.method]} ${r.gcashRef || ''} ${(r.items || []).map((i) => i.name).join(' ')}`
       .toLowerCase().includes(query));
   }
 
   function render() {
-    if (!rows) { wrap.innerHTML = loadingBlock('Loading transactions…'); chips.innerHTML = ''; return; }
+    if (!rows) { wrap.innerHTML = loadingBlock('Loading transactions…'); count.textContent = ''; return; }
     const list = filtered();
-    // Sum tx.tableFee/tx.total as stored: a table-fee-voided sale already carries the reduced
-    // amounts (fee waived, items still counted), so nothing needs to be excluded here.
-    const voidedCount = list.filter((r) => r.tableFeeVoided).length;
-    const sum = (f) => list.reduce((s, r) => s + (r[f] || 0), 0);
-    chips.innerHTML = `
-      <li class="chip">Transactions <strong class="num">${list.length}</strong></li>
-      ${voidedCount ? `<li class="chip chip--void">Table fee voided <strong class="num">${voidedCount}</strong></li>` : ''}
-      <li class="chip"><span class="dot dot--felt" aria-hidden="true"></span>Tables <strong class="num">${peso(sum('tableFee'))}</strong></li>
-      <li class="chip"><span class="dot dot--amber" aria-hidden="true"></span>Products <strong class="num">${peso(sum('productTotal'))}</strong></li>
-      <li class="chip chip--revenue">Total <strong class="num">${peso(sum('total'))}</strong></li>`;
+    count.textContent = `${list.length} sale${list.length === 1 ? '' : 's'}`;
     if (!list.length) {
-      wrap.innerHTML = emptyBlock(rows.length ? 'No transactions match your search.' : 'No transactions in this range yet.');
+      wrap.innerHTML = emptyBlock(rows.length ? 'No sales match your search.' : 'No sales in this range yet.');
       return;
     }
+    const showDate = range !== 'today';
     wrap.innerHTML = `
-      <table class="data-table data-table--compact">
-        <thead>
-          <tr>
-            <th scope="col">Date &amp; time</th>
-            <th scope="col">Table</th>
-            <th scope="col" class="t-right">Duration</th>
-            <th scope="col" class="t-right">Items</th>
-            <th scope="col">Payment</th>
-            <th scope="col">Cashier</th>
-            <th scope="col" class="t-right">Total</th>
-            <th scope="col"><span class="sr-only">Actions</span></th>
-          </tr>
-        </thead>
+      <table class="plain-table">
+        <thead><tr>
+          <th scope="col">${showDate ? 'Date & time' : 'Time'}</th>
+          <th scope="col">Table</th>
+          <th scope="col">Played</th>
+          <th scope="col">Payment</th>
+          <th scope="col">Cashier</th>
+          <th scope="col" class="t-right">Total</th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr></thead>
         <tbody>
           ${list.map((r) => `
           <tr>
-            <td class="cell-nowrap">${fmtDateTime(r.createdAt)}</td>
-            <td class="cell-strong">${r.tableId ? esc(r.tableName) : '<span class="badge badge--neutral">Walk-in</span>'}${r.tableFeeVoided ? ' <span class="badge badge--danger">Table fee voided</span>' : ''}</td>
-            <td class="t-right num cell-num">${r.tableId ? fmtDuration(r.durationMs) : '—'}</td>
-            <td class="t-right num cell-num">${(r.items || []).reduce((n, i) => n + i.qty, 0)}</td>
-            <td><span class="badge badge--neutral">${METHOD_LABEL[r.method] || esc(r.method)}</span></td>
+            <td class="cell-nowrap">${showDate ? `${fmtDate(r.createdAt)}, ` : ''}${fmtTime(r.createdAt)}</td>
+            <td>
+              <strong>${r.tableId ? esc(r.tableName) : 'Walk-in'}</strong>
+              ${r.gameCancelled ? `<span class="tx-voided">Game cancelled · ${esc(r.cancelReason)}</span>` : ''}
+              ${r.tableFeeVoided ? `<span class="tx-voided">Table fee voided · ${peso(r.refundAmount)} refunded</span>` : ''}
+            </td>
+            <td class="cell-nowrap">${r.tableId ? fmtHuman(r.durationMs || 0) : '—'}</td>
+            <td class="cell-nowrap">${METHOD_LABEL[r.method] || esc(r.method)}${r.gcashRef ? `<span class="cell-sub">Ref ${esc(r.gcashRef)}</span>` : ''}</td>
             <td class="cell-nowrap">${esc(r.cashierName)}</td>
-            <td class="t-right num cell-num cell-total">${peso(r.total)}</td>
-            <td class="t-right">
-              <div class="row-actions">
-                ${canVoidTableFee(r, ctx.user) ? `<button type="button" class="btn btn--danger-ghost btn--sm" data-void="${esc(r.id)}" aria-label="Void table fee for ${esc(r.tableName)}, ${fmtDateTime(r.createdAt)}">${icon('x')}Void table fee</button>` : ''}
-                <button type="button" class="btn btn--neutral btn--sm" data-id="${esc(r.id)}" aria-label="View receipt for ${r.tableId ? esc(r.tableName) : 'walk-in sale'}, ${fmtDateTime(r.createdAt)}">${icon('receipt')}View</button>
-              </div>
+            <td class="t-right num"><strong>${peso(r.total)}</strong></td>
+            <td class="t-right cell-nowrap">
+              <button type="button" class="link-btn" data-id="${esc(r.id)}" aria-label="Receipt for ${r.tableId ? esc(r.tableName) : 'walk-in sale'}, ${fmtTime(r.createdAt)}">Receipt</button>
             </td>
           </tr>`).join('')}
         </tbody>
@@ -109,15 +106,12 @@ export function mount(el, ctx) {
     }, { where: [['createdAt', '>=', since]] }, (err) => toast(err.message, 'error'));
   }
 
-  el.querySelectorAll('input[name=tx-range]').forEach((r) => r.addEventListener('change', () => { range = r.value; subscribe(); }));
+  el.querySelector('#tx-range').addEventListener('change', (e) => { range = e.target.value; subscribe(); });
   el.querySelector('#tx-search').addEventListener('input', (e) => { query = e.target.value.trim().toLowerCase(); render(); });
   wrap.addEventListener('click', (e) => {
-    const voidBtn = e.target.closest('button[data-void]');
-    const b = voidBtn || e.target.closest('button[data-id]');
-    const tx = b && rows?.find((r) => r.id === (voidBtn ? voidBtn.dataset.void : b.dataset.id));
-    if (!tx) return;
-    if (voidBtn) voidTableFeeDialog(tx);
-    else receiptDialog(tx);
+    const b = e.target.closest('button[data-id]');
+    const tx = b && rows?.find((r) => r.id === b.dataset.id);
+    if (tx) receiptDialog(tx);
   });
 
   subscribe();

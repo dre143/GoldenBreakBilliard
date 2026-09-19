@@ -1,12 +1,13 @@
 import { state, on } from './state.js';
 import * as svc from './services.js';
 import {
-  esc, icon, peso, fmtDuration, fmtDateTime, fmtTime, fmtBooking, METHOD_LABEL, openDialog, toast, preserveFocus,
+  esc, icon, peso, fmtDuration, fmtCountdown, fmtDateTime, fmtTime, fmtBooking, METHOD_LABEL, openDialog, toast, preserveFocus,
 } from './ui.js';
 import {
-  canVoidTableFee, VOID_REASONS, VOID_ELIGIBLE_DURATION_MS, feeBreakdown, PRICING_LABEL, PRICING, tableFee, BOOKING_PRESETS,
+  canCancelGame, cancelTimeLeft, CANCEL_REASONS, elapsedMs, feeBreakdown, PRICING_LABEL, PRICING, tableFee, BOOKING_PRESETS,
 } from './billing.js';
 import { serverNow } from './clock.js';
+import * as printer from './printer.js';
 
 const num = (v) => Number(String(v).trim());
 
@@ -280,22 +281,28 @@ export function staffDialog(member, currentUser) {
 }
 
 /**
- * Receipt for a completed sale. Table fee void is offered only while the table was used
- * VOID_ELIGIBLE_DURATION_MS or less — that eligibility is fixed the moment checkout happened, so
- * (unlike the old whole-sale void) there's nothing here that decays in real time to count down.
+ * Receipt for a completed sale. A game cancelled within 5 minutes shows its ₱0 table fee and why.
+ * (Sales from before Cancel game existed may carry a table-fee void instead; those still display.)
  */
 export function receiptDialog(tx, { fresh = false } = {}) {
+  const cancelled = Boolean(tx.gameCancelled);
   const voided = Boolean(tx.tableFeeVoided);
-  const { dlg, close } = openDialog({
-    title: voided ? 'Table fee voided' : fresh ? 'Transaction complete' : 'Receipt',
+  const { dlg } = openDialog({
+    title: cancelled ? 'Game cancelled' : voided ? 'Table fee voided' : fresh ? 'Transaction complete' : 'Receipt',
     cancelLabel: 'Close',
     body: `
-      <div class="receipt ${voided ? 'is-voided' : ''}">
+      <div class="receipt ${cancelled || voided ? 'is-voided' : ''}">
+        ${cancelled ? `
+        <div class="void-banner" role="note">
+          <span class="badge badge--danger">Game cancelled</span>
+          <span>${esc(tx.cancelReason)}${tx.cancelNote ? ` · “${esc(tx.cancelNote)}”` : ''}<br>
+            <span class="muted small">Cancelled by ${esc(tx.cancelledByName)} within the first 5 minutes, so there is no table fee.${tx.productTotal ? ' Items were still charged.' : ''}</span></span>
+        </div>` : ''}
         ${voided ? `
         <div class="void-banner" role="note">
           <span class="badge badge--danger">Table fee voided</span>
           <span>${esc(tx.voidReason)}${tx.voidNote ? ` · “${esc(tx.voidNote)}”` : ''}<br>
-            <span class="muted small">By ${esc(tx.tableFeeVoidedByName)} at ${fmtDateTime(tx.tableFeeVoidedAt)}. ₱${tx.refundAmount.toFixed(2)} refunded via ${tx.refundMethod === 'gcash' ? 'GCash' : 'Cash'}. Items already sold still count as sold.</span></span>
+            <span class="muted small">By ${esc(tx.tableFeeVoidedByName)} at ${fmtDateTime(tx.tableFeeVoidedAt)}. ${peso(tx.refundAmount)} refunded via ${tx.refundMethod === 'gcash' ? 'GCash' : 'Cash'}.</span></span>
         </div>` : ''}
         <div class="receipt__head">
           <p class="receipt__table">${tx.tableId ? esc(tx.tableName) : 'Walk-in sale'}</p>
@@ -304,8 +311,8 @@ export function receiptDialog(tx, { fresh = false } = {}) {
         <dl class="sum-lines">
           ${tx.tableId ? `
           <div class="sum-row">
-            <dt>Table fee<span class="sum-sub">${fmtDuration(tx.durationMs)} played${tx.plannedMs ? ` · ${fmtBooking(tx.plannedMs)} booked` : ' · open time'} · ${tx.pricing ? feeBreakdown(tx.billedMs ?? tx.durationMs, tx.pricing) : `${peso(tx.rate)}/hr (old rate)`}</span></dt>
-            <dd class="num">${voided ? `<s class="muted">${peso(tx.originalTableFee)}</s> Waived` : peso(tx.tableFee)}</dd>
+            <dt>Table fee<span class="sum-sub">${fmtDuration(tx.durationMs)} played${tx.plannedMs ? ` · ${fmtBooking(tx.plannedMs)} booked` : ' · open time'}${cancelled ? ' · cancelled' : ` · ${tx.pricing ? feeBreakdown(tx.billedMs ?? tx.durationMs, tx.pricing) : `${peso(tx.rate)}/hr (old rate)`}`}</span></dt>
+            <dd class="num">${voided ? `<s class="muted">${peso(tx.originalTableFee)}</s> Waived` : cancelled ? 'No charge' : peso(tx.tableFee)}</dd>
           </div>
           ${tx.rounds ? `<div class="sum-row sum-row--muted"><dt>Rounds played</dt><dd class="num">${tx.rounds}</dd></div>` : ''}` : ''}
           ${(tx.items || []).map((i) => `
@@ -316,11 +323,12 @@ export function receiptDialog(tx, { fresh = false } = {}) {
         </dl>
         <hr class="divider">
         <div class="summary-total">
-          <span class="summary-total__label">Total${voided ? ' due' : ''}</span>
+          <span class="summary-total__label">Total</span>
           <span class="num summary-total__value">${peso(tx.total)}</span>
         </div>
         <dl class="sum-lines">
           <div class="sum-row"><dt>Paid via</dt><dd>${METHOD_LABEL[tx.method] || esc(tx.method)}</dd></div>
+          ${tx.gcashRef ? `<div class="sum-row"><dt>GCash ref no. (last 5)</dt><dd class="num">${esc(tx.gcashRef)}</dd></div>` : ''}
           ${tx.method === 'split' && tx.payments ? `
           <div class="sum-row"><dt>Cash</dt><dd class="num">${peso(tx.payments.cash)}</dd></div>
           <div class="sum-row"><dt>GCash</dt><dd class="num">${peso(tx.payments.gcash)}</dd></div>` : ''}
@@ -329,59 +337,63 @@ export function receiptDialog(tx, { fresh = false } = {}) {
           <div class="sum-row sum-row--strong"><dt>Change</dt><dd class="num">${peso(tx.change)}</dd></div>` : ''}
           ${voided ? `<div class="sum-row sum-row--strong"><dt>Refunded (table fee)</dt><dd class="num">${peso(tx.refundAmount)}</dd></div>` : ''}
         </dl>
-        <div class="void-offer" data-region="void" ${canVoidTableFee(tx, state.user) ? '' : 'hidden'}>
-          <button type="button" class="btn btn--danger-ghost" data-action="void">${icon('x')}Void table fee</button>
-          <span class="void-offer__timer">Table was used ${fmtDuration(tx.durationMs)} — under the 5-minute limit, so the ₱${tx.tableFee} table fee can still be waived. Items stay charged either way.</span>
-        </div>
-      </div>`,
+      </div>
+      <div class="receipt-print" data-region="receipt-print"></div>`,
   });
 
-  if (canVoidTableFee(tx, state.user)) {
-    dlg.querySelector('[data-action=void]').addEventListener('click', () => voidTableFeeDialog(tx, { onVoided: close }));
-  }
+  // Thermal printing, same as Marimar Inn: print when a printer is connected, preview any time.
+  const region = dlg.querySelector('[data-region=receipt-print]');
+  const off = printer.subscribePrinter((s) => {
+    if (!region.isConnected) { off(); return; }
+    region.innerHTML = `
+      ${s.kind ? `<button type="button" class="btn btn--primary btn--sm" data-rp="print">${icon('print')}Print receipt</button>` : ''}
+      <button type="button" class="btn btn--neutral btn--sm" data-rp="preview">${icon('eye')}Preview print</button>
+      ${s.kind ? '' : '<button type="button" class="link-btn" data-rp="setup">Connect a thermal printer</button>'}`;
+  });
+  region.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-rp]');
+    if (!b) return;
+    if (b.dataset.rp === 'setup') printerDialog();
+    if (b.dataset.rp === 'preview') thermalPreviewDialog({ title: 'Receipt preview', lines: printer.previewSaleReceipt(tx), onPrint: () => printer.printSaleReceipt(tx) });
+    if (b.dataset.rp === 'print') {
+      b.disabled = true;
+      try { await printer.printSaleReceipt(tx); toast('Receipt sent to the printer.'); } catch (err) { toast(printer.printerErrorMessage(err), 'error'); } finally { b.disabled = false; }
+    }
+  });
 }
 
 /**
- * Confirm a table-fee void: reason (required), optional note, and — only when the original payment
- * was split between cash and GCash — which channel the refund comes out of. Items are never part of
- * this: they were already sold and stay charged, so there's nothing here about reopening the table
- * or returning stock.
+ * Cancel a game in its first 5 minutes, before anyone pays: reason (required), optional note.
+ * No items on the bill → the table is freed straight away with no charge.
+ * Items on the bill → the table fee becomes ₱0 and the cashier takes payment for the items.
  */
-export function voidTableFeeDialog(tx, { onVoided } = {}) {
-  const payments = tx.payments || { cash: tx.method === 'cash' ? tx.total : 0, gcash: tx.method === 'gcash' ? tx.total : 0 };
-  const needsChoice = payments.cash > 0 && payments.gcash > 0;
-  const inferredMethod = payments.cash >= tx.tableFee ? 'cash' : 'gcash';
+export function cancelGameDialog(table, { onDone } = {}) {
+  const items = table.session.items || [];
+  const itemsDue = items.reduce((s, i) => s + i.price * i.qty, 0);
   const { dlg } = openDialog({
-    title: `Void table fee · ${esc(tx.tableName)}`,
-    submitLabel: 'Void table fee',
+    title: `Cancel game · ${esc(table.name)}`,
+    submitLabel: items.length ? 'Cancel game' : 'Cancel game, no charge',
     submitClass: 'btn--danger',
-    cancelLabel: 'Keep charge',
+    cancelLabel: 'Keep playing',
     body: `
-      <p><strong>${esc(tx.tableName)}</strong> · used ${fmtDuration(tx.durationMs)} · ${fmtDateTime(tx.createdAt)} · ${esc(tx.cashierName)}</p>
-      <dl class="kv">
-        <div><dt>Table fee to waive</dt><dd class="num">${peso(tx.tableFee)}</dd></div>
-        <div><dt>Items stay charged</dt><dd class="num">${peso(tx.productTotal)}</dd></div>
-        <div><dt>New total</dt><dd class="num">${peso(tx.productTotal)}</dd></div>
-      </dl>
+      <p><strong>${esc(table.name)}</strong> · played <span class="num" data-live="played"></span> ·
+        <span data-live="left"></span></p>
+      <p>${items.length
+        ? `The table fee becomes <strong>₱0</strong>. The items on the bill (<strong class="num">${peso(itemsDue)}</strong>) still need to be paid, so take payment for them next.`
+        : 'The clock stops and the table is freed with <strong>no charge</strong>.'}</p>
       <fieldset class="reason-list">
         <legend>Reason</legend>
-        ${VOID_REASONS.map((r, i) => `
+        ${CANCEL_REASONS.map((r, i) => `
         <label class="reason">
           <input type="radio" name="reason" value="${esc(r)}" ${i === 0 ? 'required' : ''}>
           <span>${esc(r)}</span>
         </label>`).join('')}
       </fieldset>
       <div class="field">
-        <label for="void-note">Note <span class="muted" data-note-hint>(optional)</span></label>
-        <input id="void-note" name="note" maxlength="140" placeholder="What happened?">
+        <label for="cancel-note">Note <span class="muted" data-note-hint>(optional)</span></label>
+        <input id="cancel-note" name="note" maxlength="140" placeholder="What happened?">
       </div>
-      ${needsChoice ? `
-      <fieldset class="reason-list">
-        <legend>Refund from</legend>
-        <label class="reason"><input type="radio" name="refundMethod" value="cash" ${inferredMethod === 'cash' ? 'checked' : ''}><span>Cash (${peso(payments.cash)} paid)</span></label>
-        <label class="reason"><input type="radio" name="refundMethod" value="gcash" ${inferredMethod === 'gcash' ? 'checked' : ''}><span>GCash (${peso(payments.gcash)} paid)</span></label>
-      </fieldset>` : `<input type="hidden" name="refundMethod" value="${inferredMethod}">`}
-      <p class="muted small">Only the table fee changes — items already sold stay charged and stay sold. This can’t be undone.</p>`,
+      <p class="muted small">Only possible in the first 5 minutes. This can’t be undone.</p>`,
     onOpen(d) {
       d.querySelectorAll('input[name=reason]').forEach((r) => r.addEventListener('change', () => {
         d.querySelector('[data-note-hint]').textContent = r.value === 'Other' ? '(required)' : '(optional)';
@@ -389,13 +401,241 @@ export function voidTableFeeDialog(tx, { onVoided } = {}) {
     },
     async onSubmit(fd) {
       const reason = fd.get('reason');
-      if (!reason) throw new Error('Choose a reason for the void.');
-      const result = await svc.voidTableFee(tx.id, {
-        reason, note: String(fd.get('note') || ''), refundMethod: fd.get('refundMethod'),
-      }, state.user);
-      toast(`Table fee voided · ₱${result.refund.toFixed(2)} refunded via ${result.method === 'gcash' ? 'GCash' : 'cash'}`);
-      onVoided?.();
+      if (!reason) throw new Error('Choose a reason for cancelling.');
+      const live = state.tables.find((t) => t.id === table.id) || table;
+      if (!canCancelGame(live)) throw new Error('This game has run for more than 5 minutes, so it can no longer be cancelled.');
+      const result = await svc.cancelGame(table.id, { reason, note: String(fd.get('note') || '') }, state.user);
+      if (!result.hasItems) {
+        await svc.completeCheckout(table.id, { method: 'none' }, state.user);
+        toast(`${result.tableName}: game cancelled, no charge. The table is free.`);
+      } else {
+        toast(`${result.tableName}: game cancelled. Table fee is ₱0. Take payment for the items.`);
+      }
+      onDone?.(result);
     },
   });
+
+  // Live countdown while the dialog is open; the window closing disables the button.
+  const tick = () => {
+    if (!dlg.isConnected) { off(); return; }
+    const live = state.tables.find((t) => t.id === table.id);
+    if (!live?.session) return;
+    const setText = (k, v) => { const n = dlg.querySelector(`[data-live=${k}]`); if (n) n.textContent = v; };
+    setText('played', fmtDuration(elapsedMs(live)));
+    const left = cancelTimeLeft(live);
+    setText('left', left > 0 ? `${fmtCountdown(left)} left to cancel` : 'the 5 minutes are up');
+    if (left <= 0) dlg.querySelector('[type=submit]').disabled = true;
+  };
+  const off = on('tick', tick);
+  tick();
   return dlg;
+}
+/* ---------- thermal printer ---------- */
+
+/** On-screen look of a thermal print: the exact lines the printer receives, on a paper strip. */
+export const paperStrip = (lines, paperWidth) => `
+  <div class="paper" style="--paper-ch:${paperWidth}">
+    <div class="paper__roll">${lines.map((l) => `<div class="paper__line paper__line--${l.align}">${esc(l.text) || '&nbsp;'}</div>`).join('')}</div>
+  </div>`;
+
+/** Preview of a thermal print, with a Print button when a printer is connected. */
+export function thermalPreviewDialog({ title = 'Print preview', lines, onPrint }) {
+  const connected = Boolean(printer.getPrinterState().kind);
+  openDialog({
+    title,
+    cancelLabel: 'Close',
+    submitLabel: 'Print',
+    body: `
+      <p class="muted small">This is how it will look on the thermal printer.${connected ? '' : ' Connect a printer (sidebar) to print it.'}</p>
+      ${paperStrip(lines, printer.getPrinterState().paperWidth)}`,
+    onSubmit: connected && onPrint ? async () => {
+      await onPrint();
+      toast('Sent to the printer.');
+    } : undefined,
+  });
+}
+
+/**
+ * Thermal printer setup (Marimar Inn's printer panel): connect by Bluetooth, USB, or the RawBT app,
+ * choose the paper width, preview and print a test page, disconnect or forget the saved printer.
+ */
+export function printerDialog() {
+  let off = () => {};
+  const { dlg } = openDialog({
+    title: 'Thermal printer',
+    cancelLabel: 'Close',
+    body: '<div data-region="printer"></div>',
+    onClose: () => off(),
+  });
+  const region = dlg.querySelector('[data-region=printer]');
+
+  const render = (s) => {
+    const kindLabel = { bluetooth: 'Bluetooth', serial: 'USB', rawbt: 'via RawBT app', native: 'Tablet Bluetooth' }[s.kind] || '';
+    const paired = !s.kind && printer.isNativeApp() ? printer.listNativePrinters() : null;
+    region.innerHTML = `
+      <p class="printer-status">
+        <span class="printer-dot ${s.kind ? 'is-on' : ''}" aria-hidden="true"></span>
+        ${s.kind ? `<strong>Connected</strong> · ${esc(s.name)} · ${kindLabel}` : '<strong>Not connected</strong>'}
+      </p>
+      ${s.kind ? `
+      <div class="printer-actions">
+        <button type="button" class="btn btn--neutral" data-p="test">${icon('print')}Print test</button>
+        <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
+        <button type="button" class="btn btn--neutral" data-p="disconnect">Disconnect</button>
+      </div>` : paired ? `
+      <div class="printer-actions printer-actions--stack">
+        ${paired.length ? paired.map((d) => `<button type="button" class="btn btn--neutral" data-p="native" data-id="${esc(d.id)}">${esc(d.name)}</button>`).join('')
+          : '<p class="muted small">No paired printers yet. Pair the thermal printer in Android Settings → Bluetooth first, then tap Refresh.</p>'}
+        <button type="button" class="btn btn--neutral" data-p="refresh">Refresh printer list</button>
+        <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
+      </div>
+      <p class="muted small">Tap the printer to connect. It connects over the tablet's own Bluetooth, so no extra app is needed.</p>` : `
+      <div class="printer-actions printer-actions--stack">
+        <button type="button" class="btn btn--neutral" data-p="bluetooth" ${printer.supports.bluetooth() ? '' : 'disabled'}>Connect via Bluetooth</button>
+        <button type="button" class="btn btn--neutral" data-p="serial" ${printer.supports.serial() ? '' : 'disabled'}>Connect via USB cable</button>
+        <button type="button" class="btn btn--neutral" data-p="rawbt">Print via RawBT app (Android)</button>
+        <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
+      </div>
+      <p class="muted small">Most cheap 58mm printers use classic Bluetooth, which browsers can't reach directly. On an Android
+        phone or tablet, install the free <strong>RawBT</strong> app, pair the printer in RawBT, then choose "Print via RawBT app".
+        A USB printer works from Chrome or Edge on a computer.</p>`}
+      <div class="field">
+        <label for="paper-width">Paper width</label>
+        <select id="paper-width" data-p="paper">
+          <option value="32" ${s.paperWidth === 32 ? 'selected' : ''}>58mm (32 characters)</option>
+          <option value="48" ${s.paperWidth === 48 ? 'selected' : ''}>80mm (48 characters)</option>
+        </select>
+      </div>
+      <button type="button" class="link-btn" data-p="forget">Forget saved printer</button>`;
+  };
+  off = printer.subscribePrinter(render);
+
+  region.addEventListener('change', (e) => { if (e.target.dataset.p === 'paper') printer.setPaperWidth(Number(e.target.value)); });
+  region.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-p]');
+    if (!b || b.tagName === 'SELECT') return;
+    const run = async (fn, ok) => {
+      b.disabled = true;
+      try { await fn(); if (ok) toast(ok); } catch (err) { if (err?.name !== 'NotFoundError') toast(printer.printerErrorMessage(err), 'error'); } finally { if (b.isConnected) b.disabled = false; }
+    };
+    switch (b.dataset.p) {
+      case 'bluetooth': return run(printer.connectBluetooth, 'Thermal printer connected.');
+      case 'serial': return run(printer.connectSerial, 'Thermal printer connected.');
+      case 'rawbt': return run(async () => printer.connectRawBt(), 'Receipts will print through the RawBT app.');
+      case 'native': {
+        const device = printer.listNativePrinters().find((d) => d.id === b.dataset.id);
+        return device && run(async () => printer.connectNative(device), `Connected to ${device.name}.`);
+      }
+      case 'refresh': return render(printer.getPrinterState());
+      case 'test': return run(printer.printTestPage, 'Test sent to the printer.');
+      case 'preview': return thermalPreviewDialog({ title: 'Printer test preview', lines: printer.previewTestPage(), onPrint: printer.printTestPage });
+      case 'disconnect': printer.disconnectPrinter(); return toast('Printer disconnected.');
+      case 'forget': return run(printer.forgetPrinter, 'Saved printer forgotten.');
+      default: return undefined;
+    }
+  });
+}
+/* ---------- cash drawer (Marimar Inn) ---------- */
+
+const isOwnerUser = () => state.user?.role === 'owner';
+
+/** Open the drawer: the owner directly, a cashier with the PIN the owner set. */
+export function openDrawerDialog() {
+  if (isOwnerUser()) {
+    printer.openCashDrawer()
+      .then(() => toast('Drawer opened.'))
+      .catch((err) => toast(printer.printerErrorMessage(err), 'error'));
+    return;
+  }
+  if (!state.settings.drawerPinSet) {
+    toast('No drawer PIN yet. Ask the owner to set one (Cash drawer in the sidebar).', 'error');
+    return;
+  }
+  openDialog({
+    title: 'Open cash drawer',
+    submitLabel: 'Open drawer',
+    body: `
+      <div class="field">
+        <label for="drawer-pin">Drawer PIN</label>
+        <input id="drawer-pin" name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" required autofocus>
+      </div>
+      <p class="muted small">Enter the PIN the owner gave you.</p>`,
+    async onSubmit(fd) {
+      if (!(await svc.verifyDrawerPin(fd.get('pin')))) throw new Error('That PIN doesn’t match. Ask the owner.');
+      await printer.openCashDrawer();
+      toast('Drawer opened.');
+    },
+  });
+}
+
+/**
+ * Cash drawer panel: "On cash pay" switch (this device), Open drawer, and for the owner the drawer PIN.
+ * The drawer is plugged into the thermal printer, so the printer has to be connected.
+ */
+export function cashDrawerDialog() {
+  const offs = [];
+  const { dlg } = openDialog({
+    title: 'Cash drawer',
+    cancelLabel: 'Close',
+    body: '<div data-region="drawer"></div>',
+    onClose: () => offs.forEach((off) => off()),
+  });
+  const region = dlg.querySelector('[data-region=drawer]');
+
+  const render = () => {
+    const connected = Boolean(printer.getPrinterState().kind);
+    const onCash = printer.isDrawerEnabled();
+    region.innerHTML = `
+      ${connected ? '' : `
+      <p class="drawer-warn">The drawer is plugged into the thermal printer. <button type="button" class="link-btn" data-d="printer">Connect the printer</button> first.</p>`}
+      <div class="drawer-row">
+        <div>
+          <p class="drawer-row__title">On cash pay</p>
+          <p class="muted small">${onCash
+            ? 'The drawer opens when a customer pays cash (or the cash part of a split). GCash leaves it closed.'
+            : 'The drawer stays closed during sales. Use Open drawer when you need it.'}</p>
+        </div>
+        <button type="button" class="btn ${onCash ? 'btn--primary' : 'btn--neutral'} btn--sm" data-d="toggle" aria-pressed="${onCash}">${onCash ? 'On' : 'Off'}</button>
+      </div>
+      <div class="drawer-row">
+        <div>
+          <p class="drawer-row__title">Open drawer</p>
+          <p class="muted small">${isOwnerUser() ? 'Opens it now.' : state.settings.drawerPinSet ? 'Needs the PIN the owner set.' : 'No PIN set yet. Ask the owner.'}</p>
+        </div>
+        <button type="button" class="btn btn--neutral btn--sm" data-d="open" ${connected ? '' : 'disabled'}>Open drawer</button>
+      </div>
+      ${isOwnerUser() ? `
+      <div class="drawer-pin">
+        <div class="field">
+          <label for="new-drawer-pin">${state.settings.drawerPinSet ? 'Change cashier PIN' : 'Set a PIN for cashiers'}</label>
+          <input id="new-drawer-pin" type="text" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="e.g. 2026">
+        </div>
+        <button type="button" class="btn btn--neutral btn--sm" data-d="save-pin">Save PIN</button>
+      </div>` : ''}`;
+  };
+
+  offs.push(printer.subscribePrinter(render), on('settings', render));
+  region.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-d]');
+    if (!b) return;
+    if (b.dataset.d === 'printer') printerDialog();
+    if (b.dataset.d === 'toggle') {
+      printer.setDrawerEnabled(!printer.isDrawerEnabled());
+      toast(printer.isDrawerEnabled() ? 'On cash pay: the drawer opens when a customer pays cash.' : 'On cash pay is off.');
+    }
+    if (b.dataset.d === 'open') openDrawerDialog();
+    if (b.dataset.d === 'save-pin') {
+      const input = region.querySelector('#new-drawer-pin');
+      b.disabled = true;
+      try {
+        await svc.setDrawerPin(input.value);
+        toast('Drawer PIN saved. Cashiers can use it now.');
+      } catch (err) { toast(err.message, 'error'); } finally { if (b.isConnected) b.disabled = false; }
+    }
+  });
+  region.addEventListener('input', (e) => { if (e.target.id === 'new-drawer-pin') e.target.value = svc.normalizePin(e.target.value).slice(0, 8); });
+  // Enter in the PIN box would submit the dialog's own form (and close it), so save instead.
+  region.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.id === 'new-drawer-pin') { e.preventDefault(); region.querySelector('[data-d=save-pin]')?.click(); }
+  });
 }

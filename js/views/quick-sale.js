@@ -5,8 +5,10 @@ import { state, on } from '../state.js';
 import * as svc from '../services.js';
 import { round2, itemsTotal, itemsCount } from '../billing.js';
 import { receiptDialog } from '../dialogs.js';
+import * as printer from '../printer.js';
 import {
   esc, icon, peso, thumb, pageHeader, emptyBlock, busy, toast, openDialog, METHOD_LABEL, preserveFocus,
+  gcashRefField, wireGcashRef,
 } from '../ui.js';
 
 export function mount(el, ctx) {
@@ -74,6 +76,7 @@ export function mount(el, ctx) {
               <span class="num" data-live="split-gcash">—</span>
             </div>
           </div>
+          ${gcashRefField()}
           <button type="button" class="btn btn--amber btn--block btn--lg" data-action="complete">${icon('check')}Complete Sale</button>
         </section>
       </aside>
@@ -226,10 +229,18 @@ export function mount(el, ctx) {
       return;
     }
     const cashPart = method === 'split' ? Number(splitRaw) : null;
+    const gcashRef = $('#gcash-ref').value;
+    if ((method === 'gcash' || method === 'split') && gcashRef.length !== 5) {
+      toast('Enter the last 5 digits of the GCash reference number.', 'error');
+      $('#gcash-ref').focus();
+      return;
+    }
     completing = true;
     btn.disabled = true;
     try {
-      const record = await svc.completeQuickSale({ items: cart, method, tendered, cashPart }, ctx.user);
+      const record = await svc.completeQuickSale({ items: cart, method, tendered, cashPart, gcashRef }, ctx.user);
+      // Cash changed hands: open the drawer (if the printer is connected and "On cash pay" is on).
+      printer.kickDrawerForCash(record.payments?.cash).then((err) => err && toast(`Sold, but the drawer said: ${err}`, 'error'));
       location.hash = '#/tables';
       receiptDialog(record, { fresh: true });
     } catch (err) {
@@ -255,10 +266,12 @@ export function mount(el, ctx) {
     method = r.value;
     $('[data-region=cash]').hidden = method !== 'cash';
     $('[data-region=split]').hidden = method !== 'split';
+    $('[data-region=gcash-ref]').hidden = method === 'cash';
     tick();
   }));
   $('#cash-tendered').addEventListener('input', tick);
   $('#split-cash').addEventListener('input', tick);
+  wireGcashRef(el);
 
   const offs = [on('products', render)];
   render();

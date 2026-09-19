@@ -17,6 +17,10 @@ has the same API as Firestore. Data lives in `localStorage` and syncs live betwe
 through `BroadcastChannel`, so two tabs act like two terminals. Pick an Owner or Cashier
 account on the sign-in screen. "Reset demo data" puts the seed data back.
 
+To use demo mode while a real Firebase config is filled in, open **http://localhost:5173/?demo**. Local testing then never
+writes to the live database. **Clear sales (start empty)** on the demo sign-in screen removes all demo sales, expenses and
+open tables but keeps staff, tables and products.
+
 ### Firebase mode
 1. Create a Firebase project. Enable **Authentication → Email/Password** and **Cloud Firestore**.
 2. Paste your web app config into `js/firebase-config.js`.
@@ -34,9 +38,11 @@ account on the sign-in screen. "Reset demo data" puts the seed data back.
 | Quick Sale (walk-in items, no table) | ✓ | ✓ |
 | Inventory | view only | add products, edit, add stock |
 | Transactions | ✓ | ✓ |
-| Void the table fee (session used ≤5 min) | own sales | any sale |
+| Reports: Daily sales report & log expenses | ✓ | ✓ |
+| Remove a mistaken expense, turn Day/Night shifts on or off | — | ✓ |
+| Cancel a game in its first 5 minutes (no table fee) | ✓ | ✓ |
 | Owner Dashboard | — | ✓ |
-| Reports (sales, payments, shifts) | — | ✓ |
+| Reports: Custom range & Monthly | — | ✓ |
 | Staff & accounts, Manage Tables (names) | — | ✓ |
 
 The UI hides owner-only screens, and `firestore.rules` enforces the same limits on the server.
@@ -52,10 +58,28 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
   - Sessions can't be paused. **End Session** (or Complete Transaction) stops the clock once, and that is final.
 - `products/{id}` — `name, category, price, stock, reorderLevel, lastRestockedAt`
 - `restocks/{id}` — restock log (feeds "Restocked this week")
-- `transactions/{id}` — `tableId`/`tableName`, `startedAt`/`endedAt`/`durationMs` copied from the session, `mode` (open | timed), `plannedMs`, `billedMs`, `pricing` used, table fee, rounds, line items, totals, `method` (cash | gcash | split), `payments {cash, gcash}`, cashier, `createdAt` (server time); a table-fee-voided sale also carries `tableFeeVoided`, `voidReason`, `voidNote`, `tableFeeVoidedBy…`, `originalTableFee`, `originalTotal`, `refundAmount`, `refundMethod`. A **Quick Sale** (walk-in) has `tableId: null` and no table-session fields — see below.
+- `transactions/{id}` — `tableId`/`tableName`, `startedAt`/`endedAt`/`durationMs` copied from the session, `mode` (open | timed), `plannedMs`, `billedMs`, `pricing` used, table fee, rounds, line items, totals, `method` (cash | gcash | split, or none for a ₱0 cancelled game), `payments {cash, gcash}`, cashier, `createdAt` (server time); a cancelled game also carries `gameCancelled`, `cancelReason`, `cancelNote`, `cancelledById`, `cancelledByName` (older sales may carry the retired `tableFeeVoided…` fields). While a game is open, a cancel is stored as `session.cancelled = { reason, note, byId, byName, at }`. A **Quick Sale** (walk-in) has `tableId: null` and no table-session fields — see below.
 - `users/{uid}` — `name, email, role, active, online, lastSeen`
+- `expenses/{id}` — `description, amount, cashierId, cashierName, createdAt` (server time). Cash taken from the drawer. Nobody edits one; only the owner can delete one.
+- `settings/shifts` — `twoShifts` (owner-only). Off by default: one shift per business day.
 - `meta/setup` — marks that the first owner exists
 - `clock/{uid}` — private server-clock probe (lets each device show accurate timers)
+
+## Reports & expenses
+
+Laid out like the Marimar Inn reports. Every tab has the same shape: pickers on the left, Export CSV / Print on the right,
+one row of number cards, then plain tables.
+
+- **Daily** (everyone; cashiers see only this tab): the paper-style **Daily Sales Report** for one business day
+  (6:00 AM to 6:00 AM). It has one row per sale, the expenses, a cash/GCash line, the **Overall Sale** (sales minus
+  expenses) and signature lines. Below it: **End of shift**, where cash to count = cash collected − expenses.
+  The cashier on duty logs expenses (cash taken from the drawer) at the top of this tab.
+- **Custom range** (owner): totals, sales by day, sales/expenses/net per day, every expense, and cancelled games.
+- **Monthly** (owner): the month's totals, sales trend, revenue by table and top products.
+
+The hall runs **one shift** per business day. When a second shift starts, the owner ticks *Day and Night shifts* on the
+Daily tab. The tab then offers Day (6:00 AM–6:00 PM), Night (6:00 PM–6:00 AM) and Full day.
+`SHIFT_SPLIT_HOUR` in `js/reporting.js` sets the split.
 
 ## Table rate
 
@@ -83,7 +107,7 @@ so change both together.
 
 ## Time integrity (why a changed clock can't change a bill)
 
-- **Server timestamps:** session start, session end, sale time, table-fee-void time and presence are written as server timestamps. The
+- **Server timestamps:** session start, session end, sale time, cancel time and presence are written as server timestamps. The
   security rules require each one to equal `request.time`, so a device clock that is wrong or deliberately changed can't backdate anything.
 - **Checkout stops the clock first:** the server stamps the end, then the sale is billed from the stored start and end. If that final total
   differs from what the cashier was looking at, nothing is saved and the app shows the final amount to confirm.
@@ -94,8 +118,8 @@ so change both together.
   - it is written in the same step that frees the table.
 
   A table can't be freed without a matching sale.
-- **Locked session times:** start and end times can never be edited, and an ended clock can't restart. Voiding a sale's table fee never
-  touches the table itself, so there's no "reopen" path for old stamps to leak back onto a table.
+- **Locked session times:** start and end times can never be edited, and an ended clock can't restart. A completed sale can never be changed,
+  so there's no "reopen" path for old stamps to leak back onto a table.
 - **Server-synced timers:** on-screen timers use the server's clock, measured when you sign in, every 10 minutes and when the app returns to
   the foreground. A device whose clock is more than a minute off gets a warning.
 - **Demo mode** has no server, so it uses the browser's clock. These protections only apply with Firebase.
@@ -110,29 +134,23 @@ receipt and freeing the table, so two terminals can't oversell stock or bill a t
 - **Checkout** (one table). This is where you manage a running table: **Add time** / **Set hours**, End Session, **Log Round** (a per-session game count, saved on the receipt), **Add Item**, the **Table light** switch, and payment.
 - The navy "device display" look is used only for live table equipment (the table cards and the checkout timer). The rest of the app stays ivory and felt green, so a dark card always means a running table.
 
-## Table-fee void
+## Cancel game (first 5 minutes, before paying)
 
-Voiding never touches items — anything a customer bought is always still owed, whoever ends up paying for it.
-It only ever waives the **table fee**, for the case where a customer decides not to play after all.
+A customer who changes their mind in the first **5 minutes** isn't charged the table fee. Nobody pays first to be
+refunded later: the cashier cancels on the table itself.
 
-- **Eligible only if the table was barely used:** the table fee can be waived if the session lasted **5 minutes or
-  less** (`VOID_ELIGIBLE_DURATION_MS` in `js/billing.js`). Past 5 minutes of play, the table fee is final — there's no
-  window to still act within, because eligibility depends on how long the table was used, not on how much time has
-  passed since checkout.
-- **Who:** the cashier who completed the sale, or the owner. No approval needed.
-- **Reason required:** a reason is required, and so is a note when the reason is "Other".
-- **Where you act on it:** the receipt right after checkout, and the Transactions list (both roles).
-- **What it does:** the table fee is zeroed and refunded (through whichever payment channel — cash or GCash —
-  covered it; the cashier picks the channel if the sale was split), the sale's total drops to just the items, and it
-  stays on the totals for Tables, Transactions, Dashboard and Reports at that reduced amount. Items, their stock, and
-  the table are never touched — there's no "reopen," since nothing about the table needs undoing.
-- **Where the owner sees it, since no approval is required:**
-  - **Transactions:** a "Table fee voided" badge on the row, with the reduced total.
-  - **Owner Dashboard:** the Recent Transactions list carries the same badge, and a dedicated **Table fee voids
-    today** card lists each one — table, cashier, reason, amount refunded — click to open its receipt.
-  - **Reports → Sales:** a **Table fee voids** table for the selected date range, with a count and total refunded,
-    and it's included in that tab's CSV export.
-
+- **Where:** open the table (click it on Tables, which opens its Checkout page). While the game is 5 minutes or less,
+  a **Cancel game** button shows with a countdown ("4:12 left"). A clock that was stopped within 5 minutes can still
+  be cancelled. After 5 minutes the button disappears and the fee stands (`CANCEL_WINDOW_MS` in `js/billing.js`).
+- **Reason required,** plus a note when the reason is "Other". No approval needed. Any staff member can cancel.
+- **No items on the bill:** the clock stops, the table is freed, and a ₱0 sale marked *Game cancelled* is recorded.
+- **Items on the bill:** the table fee becomes ₱0 and the cashier takes payment for the items only. They are still owed.
+- **Enforced on the server:** `firestore.rules` (`cancelsGame`) allows it only within 5 minutes of server time, only
+  once, and a checkout of a cancelled game must have a ₱0 table fee. A normal game can't claim ₱0.
+- **A paid sale can't be changed.** Transactions are append-only, so there is no void after payment.
+- **Where the owner sees it:** "Cancelled" on the Dashboard's recent transactions plus a **Cancelled games today**
+  card, *Game cancelled* on the Transactions list and the Daily sales sheet, and a **Cancelled games** list in
+  Reports → Custom range. Older sales whose table fee was voided after payment still show there too.
 ## Quick Sale (walk-in items, no table)
 
 **Quick Sale** is for a walk-in customer buying items — drinks, snacks, merchandise — without
@@ -150,25 +168,67 @@ playing at a table: no timer, no table fee, just the items and a payment.
   `tableFee: 0`, and `total == productTotal`. `firestore.rules` verifies exactly that shape
   (`quickSaleOk`) instead of the table-session checks a normal sale goes through.
 - **Where it shows up:** the same Transactions list as table sales, tagged **Walk-in** instead of a
-  table name/number (Dashboard's Recent Transactions and the receipt do the same). A Quick Sale can
-  never be table-fee-voided — there's no table fee on it to waive.
+  table name/number (Dashboard's Recent Transactions and the receipt do the same). A Quick Sale has no
+  table fee, so there's nothing to cancel.
 
 ## Payments
 
 Checkout takes **Cash** (optional cash tendered → change), **GCash**, or **Split**. For Split the cashier enters the cash
-portion and the rest of the total goes on GCash. Every transaction stores `payments.cash` and `payments.gcash`, so
+portion and the rest of the total goes on GCash. For **GCash and Split** the cashier must enter the **last 5 digits of the
+GCash reference number** (`gcashRef`, required by `firestore.rules`). It shows on the receipt, in the Transactions list
+(and search), and on the Daily sales report and its CSV. Every transaction stores `payments.cash` and `payments.gcash`, so
 reports can add up money by type whatever the method was. (Older `card` records still show up, as "Other".)
 
-## Reports (owner)
+## Thermal printer
 
-Reports → **Sales / Payments / Shifts**, for Today, Yesterday, 7 or 30 days, or any range up to 92 days. Every tab can be
-exported to CSV or printed.
+Ported from Marimar Inn (`js/printer.js`). The **Thermal printer** button in the sidebar connects a 58mm or 80mm ESC/POS
+receipt printer (the dot turns green when connected):
 
-- **Business day:** sales are grouped by business day, which starts at 6:00 AM, so a sale at 1:30 AM counts toward the night before.
-  Change `BUSINESS_DAY_START_HOUR` in `js/reporting.js` to adjust it. The Dashboard and Transactions screens still use calendar days.
-- **Sales:** gross, table revenue (hours played, rounds), product sales, daily breakdown, and top products.
-- **Payments:** cash vs GCash collected (splits counted in both), a breakdown by method, and collections per day.
-- **Shifts:** sales per cashier per business day: number of sales, items, table revenue, product sales, and cash vs GCash.
+- **Bluetooth**: Web Bluetooth, for BLE printers (Chrome/Edge).
+- **USB cable**: Web Serial, for a USB printer on a computer (Chrome/Edge).
+- **RawBT app (Android)**: most cheap 58mm printers use classic Bluetooth, which browsers can't reach. Install the free
+  RawBT app, pair the printer there, and the app hands each receipt to RawBT.
+
+Paper width (58mm = 32 characters, 80mm = 48), Print test, and a paper-style **Preview** that shows the exact lines the
+printer gets. Receipts have **Print receipt / Preview print**. The Daily report has **Print (thermal) / Preview
+(thermal)**: a compact shift-end slip with each sale, expenses, cash to count, overall sale and signature lines. The last
+printer reconnects on its own if the browser kept the permission. Receipts are plain ASCII ("P" instead of "₱") so
+no-name printers print them correctly.
+
+### Time-left alerts
+
+For **Set Hours** (booked) tables, every signed-in screen plays a chime and shows an alert card when a table has
+**15 minutes left**, and a louder chime and a red card at **5 minutes left** (`js/time-alerts.js`, sounds in
+`js/alarm.js`, made with the Web Audio API like Marimar Inn's). Each alert plays once per table per game; the card
+stays until someone taps OK or opens the table. Open Time tables have no end time, so they don't alert. Browsers only
+allow sound after the screen has been tapped once, so tap anywhere after opening the app.
+
+### Tablet app (full screen, direct Bluetooth)
+
+`android-app/` is the Golden Break tablet app, copied from Marimar Inn. It's a small Android app that opens the live
+site full screen and prints straight to a paired Bluetooth thermal printer, no RawBT. Inside it, the Thermal printer
+panel lists the printers paired in Android Settings. See `android-app/README.md` for installing and building.
+`sw.js` keeps a saved copy of the app so it still opens when the tablet loses internet.
+
+### Cash drawer
+
+Also from Marimar Inn. The drawer plugs into the printer's drawer (RJ11) port and opens through the printer, so the
+thermal printer must be connected. **Cash drawer** in the sidebar:
+
+- **On cash pay** (on by default, per device): the drawer opens after a sale that took cash, including the cash part
+  of a split. GCash leaves it closed.
+- **Open drawer**: the owner opens it directly; a cashier needs the **drawer PIN**. It's also on the Daily report's
+  End of shift card, for counting cash.
+- **Drawer PIN** (owner only): stored as a SHA-256 hash in `settings/cashDrawer`, never as the digits.
+
+The kick is the same as Marimar Inn's: an ESC p pulse on pin 5, then pin 2 as a second job, because drawers are wired
+to either pin.
+
+## Business day
+
+Reports group sales by business day, which starts at 6:00 AM, so a sale at 1:30 AM counts toward the night before.
+Change `BUSINESS_DAY_START_HOUR` in `js/reporting.js` to adjust it. The Dashboard and Transactions screens still use calendar days.
+See **Reports & expenses** above for what each report tab shows.
 
 ## Tests
 
@@ -177,10 +237,10 @@ npm install
 npm test
 ```
 
-- `tests/unit/`: pricing examples and edge cases, void rules, and report math (plain Node).
+- `tests/unit/`: pricing examples and edge cases, the 5-minute cancel rule, and report math (plain Node).
 - `tests/rules/`: security rules on the Firestore emulator (needs Java). This covers allowed actions and attempted cheats: backdated starts,
-  ends and sales, edited start times, restarting a clock, wrong fees, false durations, freeing a table without a sale, and late or
-  unauthorized voids.
+  ends and sales, edited start times, restarting a clock, wrong fees, false durations, freeing a table without a sale, late cancels,
+  and changing a paid sale.
 
 ## Structure
 
@@ -190,7 +250,7 @@ css/styles.css          design tokens + all component styles
 js/app.js               auth flow, shell (sidebar), router, live subscriptions
 js/db.js                picks db-firebase.js or db-demo.js
 js/services.js          business operations (sessions, checkout, stock, staff)
-js/billing.js           pure billing rules (official table rate, elapsed time, voids)
+js/billing.js           pure billing rules (official table rate, elapsed time, cancel game)
 js/clock.js             server-synced clock + SERVER_TIME write placeholder
 js/reporting.js         pure report aggregation (business days, totals, shifts, CSV)
 js/dialogs.js           add/edit table, product, stock, staff; receipt

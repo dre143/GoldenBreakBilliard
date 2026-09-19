@@ -1,15 +1,16 @@
 import { state, on } from '../state.js';
 import * as svc from '../services.js';
 import {
-  elapsedMs, tableFee, itemsTotal, itemsCount, round2, feeBreakdown, nextIncreaseAt, PRICING, PRICING_LABEL,
-  billableMs, isTimed, plannedMs, remainingMs, overtimeMs,
+  elapsedMs, tableFee, sessionFee, itemsTotal, itemsCount, round2, feeBreakdown, nextIncreaseAt, PRICING, PRICING_LABEL,
+  billableMs, isTimed, plannedMs, remainingMs, overtimeMs, canCancelGame, cancelTimeLeft,
 } from '../billing.js';
-import { receiptDialog, bookingDialog } from '../dialogs.js';
+import { receiptDialog, bookingDialog, cancelGameDialog } from '../dialogs.js';
+import * as printer from '../printer.js';
 import { updateTableTimers } from './shared.js';
 import { poolCard } from './pool-card.js';
 import {
-  esc, icon, peso, fmtDuration, fmtTime, fmtBooking, statusBadge, thumb, pageHeader,
-  loadingBlock, emptyBlock, preserveFocus, busy, toast, openDialog, METHOD_LABEL,
+  esc, icon, peso, fmtDuration, fmtCountdown, fmtTime, fmtBooking, statusBadge, thumb, pageHeader,
+  loadingBlock, emptyBlock, preserveFocus, busy, toast, openDialog, METHOD_LABEL, gcashRefField, wireGcashRef,
 } from '../ui.js';
 
 export function mount(el, ctx) {
@@ -43,6 +44,7 @@ function mountBill(el, ctx, tableId) {
   let method = 'cash';
   let completing = false;
   let built = false;
+  let cancelShown = false; // whether the Cancel game offer is on screen (it goes away after 5 minutes)
   const table = () => state.tables.find((t) => t.id === tableId);
 
   el.innerHTML = `
@@ -116,6 +118,7 @@ function mountBill(el, ctx, tableId) {
                 <span class="num" data-live="split-gcash">—</span>
               </div>
             </div>
+            ${gcashRefField()}
             <button type="button" class="btn btn--amber btn--block btn--lg" data-action="complete">${icon('check')}Complete Transaction</button>
           </section>
         </aside>
@@ -126,21 +129,32 @@ function mountBill(el, ctx, tableId) {
       method = r.value;
       $('[data-region=cash]').hidden = method !== 'cash';
       $('[data-region=split]').hidden = method !== 'split';
+      $('[data-region=gcash-ref]').hidden = method === 'cash';
       tick();
     }));
     $('#cash-tendered').addEventListener('input', tick);
     $('#split-cash').addEventListener('input', tick);
+    wireGcashRef(body);
   }
 
   function renderTimer(t) {
     const s = t.session;
+    const cancellable = canCancelGame(t);
+    cancelShown = cancellable;
     preserveFocus($('[data-region=timer]'), () => {
       $('[data-region=timer]').classList.toggle('is-stopped', Boolean(s.ended));
       $('[data-region=timer]').innerHTML = `
         <div class="timer-panel__top">
           <span class="eyebrow">Elapsed time · ${esc(t.name)}</span>
-          ${s.ended ? '<span class="badge badge--ended">Session Ended</span>' : statusBadge(t.status)}
+          ${s.cancelled ? '<span class="badge badge--danger">Game cancelled</span>' : s.ended ? '<span class="badge badge--ended">Session Ended</span>' : statusBadge(t.status)}
         </div>
+        ${s.cancelled ? `
+        <p class="cancel-note">Cancelled by ${esc(s.cancelled.byName)} (${esc(s.cancelled.reason)}). No table fee. Take payment for the items below.</p>` : ''}
+        ${cancellable ? `
+        <div class="cancel-offer">
+          <button type="button" class="btn btn--danger-ghost" data-action="cancel-game" data-fk="cancel-game">${icon('x')}Cancel game</button>
+          <span class="cancel-offer__text">No charge if cancelled in the first 5 minutes · <strong class="num" data-live="cancel-left"></strong> left</span>
+        </div>` : ''}
         <div class="led led--lg">
           <span class="led__digits num" data-live="elapsed">${fmtDuration(elapsedMs(t))}</span>
         </div>
@@ -239,13 +253,15 @@ function mountBill(el, ctx, tableId) {
     if (!built || !t?.session) return;
     const s = t.session;
     const ms = elapsedMs(t);
+    if (canCancelGame(t) !== cancelShown) renderTimer(t); // the 5-minute cancel window just closed
     const billed = billableMs(s, ms); // booked hours are the minimum charge
-    const fee = tableFee(billed);
+    const fee = sessionFee(s, ms); // ₱0 once the game was cancelled
     const total = round2(fee + itemsTotal(s.items));
     const setText = (key, v) => { const n = $(`[data-live=${key}]`); if (n) n.textContent = v; };
     setText('elapsed', fmtDuration(ms));
+    setText('cancel-left', fmtCountdown(cancelTimeLeft(t)));
     setText('dur', isTimed(s) && billed > ms ? `${fmtDuration(ms)} played, ${fmtBooking(plannedMs(s))} booked` : `${fmtDuration(ms)} played`);
-    setText('breakdown', feeBreakdown(billed));
+    setText('breakdown', s.cancelled ? 'game cancelled, no charge' : feeBreakdown(billed));
     setText('fee', peso(fee));
     if (isTimed(s)) {
       const over = overtimeMs(s, ms);
@@ -354,12 +370,21 @@ function mountBill(el, ctx, tableId) {
       return;
     }
     const cashPart = method === 'split' ? Number(splitRaw) : null;
+    const gcashRef = $('#gcash-ref').value;
+    const total = round2(sessionFee(t.session, elapsedMs(t)) + itemsTotal(t.session.items));
+    if ((method === 'gcash' || method === 'split') && total > 0 && gcashRef.length !== 5) {
+      toast('Enter the last 5 digits of the GCash reference number.', 'error');
+      $('#gcash-ref').focus();
+      return;
+    }
     // The total on screen is an estimate while the clock runs; the server-stamped end time decides.
-    const expectedTotal = round2(tableFee(billableMs(t.session, elapsedMs(t))) + itemsTotal(t.session.items));
+    const expectedTotal = round2(sessionFee(t.session, elapsedMs(t)) + itemsTotal(t.session.items));
     completing = true;
     btn.disabled = true;
     try {
-      const record = await svc.completeCheckout(tableId, { method, tendered, cashPart, expectedTotal }, ctx.user);
+      const record = await svc.completeCheckout(tableId, { method, tendered, cashPart, gcashRef, expectedTotal }, ctx.user);
+      // Cash changed hands: open the drawer (if the printer is connected and "On cash pay" is on).
+      printer.kickDrawerForCash(record.payments?.cash).then((err) => err && toast(`Paid, but the drawer said: ${err}`, 'error'));
       location.hash = '#/tables';
       receiptDialog(record, { fresh: true });
     } catch (err) {
@@ -397,6 +422,13 @@ function mountBill(el, ctx, tableId) {
         });
       }
       case 'end': return busy(btn, async () => { await svc.endSession(tableId); toast('Session ended · clock stopped'); });
+      case 'cancel-game': {
+        const t = table();
+        if (!t?.session) return undefined;
+        return cancelGameDialog(t, {
+          onDone: ({ hasItems }) => { if (!hasItems) location.hash = '#/tables'; },
+        });
+      }
       case 'inc': return busy(btn, () => svc.changeItem(tableId, btn.dataset.pid, 1));
       case 'dec': return busy(btn, () => svc.changeItem(tableId, btn.dataset.pid, -1));
       case 'add-product': return openProductPicker();

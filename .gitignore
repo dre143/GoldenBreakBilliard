@@ -1,2 +1,9 @@
 node_modules/
 *.log
+
+# android tablet app build outputs
+android-app/.gradle/
+android-app/build/
+android-app/app/build/
+android-app/local.properties
+android-app/releases/

@@ -21,6 +21,11 @@ export function fmtDuration(ms) {
   const s = Math.floor(ms / 1000);
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
+/** Short countdown, e.g. "4:58". */
+export function fmtCountdown(ms) {
+  const s = Math.ceil(Math.max(0, ms) / 1000);
+  return `${Math.floor(s / 60)}:${pad(s % 60)}`;
+}
 export function fmtHuman(ms) {
   const m = Math.ceil(ms / 60000);
   const h = Math.floor(m / 60);
@@ -66,9 +71,25 @@ export const initials = (name) =>
 export const isOnline = (u) => !!u.online && (u.demoPresence || serverNow() - (u.lastSeen || 0) < 3 * 60000);
 
 // 'card' is kept only so older transactions still display a label; it's no longer offered.
-export const METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', split: 'Split', card: 'Card' };
+export const METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', split: 'Split', card: 'Card', none: 'No charge' };
 
 /* ---------- small components ---------- */
+
+/** GCash reference input (last 5 digits), shown for GCash and Split payments on Checkout and Quick Sale. */
+export const gcashRefField = () => `
+  <div class="cash" data-region="gcash-ref" hidden>
+    <div class="field">
+      <label for="gcash-ref">GCash ref no. <span class="muted">(last 5 digits)</span></label>
+      <input id="gcash-ref" type="text" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="e.g. 48213">
+    </div>
+  </div>`;
+
+/** Keep only digits in the GCash reference input while typing. */
+export function wireGcashRef(root) {
+  const input = root.querySelector('#gcash-ref');
+  input?.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, 5); });
+  return input;
+}
 
 const STATUS = {
   available: ['Available', 'available'],

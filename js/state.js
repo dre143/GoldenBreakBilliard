@@ -5,6 +5,7 @@ export const state = {
   products: [],
   users: [],
   restocks: [],
+  settings: {},
   loaded: {},
 };
 
@@ -33,5 +34,6 @@ export function reset() {
   state.products = [];
   state.users = [];
   state.restocks = [];
+  state.settings = {};
   state.loaded = {};
 }

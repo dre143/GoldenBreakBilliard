@@ -90,26 +90,30 @@ test('booked hours are a minimum charge; overtime is billed by the same rule', (
   assert.equal(b.currentBill({ session: { startedAt: 0, ended: true, endedAt: m(45), plannedMs: m(120), items: [{ price: 85, qty: 1 }] } }), 485);
 });
 
-test('table-fee void: eligible only when the table was used 5 minutes or less', () => {
-  const joy = { uid: 'joy', role: 'cashier' };
-  const bea = { uid: 'bea', role: 'cashier' };
-  const owner = { uid: 'boss', role: 'owner' };
-  const short = (extra = {}) => ({ cashierId: 'joy', tableId: 't-1', durationMs: 5 * 60_000, ...extra });
-  const long = (extra = {}) => ({ cashierId: 'joy', tableId: 't-1', durationMs: 5 * 60_000 + 1, ...extra });
+test('cancel game: only within the first 5 minutes, running or stopped, and only once', () => {
+  const start = 1_000_000;
+  const running = (session = {}) => ({ session: { startedAt: start, ended: false, endedAt: null, items: [], ...session } });
+  const at = (ms) => start + ms;
 
-  // Eligibility is a fixed property of the sale's recorded duration, not a real-time countdown —
-  // it doesn't matter how long ago checkout happened.
-  assert.equal(b.canVoidTableFee(short(), joy), true, 'exactly 5 minutes is still eligible');
-  assert.equal(b.canVoidTableFee(long(), joy), false, '1 ms over 5 minutes is not');
-  assert.equal(b.canVoidTableFee(short(), bea), false, 'another cashier cannot void it');
-  assert.equal(b.canVoidTableFee(short(), owner), true, 'the owner always can');
-  assert.equal(b.canVoidTableFee(short({ tableFeeVoided: true }), owner), false, 'only once');
-  assert.equal(b.canVoidTableFee(short(), null), false);
-  assert.equal(b.canVoidTableFee(null, joy), false);
+  assert.equal(b.canCancelGame(running(), at(5 * 60_000)), true, 'exactly 5 minutes is still allowed');
+  assert.equal(b.canCancelGame(running(), at(5 * 60_000 + 1)), false, '1 ms over 5 minutes is not');
+  assert.equal(b.cancelTimeLeft(running(), at(60_000)), 4 * 60_000);
+  assert.equal(b.cancelTimeLeft(running(), at(9 * 60_000)), 0);
 
-  // Quick Sale (walk-in) transactions have no table and no table fee, so there's nothing to void
-  // even if their (nonexistent) duration would otherwise look eligible.
-  assert.equal(b.canVoidTableFee({ cashierId: 'joy', tableId: null, durationMs: null, tableFee: 0 }, owner), false, 'walk-in sales have no table fee to void');
+  // A stopped clock is judged on the time actually played, however long ago it was stopped.
+  const stopped = running({ ended: true, endedAt: at(3 * 60_000) });
+  assert.equal(b.canCancelGame(stopped, at(60 * 60_000)), true);
+  assert.equal(b.canCancelGame(running({ ended: true, endedAt: at(6 * 60_000) }), at(6 * 60_000)), false);
+
+  assert.equal(b.canCancelGame(running({ cancelled: { reason: 'x' } }), at(60_000)), false, 'only once');
+  assert.equal(b.canCancelGame({ session: null }, at(0)), false);
+  assert.equal(b.canCancelGame(null, at(0)), false);
+
+  // A cancelled game has no table fee; items stay on the bill.
+  const cancelled = { session: { startedAt: start, ended: true, endedAt: at(2 * 60_000), cancelled: { reason: 'x' }, items: [{ price: 30, qty: 2 }] } };
+  assert.equal(b.sessionFee(cancelled.session, 2 * 60_000), 0);
+  assert.equal(b.currentBill(cancelled, at(2 * 60_000)), 60);
+  assert.equal(b.sessionFee({ plannedMs: 0 }, 2 * 60_000), 200, 'a normal short game still pays the first hour');
 
   assert.deepEqual(b.activeSales([{ id: 1 }, { id: 2, voided: true }]).map((x) => x.id), [1]);
 });
