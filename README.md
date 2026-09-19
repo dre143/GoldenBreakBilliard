@@ -181,8 +181,9 @@ reports can add up money by type whatever the method was. (Older `card` records 
 
 ## Thermal printer
 
-Ported from Marimar Inn (`js/printer.js`). The **Thermal printer** button in the sidebar connects a 58mm or 80mm ESC/POS
-receipt printer (the dot turns green when connected):
+Ported from Marimar Inn (`js/printer.js`). The **top bar** (on every screen, like Marimar Inn's header) shows the date and
+time, an online/offline pill, and two icon buttons that open small panels in place: the **printer** (dot green when
+connected) connects a 58mm or 80mm ESC/POS receipt printer, and the **cash drawer** (dot green while "On cash pay" is on):
 
 - **Bluetooth**: Web Bluetooth, for BLE printers (Chrome/Edge).
 - **USB cable**: Web Serial, for a USB printer on a computer (Chrome/Edge).
@@ -213,13 +214,15 @@ panel lists the printers paired in Android Settings. See `android-app/README.md`
 ### Cash drawer
 
 Also from Marimar Inn. The drawer plugs into the printer's drawer (RJ11) port and opens through the printer, so the
-thermal printer must be connected. **Cash drawer** in the sidebar:
+thermal printer must be connected. The **cash drawer icon in the top bar** opens the panel from any screen:
 
 - **On cash pay** (on by default, per device): the drawer opens after a sale that took cash, including the cash part
   of a split. GCash leaves it closed.
-- **Open drawer**: the owner opens it directly; a cashier needs the **drawer PIN**. It's also on the Daily report's
-  End of shift card, for counting cash.
-- **Drawer PIN** (owner only): stored as a SHA-256 hash in `settings/cashDrawer`, never as the digits.
+- **Open drawer**: the owner taps the button; a cashier types the **drawer PIN** right in the panel and taps Open, so
+  the drawer can be opened at the end of a shift or in an emergency without the owner's key. It's also on the Daily
+  report's End of shift card, for counting cash.
+- **Drawer PIN** (owner only): set or change it in the same panel. It's stored as a SHA-256 hash in
+  `settings/cashDrawer`, never as the digits.
 
 The kick is the same as Marimar Inn's: an ESC p pulse on pin 5, then pin 2 as a second job, because drawers are wired
 to either pin.

@@ -111,6 +111,7 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 .shell {
   display: grid;
   grid-template-columns: var(--sidebar) minmax(0, 1fr);
+  grid-template-rows: auto 1fr; /* top bar sizes to its content; the page takes the rest */
   min-height: 100vh;
 }
 
@@ -188,20 +189,6 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 
 /* ---------- thermal printer ---------- */
 
-.printer-btn {
-  display: flex; align-items: center; gap: 12px; width: 100%;
-  min-height: var(--tap); padding: 0 14px; margin-top: -16px;
-  background: none; border: 0; border-radius: 999px;
-  color: rgba(246, 243, 236, .72); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
-}
-.printer-btn:hover { color: var(--ivory); background: rgba(255, 255, 255, .04); }
-.printer-btn--drawer { margin-top: -26px; }
-.drawer-warn { padding: 10px 12px; border-radius: var(--radius-sm); background: #FFF4DB; color: #7A5200; font-size: 13px; }
-.drawer-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); }
-.drawer-row__title { font-weight: 700; font-size: 14px; }
-.drawer-pin { display: flex; align-items: flex-end; gap: 10px; padding-top: 12px; }
-.drawer-pin .field { flex: 1; }
-.printer-btn__text { flex: 1; text-align: left; }
 .printer-dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(160, 160, 160, .55); flex: none; }
 .printer-dot.is-on { background: #3FB67A; box-shadow: 0 0 0 3px rgba(63, 182, 122, .2); }
 .printer-status { display: flex; align-items: center; gap: 10px; font-size: 14px; }
@@ -240,7 +227,64 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 }
 .avatar--sm { width: 34px; height: 34px; font-size: 13px; }
 
-.topbar { display: none; }
+/* Top bar (Marimar Inn style): date/time, online status, printer and cash-drawer menus. On desktop it sits
+   above the page content, to the right of the sidebar; on a phone/tablet it is the dark bar with the menu button. */
+.topbar {
+  grid-column: 2; grid-row: 1;
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 10px 36px;
+  background: var(--ground); border-bottom: 1px solid var(--line);
+  --qb-fg: var(--ink); --qb-bg: var(--surface); --qb-line: var(--line);
+}
+.topbar > .icon-btn, .topbar > .brand { display: none; }
+.sidebar { grid-column: 1; grid-row: 1 / span 2; }
+.main { grid-column: 2; grid-row: 2; }
+
+.quickbar { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.quickbar__clock { font-size: 13px; color: var(--ink-soft); white-space: nowrap; margin-right: 6px; }
+.quickbar__net {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
+  border-radius: 999px; background: var(--qb-bg); border: 1px solid var(--qb-line); color: var(--qb-fg);
+  font-size: 12px; font-weight: 700;
+}
+.quickbar__net .ico { width: 16px; height: 16px; }
+.quickbar__net.is-offline { background: var(--danger-soft); border-color: #E6BDB8; color: var(--danger-ink); }
+.qb-menu { position: relative; }
+.qb-btn {
+  position: relative; display: grid; place-items: center; width: 44px; height: 44px;
+  background: var(--qb-bg); border: 1px solid var(--qb-line); border-radius: 12px; color: var(--qb-fg); cursor: pointer;
+}
+.qb-btn:hover { border-color: var(--qb-fg); }
+.qb-btn[aria-expanded="true"] { border-color: var(--qb-fg); }
+.qb-btn .ico { width: 22px; height: 22px; }
+.qb-dot { position: absolute; top: 7px; right: 7px; width: 9px; height: 9px; border-radius: 50%; background: rgba(140, 140, 140, .55); }
+.qb-dot.is-on { background: #1FBF7A; }
+.qb-pop {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 55;
+  width: min(340px, calc(100vw - 24px)); max-height: calc(100dvh - 90px); overflow-y: auto;
+  padding: 16px; background: var(--surface); color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, .35);
+}
+.qb-pop[hidden] { display: none; }
+.qb-pop__title { font-weight: 800; font-size: 15px; margin-bottom: 10px; }
+
+/* Cash drawer panel (like Marimar Inn's) */
+.drawer-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.drawer-row__title { font-weight: 800; font-size: 15px; }
+.drawer-section { display: flex; flex-direction: column; gap: 8px; padding: 14px 0 0; }
+.drawer-section + .drawer-section { border-top: 1px solid var(--line); margin-top: 14px; }
+.drawer-section__label { font-size: 13px; color: var(--ink-soft); font-weight: 600; }
+.drawer-warn { padding: 8px 10px; border-radius: var(--radius-sm); background: #FFF4DB; color: #7A5200; font-size: 12.5px; }
+.drawer-pin { display: flex; gap: 8px; }
+.drawer-pin input {
+  flex: 1; min-width: 0; min-height: var(--tap); padding: 0 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.drawer-pin input:focus-visible { border-color: var(--felt); outline: 3px solid rgba(31, 107, 74, .25); }
+.btn--dark { background: var(--ink); color: #fff; }
+.btn--dark:hover:not(:disabled) { background: #000; }
 .scrim { display: none; }
 
 .main {
@@ -1230,14 +1274,20 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 }
 
 @media (max-width: 900px) {
-  .shell { grid-template-columns: minmax(0, 1fr); }
+  .shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
   .topbar {
-    position: sticky; top: 0; z-index: 30;
-    display: flex; align-items: center; gap: 4px;
+    grid-column: 1; grid-row: 1;
+    justify-content: flex-start; gap: 4px;
     padding: 6px 12px 6px 6px;
-    background: var(--felt-deep); color: var(--ivory);
+    background: var(--felt-deep); color: var(--ivory); border-bottom: 0;
+    --qb-fg: var(--ivory); --qb-bg: rgba(255, 255, 255, .08); --qb-line: rgba(255, 255, 255, .22);
   }
+  .topbar > .icon-btn, .topbar > .brand { display: flex; }
+  .quickbar__clock { display: none; }
+  .main { grid-column: 1; grid-row: 2; }
+  .qb-btn { width: 40px; height: 40px; }
   .sidebar {
+    grid-column: auto; grid-row: auto;
     position: fixed; inset: 0 auto 0 0; z-index: 50;
     width: min(280px, 85vw);
     transform: translateX(-100%);
@@ -1254,6 +1304,9 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 }
 
 @media (max-width: 560px) {
+  /* Phone: the printer and drawer panels span the width of the top bar instead of hanging off a button. */
+  .qb-menu { position: static; }
+  .qb-pop { left: 12px; right: 12px; width: auto; top: 100%; margin-top: 6px; }
   .stats { grid-template-columns: minmax(0, 1fr); }
   .page-title { font-size: 24px; }
   .order-item { grid-template-columns: 40px minmax(0, 1fr) auto; }

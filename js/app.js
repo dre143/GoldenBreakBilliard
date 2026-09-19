@@ -1,5 +1,5 @@
 import { db, auth, mode } from './db.js';
-import { state, set, emit, reset } from './state.js';
+import { state, set, emit, reset, on } from './state.js';
 import { icon, esc, initials, toast, addDays } from './ui.js';
 import { setServerOffset } from './clock.js';
 import * as svc from './services.js';
@@ -14,7 +14,7 @@ import * as staffView from './views/staff.js';
 import * as reportsView from './views/reports.js';
 import * as printer from './printer.js';
 import { startTimeAlerts } from './time-alerts.js';
-import { printerDialog, cashDrawerDialog } from './dialogs.js';
+import { mountPrinterPanel, mountDrawerPanel } from './dialogs.js';
 
 const root = document.getElementById('root');
 
@@ -34,7 +34,7 @@ const ROUTES = {
 
 let sessionCleanups = [];
 let viewCleanup = null;
-let printerCleanup = null;
+let quickbarCleanup = null;
 let heartbeat = null;
 
 setInterval(() => emit('tick'), 1000);
@@ -131,6 +131,8 @@ function stopData() {
 }
 
 function teardown() {
+  quickbarCleanup?.();
+  quickbarCleanup = null;
   stopData();
   sessionCleanups.forEach((f) => f());
   sessionCleanups = [];
@@ -171,6 +173,30 @@ function renderShell() {
       <header class="topbar">
         <button type="button" class="icon-btn icon-btn--light" data-action="toggle-nav" aria-controls="sidebar" aria-expanded="false" aria-label="Open navigation">${icon('menu')}</button>
         ${brandCompact()}
+        <div class="quickbar">
+          <span class="quickbar__clock" data-region="clock"></span>
+          <span class="quickbar__net" data-region="net" role="status"></span>
+          <div class="qb-menu">
+            <button type="button" class="qb-btn" data-qb="printer" aria-haspopup="true" aria-expanded="false" aria-controls="qb-printer">
+              ${icon('print')}<span class="qb-dot" data-region="printer-dot" aria-hidden="true"></span>
+              <span class="sr-only" data-region="printer-label">Thermal printer</span>
+            </button>
+            <div class="qb-pop" id="qb-printer" data-pop="printer" hidden>
+              <p class="qb-pop__title">Thermal printer</p>
+              <div data-region="printer-panel"></div>
+            </div>
+          </div>
+          <div class="qb-menu">
+            <button type="button" class="qb-btn" data-qb="drawer" aria-haspopup="true" aria-expanded="false" aria-controls="qb-drawer">
+              ${icon('cash')}<span class="qb-dot" data-region="drawer-dot" aria-hidden="true"></span>
+              <span class="sr-only" data-region="drawer-label">Cash drawer</span>
+            </button>
+            <div class="qb-pop" id="qb-drawer" data-pop="drawer" hidden>
+              <p class="qb-pop__title">Cash drawer</p>
+              <div data-region="drawer-panel"></div>
+            </div>
+          </div>
+        </div>
       </header>
       <aside class="sidebar" id="sidebar">
         ${brand()}
@@ -181,14 +207,6 @@ function renderShell() {
         <div class="sidebar__spacer"></div>
         ${mode === 'demo' ? `<div class="demo-note">Demo mode · data is stored in this browser
           <button type="button" class="demo-note__btn" data-action="clear-demo">${icon('x')}Clear all sales</button></div>` : ''}
-        <button type="button" class="printer-btn" data-action="printer">
-          ${icon('print')}<span class="printer-btn__text">Thermal printer</span>
-          <span class="printer-dot" data-region="printer-dot" aria-hidden="true"></span>
-          <span class="sr-only" data-region="printer-state"></span>
-        </button>
-        <button type="button" class="printer-btn printer-btn--drawer" data-action="drawer">
-          ${icon('box')}<span class="printer-btn__text">Cash drawer</span>
-        </button>
         <div class="user-chip">
           <span class="avatar" aria-hidden="true">${esc(initials(u.name))}</span>
           <span class="user-chip__text">
@@ -205,15 +223,8 @@ function renderShell() {
   const shell = root.querySelector('.shell');
   const toggle = root.querySelector('[data-action=toggle-nav]');
   root.querySelector('[data-action=sign-out]').addEventListener('click', (e) => signOut(e.currentTarget));
-  root.querySelector('[data-action=printer]').addEventListener('click', () => { setNav(false); printerDialog(); });
-  root.querySelector('[data-action=drawer]').addEventListener('click', () => { setNav(false); cashDrawerDialog(); });
-  printerCleanup?.();
-  printerCleanup = printer.subscribePrinter((s) => {
-    const dot = root.querySelector('[data-region=printer-dot]');
-    if (!dot) return;
-    dot.classList.toggle('is-on', Boolean(s.kind));
-    root.querySelector('[data-region=printer-state]').textContent = s.kind ? `, connected: ${s.name}` : ', not connected';
-  });
+  quickbarCleanup?.();
+  quickbarCleanup = mountQuickbar(root.querySelector('.quickbar'));
   root.querySelector('[data-action=clear-demo]')?.addEventListener('click', () => {
     if (!confirm('Clear all demo sales, expenses and open tables? Staff, tables and products stay.')) return;
     auth.clearDemoSales();
@@ -222,6 +233,86 @@ function renderShell() {
   toggle.addEventListener('click', () => setNav(!shell.classList.contains('nav-open')));
   root.querySelector('[data-action=close-nav]').addEventListener('click', () => setNav(false));
   shell.addEventListener('keydown', (e) => { if (e.key === 'Escape' && shell.classList.contains('nav-open')) { setNav(false); toggle.focus(); } });
+}
+
+/**
+ * Top bar (like Marimar Inn's header), on every screen: date and time, online/offline, and the thermal
+ * printer and cash drawer menus. Each menu drops down its panel in place, so a cashier can open the
+ * drawer with the PIN from any page (end of shift, emergencies) without leaving what they're doing.
+ */
+function mountQuickbar(bar) {
+  const $ = (sel) => bar.querySelector(sel);
+  const cleanups = [];
+  let openMenu = null; // { key, cleanup }
+
+  const renderClock = () => {
+    $('[data-region=clock]').textContent = new Date().toLocaleString('en-PH', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  };
+  const renderNet = () => {
+    const online = navigator.onLine;
+    const el = $('[data-region=net]');
+    el.className = `quickbar__net ${online ? '' : 'is-offline'}`;
+    el.innerHTML = `${icon(online ? 'wifi' : 'wifiOff')}<span class="${online ? 'sr-only' : ''}">${online ? 'Online' : 'Offline'}</span>`;
+    // Starting a table and taking payment use database transactions, which need the internet.
+    el.title = online ? 'Online' : 'Offline: starting tables and taking payments need the internet';
+  };
+  const renderDots = () => {
+    const s = printer.getPrinterState();
+    $('[data-region=printer-dot]').classList.toggle('is-on', Boolean(s.kind));
+    $('[data-region=printer-label]').textContent = `Thermal printer, ${s.kind ? `connected: ${s.name}` : 'not connected'}`;
+    // Same as Marimar Inn: the drawer dot is green while "On cash pay" is on.
+    $('[data-region=drawer-dot]').classList.toggle('is-on', printer.isDrawerEnabled());
+    $('[data-region=drawer-label]').textContent = `Cash drawer, on cash pay ${printer.isDrawerEnabled() ? 'on' : 'off'}`;
+  };
+
+  function close() {
+    if (!openMenu) return;
+    openMenu.cleanup();
+    $(`[data-pop=${openMenu.key}]`).hidden = true;
+    $(`[data-qb=${openMenu.key}]`).setAttribute('aria-expanded', 'false');
+    openMenu = null;
+  }
+  function open(key) {
+    close();
+    const pop = $(`[data-pop=${key}]`);
+    const region = pop.querySelector('[data-region]');
+    const cleanup = key === 'printer' ? mountPrinterPanel(region) : mountDrawerPanel(region);
+    pop.hidden = false;
+    $(`[data-qb=${key}]`).setAttribute('aria-expanded', 'true');
+    openMenu = { key, cleanup };
+  }
+
+  bar.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-qb]');
+    if (!btn) return;
+    if (openMenu?.key === btn.dataset.qb) close();
+    else open(btn.dataset.qb);
+  });
+  // Close on a tap outside, Escape, or moving to another page.
+  const onDocDown = (e) => {
+    if (openMenu && !e.target.closest('.qb-menu') && !e.target.closest('dialog')) close();
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape' && openMenu) { const key = openMenu.key; close(); $(`[data-qb=${key}]`).focus(); }
+  };
+  document.addEventListener('pointerdown', onDocDown);
+  document.addEventListener('keydown', onKey);
+  window.addEventListener('hashchange', close);
+  window.addEventListener('online', renderNet);
+  window.addEventListener('offline', renderNet);
+  cleanups.push(
+    () => document.removeEventListener('pointerdown', onDocDown),
+    () => document.removeEventListener('keydown', onKey),
+    () => window.removeEventListener('hashchange', close),
+    () => window.removeEventListener('online', renderNet),
+    () => window.removeEventListener('offline', renderNet),
+    on('tick', renderClock),
+    printer.subscribePrinter(renderDots),
+    close,
+  );
+  renderClock();
+  renderNet();
+  return () => cleanups.forEach((fn) => fn());
 }
 
 function setNav(open) {

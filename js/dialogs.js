@@ -456,19 +456,11 @@ export function thermalPreviewDialog({ title = 'Print preview', lines, onPrint }
 }
 
 /**
- * Thermal printer setup (Marimar Inn's printer panel): connect by Bluetooth, USB, or the RawBT app,
- * choose the paper width, preview and print a test page, disconnect or forget the saved printer.
+ * Thermal printer panel (Marimar Inn's printer panel): connect by Bluetooth, USB, the RawBT app, or, inside
+ * the tablet app, a printer paired in Android Settings; paper width; test print and preview; disconnect or
+ * forget. Mounted in the top-bar printer menu and in printerDialog(). Returns a cleanup function.
  */
-export function printerDialog() {
-  let off = () => {};
-  const { dlg } = openDialog({
-    title: 'Thermal printer',
-    cancelLabel: 'Close',
-    body: '<div data-region="printer"></div>',
-    onClose: () => off(),
-  });
-  const region = dlg.querySelector('[data-region=printer]');
-
+export function mountPrinterPanel(region) {
   const render = (s) => {
     const kindLabel = { bluetooth: 'Bluetooth', serial: 'USB', rawbt: 'via RawBT app', native: 'Tablet Bluetooth' }[s.kind] || '';
     const paired = !s.kind && printer.isNativeApp() ? printer.listNativePrinters() : null;
@@ -478,7 +470,7 @@ export function printerDialog() {
         ${s.kind ? `<strong>Connected</strong> · ${esc(s.name)} · ${kindLabel}` : '<strong>Not connected</strong>'}
       </p>
       ${s.kind ? `
-      <div class="printer-actions">
+      <div class="printer-actions printer-actions--stack">
         <button type="button" class="btn btn--neutral" data-p="test">${icon('print')}Print test</button>
         <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
         <button type="button" class="btn btn--neutral" data-p="disconnect">Disconnect</button>
@@ -496,8 +488,8 @@ export function printerDialog() {
         <button type="button" class="btn btn--neutral" data-p="rawbt">Print via RawBT app (Android)</button>
         <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
       </div>
-      <p class="muted small">Most cheap 58mm printers use classic Bluetooth, which browsers can't reach directly. On an Android
-        phone or tablet, install the free <strong>RawBT</strong> app, pair the printer in RawBT, then choose "Print via RawBT app".
+      <p class="muted small">Most cheap 58mm printers use classic Bluetooth, which browsers can't reach. Use the Golden Break
+        tablet app, or on Android install the free <strong>RawBT</strong> app and choose "Print via RawBT app".
         A USB printer works from Chrome or Edge on a computer.</p>`}
       <div class="field">
         <label for="paper-width">Paper width</label>
@@ -508,10 +500,10 @@ export function printerDialog() {
       </div>
       <button type="button" class="link-btn" data-p="forget">Forget saved printer</button>`;
   };
-  off = printer.subscribePrinter(render);
+  const off = printer.subscribePrinter(render);
 
-  region.addEventListener('change', (e) => { if (e.target.dataset.p === 'paper') printer.setPaperWidth(Number(e.target.value)); });
-  region.addEventListener('click', async (e) => {
+  const onChange = (e) => { if (e.target.dataset.p === 'paper') printer.setPaperWidth(Number(e.target.value)); };
+  const onClick = async (e) => {
     const b = e.target.closest('[data-p]');
     if (!b || b.tagName === 'SELECT') return;
     const run = async (fn, ok) => {
@@ -533,22 +525,37 @@ export function printerDialog() {
       case 'forget': return run(printer.forgetPrinter, 'Saved printer forgotten.');
       default: return undefined;
     }
-  });
+  };
+  region.addEventListener('change', onChange);
+  region.addEventListener('click', onClick);
+  return () => { off(); region.removeEventListener('change', onChange); region.removeEventListener('click', onClick); };
 }
+
+export function printerDialog() {
+  let off = () => {};
+  const { dlg } = openDialog({ title: 'Thermal printer', cancelLabel: 'Close', body: '<div data-region="printer"></div>', onClose: () => off() });
+  off = mountPrinterPanel(dlg.querySelector('[data-region=printer]'));
+}
+
 /* ---------- cash drawer (Marimar Inn) ---------- */
 
 const isOwnerUser = () => state.user?.role === 'owner';
 
-/** Open the drawer: the owner directly, a cashier with the PIN the owner set. */
+/** Check the PIN (cashiers) and open the drawer. The owner never needs the PIN. */
+async function openDrawerWithPin(pin) {
+  if (!isOwnerUser()) {
+    if (!state.settings.drawerPinSet) throw new Error('No drawer PIN yet. Ask the owner to set one.');
+    if (!svc.normalizePin(pin)) throw new Error('Enter the drawer PIN.');
+    if (!(await svc.verifyDrawerPin(pin))) throw new Error('That PIN doesn’t match. Ask the owner.');
+  }
+  await printer.openCashDrawer();
+  toast('Drawer opened.');
+}
+
+/** Open the drawer from anywhere else (End of shift): the owner directly, a cashier via a PIN prompt. */
 export function openDrawerDialog() {
   if (isOwnerUser()) {
-    printer.openCashDrawer()
-      .then(() => toast('Drawer opened.'))
-      .catch((err) => toast(printer.printerErrorMessage(err), 'error'));
-    return;
-  }
-  if (!state.settings.drawerPinSet) {
-    toast('No drawer PIN yet. Ask the owner to set one (Cash drawer in the sidebar).', 'error');
+    openDrawerWithPin().catch((err) => toast(printer.printerErrorMessage(err), 'error'));
     return;
   }
   openDialog({
@@ -560,70 +567,72 @@ export function openDrawerDialog() {
         <input id="drawer-pin" name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" required autofocus>
       </div>
       <p class="muted small">Enter the PIN the owner gave you.</p>`,
-    async onSubmit(fd) {
-      if (!(await svc.verifyDrawerPin(fd.get('pin')))) throw new Error('That PIN doesn’t match. Ask the owner.');
-      await printer.openCashDrawer();
-      toast('Drawer opened.');
-    },
+    onSubmit: (fd) => openDrawerWithPin(fd.get('pin')),
   });
 }
 
 /**
- * Cash drawer panel: "On cash pay" switch (this device), Open drawer, and for the owner the drawer PIN.
- * The drawer is plugged into the thermal printer, so the printer has to be connected.
+ * Cash drawer panel, laid out like Marimar Inn's: "On cash pay" switch (this device), Open drawer (the
+ * owner taps it; a cashier types the PIN right here, for emergencies or the end of a shift), and for the
+ * owner the cashier PIN. Mounted in the top-bar drawer menu and in cashDrawerDialog(). Returns cleanup.
  */
-export function cashDrawerDialog() {
-  const offs = [];
-  const { dlg } = openDialog({
-    title: 'Cash drawer',
-    cancelLabel: 'Close',
-    body: '<div data-region="drawer"></div>',
-    onClose: () => offs.forEach((off) => off()),
-  });
-  const region = dlg.querySelector('[data-region=drawer]');
-
+export function mountDrawerPanel(region) {
   const render = () => {
     const connected = Boolean(printer.getPrinterState().kind);
     const onCash = printer.isDrawerEnabled();
+    const owner = isOwnerUser();
+    const pinSet = Boolean(state.settings.drawerPinSet);
     region.innerHTML = `
-      ${connected ? '' : `
-      <p class="drawer-warn">The drawer is plugged into the thermal printer. <button type="button" class="link-btn" data-d="printer">Connect the printer</button> first.</p>`}
       <div class="drawer-row">
         <div>
           <p class="drawer-row__title">On cash pay</p>
           <p class="muted small">${onCash
-            ? 'The drawer opens when a customer pays cash (or the cash part of a split). GCash leaves it closed.'
-            : 'The drawer stays closed during sales. Use Open drawer when you need it.'}</p>
+            ? 'Drawer opens when a customer pays cash (or the cash part of a split). GCash leaves it closed.'
+            : 'Drawer stays closed during sales. Open it below when you need it.'}</p>
         </div>
-        <button type="button" class="btn ${onCash ? 'btn--primary' : 'btn--neutral'} btn--sm" data-d="toggle" aria-pressed="${onCash}">${onCash ? 'On' : 'Off'}</button>
+        <button type="button" class="btn ${onCash ? 'btn--dark' : 'btn--neutral'} btn--sm" data-d="toggle" aria-pressed="${onCash}">${onCash ? 'On' : 'Off'}</button>
       </div>
-      <div class="drawer-row">
-        <div>
-          <p class="drawer-row__title">Open drawer</p>
-          <p class="muted small">${isOwnerUser() ? 'Opens it now.' : state.settings.drawerPinSet ? 'Needs the PIN the owner set.' : 'No PIN set yet. Ask the owner.'}</p>
-        </div>
-        <button type="button" class="btn btn--neutral btn--sm" data-d="open" ${connected ? '' : 'disabled'}>Open drawer</button>
+      <div class="drawer-section">
+        <p class="drawer-section__label">Open drawer</p>
+        ${connected ? '' : '<p class="drawer-warn">Connect the thermal printer first. The drawer is plugged into it. <button type="button" class="link-btn" data-d="printer">Printer settings</button></p>'}
+        ${owner ? `<button type="button" class="btn btn--dark btn--block" data-d="open" ${connected ? '' : 'disabled'}>Open drawer</button>`
+          : pinSet ? `
+        <div class="drawer-pin">
+          <label for="drawer-open-pin" class="sr-only">Drawer PIN</label>
+          <input id="drawer-open-pin" data-d-pin type="password" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="Enter the PIN the owner set">
+          <button type="button" class="btn btn--dark" data-d="open" ${connected ? '' : 'disabled'}>Open</button>
+        </div>` : '<p class="muted small">No drawer PIN yet. Ask the owner to set one.</p>'}
       </div>
-      ${isOwnerUser() ? `
-      <div class="drawer-pin">
-        <div class="field">
-          <label for="new-drawer-pin">${state.settings.drawerPinSet ? 'Change cashier PIN' : 'Set a PIN for cashiers'}</label>
-          <input id="new-drawer-pin" type="text" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="e.g. 2026">
+      ${owner ? `
+      <div class="drawer-section">
+        <label class="drawer-section__label" for="new-drawer-pin">${pinSet ? 'Change cashier PIN' : 'Set a PIN for cashiers'}</label>
+        <div class="drawer-pin">
+          <input id="new-drawer-pin" data-d-pin type="text" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="e.g. 2026">
+          <button type="button" class="btn btn--neutral" data-d="save-pin">Save</button>
         </div>
-        <button type="button" class="btn btn--neutral btn--sm" data-d="save-pin">Save PIN</button>
       </div>` : ''}`;
   };
+  const offs = [printer.subscribePrinter(render), on('settings', render)];
 
-  offs.push(printer.subscribePrinter(render), on('settings', render));
-  region.addEventListener('click', async (e) => {
+  const onClick = async (e) => {
     const b = e.target.closest('[data-d]');
     if (!b) return;
     if (b.dataset.d === 'printer') printerDialog();
     if (b.dataset.d === 'toggle') {
       printer.setDrawerEnabled(!printer.isDrawerEnabled());
-      toast(printer.isDrawerEnabled() ? 'On cash pay: the drawer opens when a customer pays cash.' : 'On cash pay is off.');
+      toast(printer.isDrawerEnabled() ? 'On cash pay: the drawer opens when a customer pays cash.' : 'On cash pay is off. Open the drawer here when you need it.');
     }
-    if (b.dataset.d === 'open') openDrawerDialog();
+    if (b.dataset.d === 'open') {
+      const pin = region.querySelector('#drawer-open-pin');
+      b.disabled = true;
+      try {
+        await openDrawerWithPin(pin?.value);
+        if (pin) pin.value = '';
+      } catch (err) {
+        toast(printer.printerErrorMessage(err), 'error');
+        pin?.select();
+      } finally { if (b.isConnected) b.disabled = false; }
+    }
     if (b.dataset.d === 'save-pin') {
       const input = region.querySelector('#new-drawer-pin');
       b.disabled = true;
@@ -632,10 +641,27 @@ export function cashDrawerDialog() {
         toast('Drawer PIN saved. Cashiers can use it now.');
       } catch (err) { toast(err.message, 'error'); } finally { if (b.isConnected) b.disabled = false; }
     }
-  });
-  region.addEventListener('input', (e) => { if (e.target.id === 'new-drawer-pin') e.target.value = svc.normalizePin(e.target.value).slice(0, 8); });
-  // Enter in the PIN box would submit the dialog's own form (and close it), so save instead.
-  region.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target.id === 'new-drawer-pin') { e.preventDefault(); region.querySelector('[data-d=save-pin]')?.click(); }
-  });
+  };
+  const onInput = (e) => { if (e.target.matches('[data-d-pin]')) e.target.value = svc.normalizePin(e.target.value).slice(0, 8); };
+  // Enter in a PIN box presses its button (and never submits a surrounding dialog form).
+  const onKey = (e) => {
+    if (e.key !== 'Enter' || !e.target.matches('[data-d-pin]')) return;
+    e.preventDefault();
+    e.target.closest('.drawer-pin')?.querySelector('button')?.click();
+  };
+  region.addEventListener('click', onClick);
+  region.addEventListener('input', onInput);
+  region.addEventListener('keydown', onKey);
+  return () => {
+    offs.forEach((off) => off());
+    region.removeEventListener('click', onClick);
+    region.removeEventListener('input', onInput);
+    region.removeEventListener('keydown', onKey);
+  };
+}
+
+export function cashDrawerDialog() {
+  let off = () => {};
+  const { dlg } = openDialog({ title: 'Cash drawer', cancelLabel: 'Close', body: '<div data-region="drawer"></div>', onClose: () => off() });
+  off = mountDrawerPanel(dlg.querySelector('[data-region=drawer]'));
 }
