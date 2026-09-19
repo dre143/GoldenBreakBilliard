@@ -154,6 +154,13 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 .nav__link[aria-current="page"] { color: var(--ivory); background: rgba(255, 255, 255, .08); }
 .nav__link[aria-current="page"] .ico { color: var(--amber); }
 
+.demo-note__btn {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 10px; width: 100%;
+  background: transparent; color: var(--ivory); font: inherit; font-weight: 700; cursor: pointer;
+  border: 1px solid rgba(246, 243, 236, .35); border-radius: var(--radius-sm);
+}
+.demo-note__btn:hover { background: rgba(246, 243, 236, .1); }
+.demo-note__btn .ico { width: 14px; height: 14px; }
 .demo-note {
   padding: 8px 12px; border-radius: var(--radius-sm);
   font-size: 12px; line-height: 1.4; color: rgba(246, 243, 236, .7);

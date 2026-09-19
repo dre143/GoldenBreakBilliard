@@ -171,7 +171,8 @@ function renderShell() {
           ${owner ? `<p class="nav__label">Owner</p>${['dashboard', 'reports', 'staff'].map(link).join('')}` : ''}
         </nav>
         <div class="sidebar__spacer"></div>
-        ${mode === 'demo' ? '<p class="demo-note">Demo mode · data is stored in this browser</p>' : ''}
+        ${mode === 'demo' ? `<div class="demo-note">Demo mode · data is stored in this browser
+          <button type="button" class="demo-note__btn" data-action="clear-demo">${icon('x')}Clear all sales</button></div>` : ''}
         <div class="user-chip">
           <span class="avatar" aria-hidden="true">${esc(initials(u.name))}</span>
           <span class="user-chip__text">
@@ -188,6 +189,11 @@ function renderShell() {
   const shell = root.querySelector('.shell');
   const toggle = root.querySelector('[data-action=toggle-nav]');
   root.querySelector('[data-action=sign-out]').addEventListener('click', (e) => signOut(e.currentTarget));
+  root.querySelector('[data-action=clear-demo]')?.addEventListener('click', () => {
+    if (!confirm('Clear all demo sales, expenses and open tables? Staff, tables and products stay.')) return;
+    auth.clearDemoSales();
+    toast('All demo sales cleared. Everything starts at zero.');
+  });
   toggle.addEventListener('click', () => setNav(!shell.classList.contains('nav-open')));
   root.querySelector('[data-action=close-nav]').addEventListener('click', () => setNav(false));
   shell.addEventListener('keydown', (e) => { if (e.key === 'Escape' && shell.classList.contains('nav-open')) { setNav(false); toggle.focus(); } });
