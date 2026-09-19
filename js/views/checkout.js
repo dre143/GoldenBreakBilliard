@@ -29,7 +29,7 @@ function mountPicker(el) {
     if (!state.loaded.tables) { grid.innerHTML = loadingBlock('Loading tables…'); return; }
     const active = state.tables.filter((t) => t.session);
     grid.innerHTML = active.length
-      ? active.map(poolCard).join('')
+      ? active.map((t) => poolCard(t, { picker: true })).join('')
       : emptyBlock('No open sessions.', 'Start a session from Tables, then bill it here.', '<a class="btn btn--primary" href="#/tables">Go to Tables</a>');
   };
 

@@ -1,7 +1,7 @@
 import {
   elapsedMs, currentBill, PRICING, isTimed, remainingMs, overtimeMs,
 } from '../billing.js';
-import { esc, icon, peso, fmtDuration, fmtBooking } from '../ui.js';
+import { esc, peso, fmtDuration, fmtBooking } from '../ui.js';
 
 // Live tables show a spinning 9-ball in place of the status lamp; the highlight layer stays still
 // while the inner ball (with its off-center "9") rotates, so it reads as a ball turning.
@@ -20,11 +20,11 @@ export function bookingStatus(t, elapsed) {
 
 /**
  * Top-down pool table card for the floor grid. One glance: dark navy cloth with a lit LED = In Use,
- * pale cloth with an unlit display = Available. A free table offers Open Time (runs until stopped)
- * or Set Hours (a booked number of hours). On a live table the whole card is the Stop & Bill link
- * (stretched-link pattern), so it's a single tap to Checkout.
+ * pale cloth with an unlit display = Available. The card carries no visible buttons: the whole card is
+ * the tap target (stretched-hit pattern). On the Tables screen it opens that table's actions
+ * (Open Time / Set Hours, or Stop & Bill); on the Checkout picker (picker: true) it goes straight to the bill.
  */
-export function poolCard(t) {
+export function poolCard(t, { picker = false } = {}) {
   const live = t.status === 'in_use' && Boolean(t.session);
   const stopped = live && t.session.ended;
   const timed = live && isTimed(t.session);
@@ -56,11 +56,8 @@ export function poolCard(t) {
           </dl>
         </div>
       </div>
-      ${live
-        ? `<a class="btn btn--amber btn--block btn--lg pool__cta pool__cta--stretch" href="#/checkout/${encodeURIComponent(t.id)}" data-fk="bill-${id}">${icon('stop')}Stop &amp; Bill</a>`
-        : `<div class="pool__actions">
-            <button type="button" class="btn btn--primary btn--lg" data-action="open-time" data-id="${id}" data-fk="open-${id}" aria-label="Open time on ${esc(t.name)}">${icon('play')}Open Time</button>
-            <button type="button" class="btn btn--neutral btn--lg" data-action="set-hours" data-id="${id}" data-fk="hours-${id}" aria-label="Set hours on ${esc(t.name)}">${icon('clock')}Set Hours</button>
-          </div>`}
+      ${picker
+        ? `<a class="pool__hit" href="#/checkout/${encodeURIComponent(t.id)}" data-fk="bill-${id}" aria-label="Bill ${esc(t.name)}"></a>`
+        : `<button type="button" class="pool__hit" data-action="open-table" data-id="${id}" data-fk="pool-${id}" aria-label="${esc(t.name)}, ${live ? 'in use' : 'available'}. Show actions"></button>`}
     </article>`;
 }

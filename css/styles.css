@@ -112,13 +112,15 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
   display: grid;
   grid-template-columns: var(--sidebar) minmax(0, 1fr);
   min-height: 100vh;
+  min-height: 100dvh; /* mobile browsers shrink 100vh under their own toolbar, cutting off content */
 }
 
 .sidebar {
   position: sticky; top: 0;
   height: 100vh;
+  height: 100dvh;
   display: flex; flex-direction: column; gap: 28px;
-  padding: 24px 14px 16px;
+  padding: 24px 14px calc(16px + env(safe-area-inset-bottom)) 14px;
   background: var(--felt-deep);
   color: var(--ivory);
   overflow-y: auto;
@@ -476,7 +478,7 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 }
 .pool--idle .pool__table { background: var(--wood-light); }
 .pool--live:hover .pool__table { background: var(--wood-hover); }
-.pool--live:has(.pool__cta:focus-visible) .pool__table { outline: 3px solid var(--amber); outline-offset: 3px; }
+.pool:has(.pool__hit:focus-visible) .pool__table { outline: 3px solid var(--amber); outline-offset: 3px; }
 
 .pocket {
   position: absolute; z-index: 1;
@@ -563,9 +565,6 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 .pool--idle .pool__meta dt { color: #4F574F; }
 .pool--idle .pool__meta dd { color: var(--ink); }
 
-.pool__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.pool__actions .btn { min-width: 0; padding: 0 8px; }
-.pool__actions .btn .ico { display: none; } /* two buttons share the card width; labels matter more */
 /* Booked table past its time: amber readout so staff notice at a glance. */
 .pool--overtime .pool__meta dd[data-left], .pool--overtime .pool__meta dt[data-left-label] { color: var(--led-stopped); font-weight: 700; }
 .pool--overtime .pool__table { box-shadow: inset 0 0 0 3px var(--amber); }
@@ -580,8 +579,13 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 .booking-preset input:focus-visible + span { outline: 3px solid var(--amber); outline-offset: 2px; }
 .booking-custom[hidden] { display: none; }
 
-/* Stretched link: on a live table the whole card opens Checkout (one tap), with one focusable element. */
-.pool__cta--stretch::after { content: ""; position: absolute; inset: -15px 0 0; z-index: 3; border-radius: 20px; }
+/* The whole card is one invisible button/link; the floating nameplate is included in the hit area. */
+.pool__hit {
+  position: absolute; inset: -15px 0 0; z-index: 3;
+  border: 0; border-radius: 20px; background: transparent; cursor: pointer;
+}
+.pool__hit:focus-visible { outline: none; }
+.pool:hover .pool__table { filter: brightness(.97); }
 
 /* ---------- checkout ---------- */
 
@@ -1234,12 +1238,15 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
   .topbar {
     position: sticky; top: 0; z-index: 30;
     display: flex; align-items: center; gap: 4px;
-    padding: 6px 12px 6px 6px;
+    padding: calc(6px + env(safe-area-inset-top)) 12px 6px 6px;
     background: var(--felt-deep); color: var(--ivory);
   }
   .sidebar {
     position: fixed; inset: 0 auto 0 0; z-index: 50;
+    height: 100vh;
+    height: 100dvh; /* fixed + inset 0/0 can over-constrain against the plain 100vh above otherwise */
     width: min(280px, 85vw);
+    padding-top: calc(24px + env(safe-area-inset-top));
     transform: translateX(-100%);
     visibility: hidden;
     transition: transform .2s ease, visibility .2s;
@@ -1286,3 +1293,7 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
   .nine-ball__spin { animation: none !important; } /* an infinite .01ms loop would flicker */
 }
+
+/* Actions panel that opens when a table card is tapped. */
+.table-actions { display: grid; gap: 10px; }
+.table-actions .btn { width: 100%; }
