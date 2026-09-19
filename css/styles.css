@@ -621,7 +621,6 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 .session-tools { padding: 16px 18px; }
 .session-tools__row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; }
 .quick-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.round-group { display: flex; align-items: center; gap: 6px; }
 
 .pill-action {
   display: inline-flex; align-items: center; gap: 10px;
@@ -633,33 +632,11 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 }
 .pill-action .ico { width: 20px; height: 20px; }
 .pill-action:disabled { opacity: .5; cursor: not-allowed; }
-.pill-action--round { background: var(--amber); color: var(--ink); }
-.pill-action--round:hover:not(:disabled) { background: var(--amber-hover); }
 .pill-action--item { background: var(--cue-blue); color: #fff; }
 .pill-action--item:hover:not(:disabled) { background: var(--cue-blue-hover); }
-.pill-action__count {
-  min-width: 30px; padding: 3px 9px;
-  border-radius: 999px; background: rgba(30, 27, 22, .16);
-  font-size: 17px; line-height: 1.1; text-align: center;
-}
 .icon-btn--outline { background: var(--ground); border: 1px solid var(--line); }
 .icon-btn--outline:hover:not(:disabled) { background: var(--ground-deep); }
 .icon-btn:disabled { opacity: .4; cursor: not-allowed; }
-
-.light-switch {
-  display: inline-flex; align-items: center; gap: 12px;
-  min-height: 52px; padding: 0 18px 0 8px;
-  background: var(--ground); border: 1px solid var(--line); border-radius: 999px;
-  text-align: left; cursor: pointer;
-}
-.light-switch:hover:not(:disabled) { background: var(--ground-deep); }
-.light-switch__track { position: relative; width: 48px; height: 28px; flex: none; border-radius: 999px; background: #A59D8F; transition: background-color .15s; }
-.light-switch__thumb { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: transform .15s; }
-.light-switch[aria-checked="true"] .light-switch__track { background: var(--felt); }
-.light-switch[aria-checked="true"] .light-switch__thumb { transform: translateX(20px); }
-.light-switch__text { display: flex; flex-direction: column; line-height: 1.2; }
-.light-switch__label { font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
-.light-switch__state { font-size: 15px; font-weight: 700; }
 
 .order-list {
   display: flex; flex-direction: column;

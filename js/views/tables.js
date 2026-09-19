@@ -1,20 +1,17 @@
-import { db } from '../db.js';
 import { state, on } from '../state.js';
 import * as svc from '../services.js';
 import { manageTablesDialog, bookingDialog } from '../dialogs.js';
 import { isTimed } from '../billing.js';
 import { updateTableTimers } from './shared.js';
-import { activeSales } from '../billing.js';
 import { poolCard } from './pool-card.js';
 import {
-  esc, icon, peso, todayLabel, startOfDay, fmtBooking, openDialog,
+  esc, icon, todayLabel, fmtBooking, openDialog,
   pageHeader, searchField, loadingBlock, emptyBlock, preserveFocus, busy, toast,
 } from '../ui.js';
 
 export function mount(el, ctx) {
   const owner = ctx.user.role === 'owner';
   let query = '';
-  let revenue = null;
 
   el.innerHTML = `
     ${pageHeader({
@@ -35,8 +32,7 @@ export function mount(el, ctx) {
     const count = (s) => state.tables.filter((t) => t.status === s).length;
     chips.innerHTML = `
       <li class="chip"><span class="dot dot--live" aria-hidden="true"></span>In Use <strong class="num">${count('in_use')}</strong></li>
-      <li class="chip"><span class="dot dot--idle" aria-hidden="true"></span>Available <strong class="num">${count('available')}</strong></li>
-      <li class="chip chip--revenue">Today’s table revenue <strong class="num">${revenue == null ? '—' : peso(revenue)}</strong></li>`;
+      <li class="chip"><span class="dot dot--idle" aria-hidden="true"></span>Available <strong class="num">${count('available')}</strong></li>`;
   }
 
   function renderGrid() {
@@ -54,10 +50,6 @@ export function mount(el, ctx) {
   const offs = [
     on('tables', () => { renderChips(); renderGrid(); }),
     on('tick', () => updateTableTimers(grid)),
-    db.listen('transactions', (rows) => {
-      revenue = activeSales(rows).reduce((sum, r) => sum + (r.tableFee || 0), 0);
-      renderChips();
-    }, { where: [['createdAt', '>=', startOfDay()]] }),
   ];
 
   el.querySelector('#table-search').addEventListener('input', (e) => {

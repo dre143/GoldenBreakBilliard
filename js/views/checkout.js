@@ -170,28 +170,13 @@ function mountBill(el, ctx, tableId) {
     });
   }
 
-  function renderTools(t) {
-    const rounds = t.session.rounds || 0;
-    const lightOn = Boolean(t.light);
+  function renderTools() {
     const region = $('[data-region=tools]');
     preserveFocus(region, () => {
       region.innerHTML = `
         <div class="quick-actions">
-          <div class="round-group">
-            <button type="button" class="pill-action pill-action--round" data-action="round" data-fk="round">
-              ${icon('rack')}Log Round<span class="pill-action__count num">${rounds}</span>
-            </button>
-            <button type="button" class="icon-btn icon-btn--outline" data-action="round-undo" data-fk="round-undo" aria-label="Remove last round" ${rounds ? '' : 'disabled'}>${icon('minus')}</button>
-          </div>
           <button type="button" class="pill-action pill-action--item" data-action="add-product" data-fk="add-item">${icon('plus')}Add Item</button>
-        </div>
-        <button type="button" class="light-switch" role="switch" aria-checked="${lightOn}" aria-labelledby="light-label" data-action="light" data-fk="light">
-          <span class="light-switch__track" aria-hidden="true"><span class="light-switch__thumb"></span></span>
-          <span class="light-switch__text">
-            <span class="light-switch__label" id="light-label">Table light</span>
-            <span class="light-switch__state" aria-hidden="true">${lightOn ? 'Light On' : 'Light Off'}</span>
-          </span>
-        </button>`;
+        </div>`;
     });
   }
 
@@ -230,11 +215,6 @@ function mountBill(el, ctx, tableId) {
           <dt>Table fee<span class="sum-sub"><span data-live="dur"></span> · <span data-live="breakdown"></span></span></dt>
           <dd class="num" data-live="fee"></dd>
         </div>
-        ${t.session.rounds ? `
-        <div class="sum-row sum-row--muted">
-          <dt>Rounds played</dt>
-          <dd class="num">${t.session.rounds}</dd>
-        </div>` : ''}
         ${items.map((i) => `
         <div class="sum-row">
           <dt>${i.qty} × ${esc(i.name)}</dt>
@@ -302,7 +282,7 @@ function mountBill(el, ctx, tableId) {
     title.textContent = `Checkout · ${t.name}`;
     sub.textContent = `Opened by ${t.session.openedByName || 'staff'} at ${fmtTime(t.session.startedAt)}`;
     renderTimer(t);
-    renderTools(t);
+    renderTools();
     renderItems(t);
     const n = itemsCount(t.session.items);
     $('[data-region=item-count]').textContent = `${n} item${n === 1 ? '' : 's'}`;
@@ -432,12 +412,6 @@ function mountBill(el, ctx, tableId) {
       case 'inc': return busy(btn, () => svc.changeItem(tableId, btn.dataset.pid, 1));
       case 'dec': return busy(btn, () => svc.changeItem(tableId, btn.dataset.pid, -1));
       case 'add-product': return openProductPicker();
-      case 'round': return busy(btn, () => svc.logRound(tableId, 1));
-      case 'round-undo': return busy(btn, () => svc.logRound(tableId, -1));
-      case 'light': {
-        const turnOn = btn.getAttribute('aria-checked') !== 'true';
-        return busy(btn, async () => { await svc.setLight(tableId, turnOn); toast(`${table()?.name ?? 'Table'} light ${turnOn ? 'on' : 'off'}`); });
-      }
       case 'complete': return complete(btn);
       default: return undefined;
     }

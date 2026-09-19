@@ -85,20 +85,6 @@ export function cancelGame(tableId, { reason, note = '' } = {}, user) {
   });
 }
 
-/** Per-session game counter (a running count of racks played). */
-export function logRound(tableId, delta = 1) {
-  return db.transaction(async (tx) => {
-    const t = await tx.get('tables', tableId);
-    if (!t?.session) throw new Error('This table has no open session.');
-    const rounds = Math.max(0, (t.session.rounds || 0) + delta);
-    tx.update('tables', tableId, { 'session.rounds': rounds, updatedAt: SERVER_TIME });
-    return rounds;
-  });
-}
-
-/** Physical table light. Lives on the table, not the session, so it persists between games. */
-export const setLight = (tableId, on) => db.update('tables', tableId, { light: on, updatedAt: SERVER_TIME });
-
 /** Add/remove units of a product on a table's open bill (stock is checked, deducted at checkout). */
 export function changeItem(tableId, productId, delta) {
   return db.transaction(async (tx) => {
