@@ -179,6 +179,22 @@ GCash reference number** (`gcashRef`, required by `firestore.rules`). It shows o
 (and search), and on the Daily sales report and its CSV. Every transaction stores `payments.cash` and `payments.gcash`, so
 reports can add up money by type whatever the method was. (Older `card` records still show up, as "Other".)
 
+## Thermal printer
+
+Ported from Marimar Inn (`js/printer.js`). The **Thermal printer** button in the sidebar connects a 58mm or 80mm ESC/POS
+receipt printer (the dot turns green when connected):
+
+- **Bluetooth**: Web Bluetooth, for BLE printers (Chrome/Edge).
+- **USB cable**: Web Serial, for a USB printer on a computer (Chrome/Edge).
+- **RawBT app (Android)**: most cheap 58mm printers use classic Bluetooth, which browsers can't reach. Install the free
+  RawBT app, pair the printer there, and the app hands each receipt to RawBT.
+
+Paper width (58mm = 32 characters, 80mm = 48), Print test, and a paper-style **Preview** that shows the exact lines the
+printer gets. Receipts have **Print receipt / Preview print**. The Daily report has **Print (thermal) / Preview
+(thermal)**: a compact shift-end slip with each sale, expenses, cash to count, overall sale and signature lines. The last
+printer reconnects on its own if the browser kept the permission. Receipts are plain ASCII ("P" instead of "₱") so
+no-name printers print them correctly. The cash-drawer kick from Marimar Inn isn't included (no drawer confirmed yet).
+
 ## Business day
 
 Reports group sales by business day, which starts at 6:00 AM, so a sale at 1:30 AM counts toward the night before.

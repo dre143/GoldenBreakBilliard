@@ -7,6 +7,7 @@ import {
   canCancelGame, cancelTimeLeft, CANCEL_REASONS, elapsedMs, feeBreakdown, PRICING_LABEL, PRICING, tableFee, BOOKING_PRESETS,
 } from './billing.js';
 import { serverNow } from './clock.js';
+import * as printer from './printer.js';
 
 const num = (v) => Number(String(v).trim());
 
@@ -286,7 +287,7 @@ export function staffDialog(member, currentUser) {
 export function receiptDialog(tx, { fresh = false } = {}) {
   const cancelled = Boolean(tx.gameCancelled);
   const voided = Boolean(tx.tableFeeVoided);
-  openDialog({
+  const { dlg } = openDialog({
     title: cancelled ? 'Game cancelled' : voided ? 'Table fee voided' : fresh ? 'Transaction complete' : 'Receipt',
     cancelLabel: 'Close',
     body: `
@@ -336,7 +337,28 @@ export function receiptDialog(tx, { fresh = false } = {}) {
           <div class="sum-row sum-row--strong"><dt>Change</dt><dd class="num">${peso(tx.change)}</dd></div>` : ''}
           ${voided ? `<div class="sum-row sum-row--strong"><dt>Refunded (table fee)</dt><dd class="num">${peso(tx.refundAmount)}</dd></div>` : ''}
         </dl>
-      </div>`,
+      </div>
+      <div class="receipt-print" data-region="receipt-print"></div>`,
+  });
+
+  // Thermal printing, same as Marimar Inn: print when a printer is connected, preview any time.
+  const region = dlg.querySelector('[data-region=receipt-print]');
+  const off = printer.subscribePrinter((s) => {
+    if (!region.isConnected) { off(); return; }
+    region.innerHTML = `
+      ${s.kind ? `<button type="button" class="btn btn--primary btn--sm" data-rp="print">${icon('print')}Print receipt</button>` : ''}
+      <button type="button" class="btn btn--neutral btn--sm" data-rp="preview">${icon('eye')}Preview print</button>
+      ${s.kind ? '' : '<button type="button" class="link-btn" data-rp="setup">Connect a thermal printer</button>'}`;
+  });
+  region.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-rp]');
+    if (!b) return;
+    if (b.dataset.rp === 'setup') printerDialog();
+    if (b.dataset.rp === 'preview') thermalPreviewDialog({ title: 'Receipt preview', lines: printer.previewSaleReceipt(tx), onPrint: () => printer.printSaleReceipt(tx) });
+    if (b.dataset.rp === 'print') {
+      b.disabled = true;
+      try { await printer.printSaleReceipt(tx); toast('Receipt sent to the printer.'); } catch (err) { toast(printer.printerErrorMessage(err), 'error'); } finally { b.disabled = false; }
+    }
   });
 }
 
@@ -407,4 +429,96 @@ export function cancelGameDialog(table, { onDone } = {}) {
   const off = on('tick', tick);
   tick();
   return dlg;
+}
+/* ---------- thermal printer ---------- */
+
+/** On-screen look of a thermal print: the exact lines the printer receives, on a paper strip. */
+export const paperStrip = (lines, paperWidth) => `
+  <div class="paper" style="--paper-ch:${paperWidth}">
+    <div class="paper__roll">${lines.map((l) => `<div class="paper__line paper__line--${l.align}">${esc(l.text) || '&nbsp;'}</div>`).join('')}</div>
+  </div>`;
+
+/** Preview of a thermal print, with a Print button when a printer is connected. */
+export function thermalPreviewDialog({ title = 'Print preview', lines, onPrint }) {
+  const connected = Boolean(printer.getPrinterState().kind);
+  openDialog({
+    title,
+    cancelLabel: 'Close',
+    submitLabel: 'Print',
+    body: `
+      <p class="muted small">This is how it will look on the thermal printer.${connected ? '' : ' Connect a printer (sidebar) to print it.'}</p>
+      ${paperStrip(lines, printer.getPrinterState().paperWidth)}`,
+    onSubmit: connected && onPrint ? async () => {
+      await onPrint();
+      toast('Sent to the printer.');
+    } : undefined,
+  });
+}
+
+/**
+ * Thermal printer setup (Marimar Inn's printer panel): connect by Bluetooth, USB, or the RawBT app,
+ * choose the paper width, preview and print a test page, disconnect or forget the saved printer.
+ */
+export function printerDialog() {
+  let off = () => {};
+  const { dlg } = openDialog({
+    title: 'Thermal printer',
+    cancelLabel: 'Close',
+    body: '<div data-region="printer"></div>',
+    onClose: () => off(),
+  });
+  const region = dlg.querySelector('[data-region=printer]');
+
+  const render = (s) => {
+    const kindLabel = { bluetooth: 'Bluetooth', serial: 'USB', rawbt: 'via RawBT app' }[s.kind] || '';
+    region.innerHTML = `
+      <p class="printer-status">
+        <span class="printer-dot ${s.kind ? 'is-on' : ''}" aria-hidden="true"></span>
+        ${s.kind ? `<strong>Connected</strong> · ${esc(s.name)} · ${kindLabel}` : '<strong>Not connected</strong>'}
+      </p>
+      ${s.kind ? `
+      <div class="printer-actions">
+        <button type="button" class="btn btn--neutral" data-p="test">${icon('print')}Print test</button>
+        <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
+        <button type="button" class="btn btn--neutral" data-p="disconnect">Disconnect</button>
+      </div>` : `
+      <div class="printer-actions printer-actions--stack">
+        <button type="button" class="btn btn--neutral" data-p="bluetooth" ${printer.supports.bluetooth() ? '' : 'disabled'}>Connect via Bluetooth</button>
+        <button type="button" class="btn btn--neutral" data-p="serial" ${printer.supports.serial() ? '' : 'disabled'}>Connect via USB cable</button>
+        <button type="button" class="btn btn--neutral" data-p="rawbt">Print via RawBT app (Android)</button>
+        <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
+      </div>
+      <p class="muted small">Most cheap 58mm printers use classic Bluetooth, which browsers can't reach directly. On an Android
+        phone or tablet, install the free <strong>RawBT</strong> app, pair the printer in RawBT, then choose "Print via RawBT app".
+        A USB printer works from Chrome or Edge on a computer.</p>`}
+      <div class="field">
+        <label for="paper-width">Paper width</label>
+        <select id="paper-width" data-p="paper">
+          <option value="32" ${s.paperWidth === 32 ? 'selected' : ''}>58mm (32 characters)</option>
+          <option value="48" ${s.paperWidth === 48 ? 'selected' : ''}>80mm (48 characters)</option>
+        </select>
+      </div>
+      <button type="button" class="link-btn" data-p="forget">Forget saved printer</button>`;
+  };
+  off = printer.subscribePrinter(render);
+
+  region.addEventListener('change', (e) => { if (e.target.dataset.p === 'paper') printer.setPaperWidth(Number(e.target.value)); });
+  region.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-p]');
+    if (!b || b.tagName === 'SELECT') return;
+    const run = async (fn, ok) => {
+      b.disabled = true;
+      try { await fn(); if (ok) toast(ok); } catch (err) { if (err?.name !== 'NotFoundError') toast(printer.printerErrorMessage(err), 'error'); } finally { if (b.isConnected) b.disabled = false; }
+    };
+    switch (b.dataset.p) {
+      case 'bluetooth': return run(printer.connectBluetooth, 'Thermal printer connected.');
+      case 'serial': return run(printer.connectSerial, 'Thermal printer connected.');
+      case 'rawbt': return run(async () => printer.connectRawBt(), 'Receipts will print through the RawBT app.');
+      case 'test': return run(printer.printTestPage, 'Test sent to the printer.');
+      case 'preview': return thermalPreviewDialog({ title: 'Printer test preview', lines: printer.previewTestPage(), onPrint: printer.printTestPage });
+      case 'disconnect': printer.disconnectPrinter(); return toast('Printer disconnected.');
+      case 'forget': return run(printer.forgetPrinter, 'Saved printer forgotten.');
+      default: return undefined;
+    }
+  });
 }

@@ -9,7 +9,8 @@ import { state, on } from '../state.js';
 import * as rep from '../reporting.js';
 import * as svc from '../services.js';
 import { barChart } from './charts.js';
-import { receiptDialog } from '../dialogs.js';
+import { receiptDialog, printerDialog, thermalPreviewDialog } from '../dialogs.js';
+import * as printer from '../printer.js';
 import {
   esc, icon, peso, fmtTime, fmtDateTime, fmtHuman, fmtBooking, METHOD_LABEL, pageHeader, loadingBlock, emptyBlock,
   toast, busy, openDialog,
@@ -116,9 +117,12 @@ function downloadCsv(filename, rows) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const actionButtons = () => `
+const actionButtons = (thermal = false) => `
   <div class="report-controls__actions">
     <button type="button" class="btn btn--neutral" data-action="csv">${icon('download')}Export CSV</button>
+    ${thermal ? `
+    <button type="button" class="btn btn--neutral" data-action="thermal-preview">${icon('eye')}Preview (thermal)</button>
+    <button type="button" class="btn btn--neutral" data-action="thermal">${icon('receipt')}Print (thermal)</button>` : ''}
     <button type="button" class="btn btn--neutral" data-action="print">${icon('print')}Print / PDF</button>
   </div>`;
 
@@ -238,7 +242,7 @@ function dailyTab(panel, ctx) {
           Day and Night shifts
         </label>` : ''}
       </div>
-      ${actionButtons()}
+      ${actionButtons(true)}
     </div>
     <section class="card no-print" data-region="expense-form" aria-labelledby="exp-form-title"></section>
     <div class="report-body" data-region="body"></div>`;
@@ -507,8 +511,28 @@ function dailyTab(panel, ctx) {
     line[input.dataset.field] = input.value;
     refreshExpenseTotals();
   };
+  /** The Daily Sales Report in the compact thermal layout (Marimar Inn's shift-end slip). */
+  const thermalData = () => ({
+    dateLabel: rep.keyLabel(key, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }), // fits 58mm paper
+    timeLabel: timeText(),
+    shiftLabel: shiftName(),
+    txs,
+    expenses,
+    totals: rep.totals(txs, expenses),
+  });
+
+  async function printThermal(button) {
+    if (!txs || !expenses) return;
+    if (!printer.getPrinterState().kind) { printerDialog(); return; }
+    await busy(button, async () => { await printer.printDailySales(thermalData()); toast('Daily sales report sent to the printer.'); });
+  }
+
   const onClick = (e) => {
     const action = e.target.closest('[data-action]')?.dataset.action;
+    if (action === 'thermal') printThermal(e.target.closest('button'));
+    if (action === 'thermal-preview' && txs && expenses) {
+      thermalPreviewDialog({ title: 'Daily sales report preview', lines: printer.previewDailySales(thermalData()), onPrint: () => printer.printDailySales(thermalData()) });
+    }
     if (action === 'add-line') {
       lines.push(newLine());
       renderExpenseForm();

@@ -12,6 +12,8 @@ import * as transactionsView from './views/transactions.js';
 import * as dashboardView from './views/dashboard.js';
 import * as staffView from './views/staff.js';
 import * as reportsView from './views/reports.js';
+import * as printer from './printer.js';
+import { printerDialog } from './dialogs.js';
 
 const root = document.getElementById('root');
 
@@ -28,6 +30,7 @@ const ROUTES = {
 
 let sessionCleanups = [];
 let viewCleanup = null;
+let printerCleanup = null;
 let heartbeat = null;
 
 setInterval(() => emit('tick'), 1000);
@@ -102,6 +105,7 @@ function startData() {
     db.listen('restocks', (rows) => set('restocks', rows), { where: [['createdAt', '>=', addDays(Date.now(), -7)]] }, onDataError),
     db.listenDoc('settings', 'shifts', (doc) => set('settings', { ...state.settings, twoShifts: !!doc?.twoShifts }), onDataError),
   ];
+  printer.tryReconnect(); // quietly reconnect the last thermal printer, if the browser kept permission
   const beat = () => state.user && svc.setPresence(state.user.uid, true).catch(() => {});
   beat();
   syncClock();
@@ -171,6 +175,11 @@ function renderShell() {
         <div class="sidebar__spacer"></div>
         ${mode === 'demo' ? `<div class="demo-note">Demo mode · data is stored in this browser
           <button type="button" class="demo-note__btn" data-action="clear-demo">${icon('x')}Clear all sales</button></div>` : ''}
+        <button type="button" class="printer-btn" data-action="printer">
+          ${icon('print')}<span class="printer-btn__text">Thermal printer</span>
+          <span class="printer-dot" data-region="printer-dot" aria-hidden="true"></span>
+          <span class="sr-only" data-region="printer-state"></span>
+        </button>
         <div class="user-chip">
           <span class="avatar" aria-hidden="true">${esc(initials(u.name))}</span>
           <span class="user-chip__text">
@@ -187,6 +196,14 @@ function renderShell() {
   const shell = root.querySelector('.shell');
   const toggle = root.querySelector('[data-action=toggle-nav]');
   root.querySelector('[data-action=sign-out]').addEventListener('click', (e) => signOut(e.currentTarget));
+  root.querySelector('[data-action=printer]').addEventListener('click', () => { setNav(false); printerDialog(); });
+  printerCleanup?.();
+  printerCleanup = printer.subscribePrinter((s) => {
+    const dot = root.querySelector('[data-region=printer-dot]');
+    if (!dot) return;
+    dot.classList.toggle('is-on', Boolean(s.kind));
+    root.querySelector('[data-region=printer-state]').textContent = s.kind ? `, connected: ${s.name}` : ', not connected';
+  });
   root.querySelector('[data-action=clear-demo]')?.addEventListener('click', () => {
     if (!confirm('Clear all demo sales, expenses and open tables? Staff, tables and products stay.')) return;
     auth.clearDemoSales();
