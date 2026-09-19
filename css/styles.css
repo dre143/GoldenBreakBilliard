@@ -787,8 +787,12 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 .plain-table td { padding: 8px; border-top: 1px solid var(--line); }
 .plain-table tfoot td { background: var(--ground); font-weight: 600; }
 
-.link-btn { padding: 0; background: none; border: 0; font: inherit; font-size: 12px; color: var(--felt); text-decoration: underline; cursor: pointer; }
+.link-btn { padding: 0; background: none; border: 0; font: inherit; font-size: 13px; color: var(--felt); text-decoration: underline; cursor: pointer; }
 .link-btn--danger { color: var(--danger-ink); }
+.tx-rule { font-size: 13px; color: var(--ink-soft); max-width: 80ch; }
+.tx-voided { display: block; font-size: 12px; color: var(--danger-ink); }
+.report-controls .search input { width: 260px; }
+@media (max-width: 560px) { .report-controls .search, .report-controls .search input { width: 100%; } }
 
 .pay-strip {
   display: flex; flex-wrap: wrap; gap: 6px 24px; padding: 12px 14px;
