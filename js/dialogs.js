@@ -522,3 +522,107 @@ export function printerDialog() {
     }
   });
 }
+/* ---------- cash drawer (Marimar Inn) ---------- */
+
+const isOwnerUser = () => state.user?.role === 'owner';
+
+/** Open the drawer: the owner directly, a cashier with the PIN the owner set. */
+export function openDrawerDialog() {
+  if (isOwnerUser()) {
+    printer.openCashDrawer()
+      .then(() => toast('Drawer opened.'))
+      .catch((err) => toast(printer.printerErrorMessage(err), 'error'));
+    return;
+  }
+  if (!state.settings.drawerPinSet) {
+    toast('No drawer PIN yet. Ask the owner to set one (Cash drawer in the sidebar).', 'error');
+    return;
+  }
+  openDialog({
+    title: 'Open cash drawer',
+    submitLabel: 'Open drawer',
+    body: `
+      <div class="field">
+        <label for="drawer-pin">Drawer PIN</label>
+        <input id="drawer-pin" name="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="8" required autofocus>
+      </div>
+      <p class="muted small">Enter the PIN the owner gave you.</p>`,
+    async onSubmit(fd) {
+      if (!(await svc.verifyDrawerPin(fd.get('pin')))) throw new Error('That PIN doesn’t match. Ask the owner.');
+      await printer.openCashDrawer();
+      toast('Drawer opened.');
+    },
+  });
+}
+
+/**
+ * Cash drawer panel: "On cash pay" switch (this device), Open drawer, and for the owner the drawer PIN.
+ * The drawer is plugged into the thermal printer, so the printer has to be connected.
+ */
+export function cashDrawerDialog() {
+  const offs = [];
+  const { dlg } = openDialog({
+    title: 'Cash drawer',
+    cancelLabel: 'Close',
+    body: '<div data-region="drawer"></div>',
+    onClose: () => offs.forEach((off) => off()),
+  });
+  const region = dlg.querySelector('[data-region=drawer]');
+
+  const render = () => {
+    const connected = Boolean(printer.getPrinterState().kind);
+    const onCash = printer.isDrawerEnabled();
+    region.innerHTML = `
+      ${connected ? '' : `
+      <p class="drawer-warn">The drawer is plugged into the thermal printer. <button type="button" class="link-btn" data-d="printer">Connect the printer</button> first.</p>`}
+      <div class="drawer-row">
+        <div>
+          <p class="drawer-row__title">On cash pay</p>
+          <p class="muted small">${onCash
+            ? 'The drawer opens when a customer pays cash (or the cash part of a split). GCash leaves it closed.'
+            : 'The drawer stays closed during sales. Use Open drawer when you need it.'}</p>
+        </div>
+        <button type="button" class="btn ${onCash ? 'btn--primary' : 'btn--neutral'} btn--sm" data-d="toggle" aria-pressed="${onCash}">${onCash ? 'On' : 'Off'}</button>
+      </div>
+      <div class="drawer-row">
+        <div>
+          <p class="drawer-row__title">Open drawer</p>
+          <p class="muted small">${isOwnerUser() ? 'Opens it now.' : state.settings.drawerPinSet ? 'Needs the PIN the owner set.' : 'No PIN set yet. Ask the owner.'}</p>
+        </div>
+        <button type="button" class="btn btn--neutral btn--sm" data-d="open" ${connected ? '' : 'disabled'}>Open drawer</button>
+      </div>
+      ${isOwnerUser() ? `
+      <div class="drawer-pin">
+        <div class="field">
+          <label for="new-drawer-pin">${state.settings.drawerPinSet ? 'Change cashier PIN' : 'Set a PIN for cashiers'}</label>
+          <input id="new-drawer-pin" type="text" inputmode="numeric" autocomplete="off" maxlength="8" placeholder="e.g. 2026">
+        </div>
+        <button type="button" class="btn btn--neutral btn--sm" data-d="save-pin">Save PIN</button>
+      </div>` : ''}`;
+  };
+
+  offs.push(printer.subscribePrinter(render), on('settings', render));
+  region.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-d]');
+    if (!b) return;
+    if (b.dataset.d === 'printer') printerDialog();
+    if (b.dataset.d === 'toggle') {
+      printer.setDrawerEnabled(!printer.isDrawerEnabled());
+      toast(printer.isDrawerEnabled() ? 'On cash pay: the drawer opens when a customer pays cash.' : 'On cash pay is off.');
+    }
+    if (b.dataset.d === 'open') openDrawerDialog();
+    if (b.dataset.d === 'save-pin') {
+      const input = region.querySelector('#new-drawer-pin');
+      b.disabled = true;
+      try {
+        await svc.setDrawerPin(input.value);
+        toast('Drawer PIN saved. Cashiers can use it now.');
+      } catch (err) { toast(err.message, 'error'); } finally { if (b.isConnected) b.disabled = false; }
+    }
+  });
+  region.addEventListener('input', (e) => { if (e.target.id === 'new-drawer-pin') e.target.value = svc.normalizePin(e.target.value).slice(0, 8); });
+  // Enter in the PIN box would submit the dialog's own form (and close it), so save instead.
+  region.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.id === 'new-drawer-pin') { e.preventDefault(); region.querySelector('[data-d=save-pin]')?.click(); }
+  });
+}

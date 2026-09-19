@@ -310,6 +310,34 @@ export function recordExpenses(lines, user) {
 
 export const removeExpense = (id) => db.remove('expenses', id);
 
+/* ---------- cash drawer PIN (Marimar Inn) ----------
+ * The owner sets a PIN; a cashier types it to open the drawer outside a sale (e.g. to count cash).
+ * Only a SHA-256 hash is stored (settings/cashDrawer.pinHash), never the PIN. A short numeric PIN isn't
+ * strong security, it just stops the drawer being opened without the code the owner gave out.
+ */
+
+/** Digits only, including full-width digits some tablet keyboards type. */
+export const normalizePin = (pin) => String(pin ?? '').normalize('NFKC').replace(/\D/g, '');
+
+async function hashPin(pin) {
+  if (!globalThis.crypto?.subtle) throw new Error('This device can’t check a PIN. Open the app in Chrome.');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export async function setDrawerPin(pin) {
+  const digits = normalizePin(pin);
+  if (digits.length < 4) throw new Error('Use at least 4 digits.');
+  await db.set('settings', 'cashDrawer', { pinHash: await hashPin(digits), updatedAt: SERVER_TIME }, { merge: true });
+}
+
+export async function verifyDrawerPin(pin) {
+  const digits = normalizePin(pin);
+  if (!digits) return false;
+  const stored = (await db.get('settings', 'cashDrawer'))?.pinHash;
+  return Boolean(stored) && (await hashPin(digits)) === stored;
+}
+
 /** Owner switch: one shift per business day (default), or split into Day and Night shifts. */
 export const setTwoShifts = (on) =>
   db.set('settings', 'shifts', { twoShifts: !!on, updatedAt: SERVER_TIME }, { merge: true }).then(() => !!on);

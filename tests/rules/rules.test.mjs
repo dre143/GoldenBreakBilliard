@@ -393,6 +393,13 @@ test('settings: staff read, only the owner switches Day/Night shifts', async () 
   await assertSucceeds(getDoc(doc(as('joy'), 'settings/shifts')));
 });
 
+test('settings: only the owner sets the cash drawer PIN; staff can read it to check a PIN', async () => {
+  await assertFails(setDoc(doc(as('joy'), 'settings/cashDrawer'), { pinHash: 'x' }));
+  await assertSucceeds(setDoc(doc(as('owner'), 'settings/cashDrawer'), { pinHash: 'abc123' }));
+  await assertSucceeds(getDoc(doc(as('joy'), 'settings/cashDrawer')));
+  await assertFails(getDoc(doc(env.unauthenticatedContext().firestore(), 'settings/cashDrawer')));
+});
+
 /* ---------------- clock & presence ---------------- */
 
 test('clock probe and presence must use server time', async () => {

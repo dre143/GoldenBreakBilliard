@@ -176,6 +176,12 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
   color: rgba(246, 243, 236, .72); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
 }
 .printer-btn:hover { color: var(--ivory); background: rgba(255, 255, 255, .04); }
+.printer-btn--drawer { margin-top: -26px; }
+.drawer-warn { padding: 10px 12px; border-radius: var(--radius-sm); background: #FFF4DB; color: #7A5200; font-size: 13px; }
+.drawer-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.drawer-row__title { font-weight: 700; font-size: 14px; }
+.drawer-pin { display: flex; align-items: flex-end; gap: 10px; padding-top: 12px; }
+.drawer-pin .field { flex: 1; }
 .printer-btn__text { flex: 1; text-align: left; }
 .printer-dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(160, 160, 160, .55); flex: none; }
 .printer-dot.is-on { background: #3FB67A; box-shadow: 0 0 0 3px rgba(63, 182, 122, .2); }

@@ -5,6 +5,7 @@ import { state, on } from '../state.js';
 import * as svc from '../services.js';
 import { round2, itemsTotal, itemsCount } from '../billing.js';
 import { receiptDialog } from '../dialogs.js';
+import * as printer from '../printer.js';
 import {
   esc, icon, peso, thumb, pageHeader, emptyBlock, busy, toast, openDialog, METHOD_LABEL, preserveFocus,
   gcashRefField, wireGcashRef,
@@ -238,6 +239,8 @@ export function mount(el, ctx) {
     btn.disabled = true;
     try {
       const record = await svc.completeQuickSale({ items: cart, method, tendered, cashPart, gcashRef }, ctx.user);
+      // Cash changed hands: open the drawer (if the printer is connected and "On cash pay" is on).
+      printer.kickDrawerForCash(record.payments?.cash).then((err) => err && toast(`Sold, but the drawer said: ${err}`, 'error'));
       location.hash = '#/tables';
       receiptDialog(record, { fresh: true });
     } catch (err) {

@@ -9,7 +9,7 @@ import { state, on } from '../state.js';
 import * as rep from '../reporting.js';
 import * as svc from '../services.js';
 import { barChart } from './charts.js';
-import { receiptDialog, printerDialog, thermalPreviewDialog } from '../dialogs.js';
+import { receiptDialog, printerDialog, thermalPreviewDialog, cashDrawerDialog, openDrawerDialog } from '../dialogs.js';
 import * as printer from '../printer.js';
 import {
   esc, icon, peso, fmtTime, fmtDateTime, fmtHuman, fmtBooking, METHOD_LABEL, pageHeader, loadingBlock, emptyBlock,
@@ -425,13 +425,14 @@ function dailyTab(panel, ctx) {
       <section class="card end-shift no-print" aria-labelledby="end-shift-title">
         <div>
           <h2 class="card-title" id="end-shift-title">End of shift</h2>
-          <p class="card-sub">Count the cash in the drawer against this report, then print or export it.</p>
+          <p class="card-sub">Open the cash drawer, count the cash against this report, then print or export it.</p>
         </div>
         <dl class="end-shift__figures">
           <div><dt>Cash collected</dt><dd class="num">${peso(t.cash)}</dd></div>
           <div><dt>Expenses</dt><dd class="num">− ${peso(t.expenses)}</dd></div>
           <div class="end-shift__total"><dt>Cash to count</dt><dd class="num">${peso(t.cashToCount)}</dd></div>
         </dl>
+        <button type="button" class="btn btn--neutral" data-action="open-drawer">${icon('box')}Open drawer</button>
       </section>
 
       <div class="stats stats--6 no-print">
@@ -530,6 +531,10 @@ function dailyTab(panel, ctx) {
   const onClick = (e) => {
     const action = e.target.closest('[data-action]')?.dataset.action;
     if (action === 'thermal') printThermal(e.target.closest('button'));
+    if (action === 'open-drawer') {
+      if (!printer.getPrinterState().kind) cashDrawerDialog(); // explains that the printer must be connected
+      else openDrawerDialog();
+    }
     if (action === 'thermal-preview' && txs && expenses) {
       thermalPreviewDialog({ title: 'Daily sales report preview', lines: printer.previewDailySales(thermalData()), onPrint: () => printer.printDailySales(thermalData()) });
     }

@@ -468,6 +468,44 @@ function dailySalesReceipt({ dateLabel, timeLabel, shiftLabel, txs, expenses, to
 export const previewDailySales = (data) => dailySalesReceipt(data).preview;
 export const printDailySales = (data) => send(dailySalesReceipt(data).encode());
 
+/* ---------- cash drawer ----------
+ * The drawer is cabled into the printer's RJ11 "DK" port and opens when the printer gets an ESC p pulse.
+ * Same kick as Marimar Inn: pin 5 first, then pin 2 as a second job, because different drawers are
+ * wired to different pins. Needs a real connection (Bluetooth or USB); RawBT only forwards the bytes.
+ */
+const DRAWER_KEY = 'goldenbreak:cash-drawer-on-cash';
+
+const drawerPulse = (pin) => [0x07, 0x1b, 0x70, pin, 0x32, 0xfa]; // BEL + ESC p m t1 t2
+
+/** "On cash pay" switch (this device only): open the drawer when a payment includes cash. On by default. */
+export function isDrawerEnabled() {
+  try { return localStorage.getItem(DRAWER_KEY) !== '0'; } catch { return true; }
+}
+export function setDrawerEnabled(on) {
+  try { localStorage.setItem(DRAWER_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+  emit();
+}
+
+/** Opens the cash drawer through the connected printer. */
+export async function openCashDrawer() {
+  if (!state.kind) throw new Error('Connect the thermal printer first. The drawer is wired into it.');
+  await send(Uint8Array.from([0x1b, 0x40, ...drawerPulse(1)]));
+  try {
+    await sleep(700);
+    await send(Uint8Array.from(drawerPulse(0)));
+  } catch { /* pin 5 already went out; don't fail the sale if pin 2 is ignored */ }
+}
+
+/**
+ * After a sale: open the drawer only when cash changed hands (a cash or split payment), the printer is
+ * connected, and "On cash pay" is on. GCash-only payments leave it closed. Never throws; returns an
+ * error message for the caller to show, or null.
+ */
+export async function kickDrawerForCash(cashAmount) {
+  if (!(cashAmount > 0) || !state.kind || !isDrawerEnabled()) return null;
+  try { await openCashDrawer(); return null; } catch (err) { return printerErrorMessage(err); }
+}
+
 function testPage() {
   const e = new EscPosBuilder();
   e.initialize().align('center').line(HALL).line('Printer test').newline()

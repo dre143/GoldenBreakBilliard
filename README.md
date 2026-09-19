@@ -193,7 +193,21 @@ Paper width (58mm = 32 characters, 80mm = 48), Print test, and a paper-style **P
 printer gets. Receipts have **Print receipt / Preview print**. The Daily report has **Print (thermal) / Preview
 (thermal)**: a compact shift-end slip with each sale, expenses, cash to count, overall sale and signature lines. The last
 printer reconnects on its own if the browser kept the permission. Receipts are plain ASCII ("P" instead of "₱") so
-no-name printers print them correctly. The cash-drawer kick from Marimar Inn isn't included (no drawer confirmed yet).
+no-name printers print them correctly.
+
+### Cash drawer
+
+Also from Marimar Inn. The drawer plugs into the printer's drawer (RJ11) port and opens through the printer, so the
+thermal printer must be connected. **Cash drawer** in the sidebar:
+
+- **On cash pay** (on by default, per device): the drawer opens after a sale that took cash, including the cash part
+  of a split. GCash leaves it closed.
+- **Open drawer**: the owner opens it directly; a cashier needs the **drawer PIN**. It's also on the Daily report's
+  End of shift card, for counting cash.
+- **Drawer PIN** (owner only): stored as a SHA-256 hash in `settings/cashDrawer`, never as the digits.
+
+The kick is the same as Marimar Inn's: an ESC p pulse on pin 5, then pin 2 as a second job, because drawers are wired
+to either pin.
 
 ## Business day
 

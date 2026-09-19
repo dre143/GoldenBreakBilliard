@@ -5,6 +5,7 @@ import {
   billableMs, isTimed, plannedMs, remainingMs, overtimeMs, canCancelGame, cancelTimeLeft,
 } from '../billing.js';
 import { receiptDialog, bookingDialog, cancelGameDialog } from '../dialogs.js';
+import * as printer from '../printer.js';
 import { updateTableTimers } from './shared.js';
 import { poolCard } from './pool-card.js';
 import {
@@ -382,6 +383,8 @@ function mountBill(el, ctx, tableId) {
     btn.disabled = true;
     try {
       const record = await svc.completeCheckout(tableId, { method, tendered, cashPart, gcashRef, expectedTotal }, ctx.user);
+      // Cash changed hands: open the drawer (if the printer is connected and "On cash pay" is on).
+      printer.kickDrawerForCash(record.payments?.cash).then((err) => err && toast(`Paid, but the drawer said: ${err}`, 'error'));
       location.hash = '#/tables';
       receiptDialog(record, { fresh: true });
     } catch (err) {

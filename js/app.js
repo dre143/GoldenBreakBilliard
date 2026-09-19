@@ -13,7 +13,7 @@ import * as dashboardView from './views/dashboard.js';
 import * as staffView from './views/staff.js';
 import * as reportsView from './views/reports.js';
 import * as printer from './printer.js';
-import { printerDialog } from './dialogs.js';
+import { printerDialog, cashDrawerDialog } from './dialogs.js';
 
 const root = document.getElementById('root');
 
@@ -104,6 +104,7 @@ function startData() {
     db.listen('users', (rows) => set('users', rows.sort(byName)), {}, onDataError),
     db.listen('restocks', (rows) => set('restocks', rows), { where: [['createdAt', '>=', addDays(Date.now(), -7)]] }, onDataError),
     db.listenDoc('settings', 'shifts', (doc) => set('settings', { ...state.settings, twoShifts: !!doc?.twoShifts }), onDataError),
+    db.listenDoc('settings', 'cashDrawer', (doc) => set('settings', { ...state.settings, drawerPinSet: !!doc?.pinHash }), onDataError),
   ];
   printer.tryReconnect(); // quietly reconnect the last thermal printer, if the browser kept permission
   const beat = () => state.user && svc.setPresence(state.user.uid, true).catch(() => {});
@@ -180,6 +181,9 @@ function renderShell() {
           <span class="printer-dot" data-region="printer-dot" aria-hidden="true"></span>
           <span class="sr-only" data-region="printer-state"></span>
         </button>
+        <button type="button" class="printer-btn printer-btn--drawer" data-action="drawer">
+          ${icon('box')}<span class="printer-btn__text">Cash drawer</span>
+        </button>
         <div class="user-chip">
           <span class="avatar" aria-hidden="true">${esc(initials(u.name))}</span>
           <span class="user-chip__text">
@@ -197,6 +201,7 @@ function renderShell() {
   const toggle = root.querySelector('[data-action=toggle-nav]');
   root.querySelector('[data-action=sign-out]').addEventListener('click', (e) => signOut(e.currentTarget));
   root.querySelector('[data-action=printer]').addEventListener('click', () => { setNav(false); printerDialog(); });
+  root.querySelector('[data-action=drawer]').addEventListener('click', () => { setNav(false); cashDrawerDialog(); });
   printerCleanup?.();
   printerCleanup = printer.subscribePrinter((s) => {
     const dot = root.querySelector('[data-region=printer-dot]');
