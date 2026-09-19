@@ -195,6 +195,13 @@ printer gets. Receipts have **Print receipt / Preview print**. The Daily report 
 printer reconnects on its own if the browser kept the permission. Receipts are plain ASCII ("P" instead of "₱") so
 no-name printers print them correctly.
 
+### Tablet app (full screen, direct Bluetooth)
+
+`android-app/` is the Golden Break tablet app, copied from Marimar Inn. It's a small Android app that opens the live
+site full screen and prints straight to a paired Bluetooth thermal printer, no RawBT. Inside it, the Thermal printer
+panel lists the printers paired in Android Settings. See `android-app/README.md` for installing and building.
+`sw.js` keeps a saved copy of the app so it still opens when the tablet loses internet.
+
 ### Cash drawer
 
 Also from Marimar Inn. The drawer plugs into the printer's drawer (RJ11) port and opens through the printer, so the

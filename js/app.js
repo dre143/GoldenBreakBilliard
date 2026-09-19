@@ -17,6 +17,9 @@ import { printerDialog, cashDrawerDialog } from './dialogs.js';
 
 const root = document.getElementById('root');
 
+// Offline safety net (sw.js): lets the app reopen from its saved copy when the tablet has no internet.
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
 const ROUTES = {
   tables: { label: 'Tables', icon: 'tables', view: tablesView },
   inventory: { label: 'Inventory', icon: 'box', view: inventoryView },

@@ -470,7 +470,8 @@ export function printerDialog() {
   const region = dlg.querySelector('[data-region=printer]');
 
   const render = (s) => {
-    const kindLabel = { bluetooth: 'Bluetooth', serial: 'USB', rawbt: 'via RawBT app' }[s.kind] || '';
+    const kindLabel = { bluetooth: 'Bluetooth', serial: 'USB', rawbt: 'via RawBT app', native: 'Tablet Bluetooth' }[s.kind] || '';
+    const paired = !s.kind && printer.isNativeApp() ? printer.listNativePrinters() : null;
     region.innerHTML = `
       <p class="printer-status">
         <span class="printer-dot ${s.kind ? 'is-on' : ''}" aria-hidden="true"></span>
@@ -481,7 +482,14 @@ export function printerDialog() {
         <button type="button" class="btn btn--neutral" data-p="test">${icon('print')}Print test</button>
         <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
         <button type="button" class="btn btn--neutral" data-p="disconnect">Disconnect</button>
-      </div>` : `
+      </div>` : paired ? `
+      <div class="printer-actions printer-actions--stack">
+        ${paired.length ? paired.map((d) => `<button type="button" class="btn btn--neutral" data-p="native" data-id="${esc(d.id)}">${esc(d.name)}</button>`).join('')
+          : '<p class="muted small">No paired printers yet. Pair the thermal printer in Android Settings → Bluetooth first, then tap Refresh.</p>'}
+        <button type="button" class="btn btn--neutral" data-p="refresh">Refresh printer list</button>
+        <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
+      </div>
+      <p class="muted small">Tap the printer to connect. It connects over the tablet's own Bluetooth, so no extra app is needed.</p>` : `
       <div class="printer-actions printer-actions--stack">
         <button type="button" class="btn btn--neutral" data-p="bluetooth" ${printer.supports.bluetooth() ? '' : 'disabled'}>Connect via Bluetooth</button>
         <button type="button" class="btn btn--neutral" data-p="serial" ${printer.supports.serial() ? '' : 'disabled'}>Connect via USB cable</button>
@@ -514,6 +522,11 @@ export function printerDialog() {
       case 'bluetooth': return run(printer.connectBluetooth, 'Thermal printer connected.');
       case 'serial': return run(printer.connectSerial, 'Thermal printer connected.');
       case 'rawbt': return run(async () => printer.connectRawBt(), 'Receipts will print through the RawBT app.');
+      case 'native': {
+        const device = printer.listNativePrinters().find((d) => d.id === b.dataset.id);
+        return device && run(async () => printer.connectNative(device), `Connected to ${device.name}.`);
+      }
+      case 'refresh': return render(printer.getPrinterState());
       case 'test': return run(printer.printTestPage, 'Test sent to the printer.');
       case 'preview': return thermalPreviewDialog({ title: 'Printer test preview', lines: printer.previewTestPage(), onPrint: printer.printTestPage });
       case 'disconnect': printer.disconnectPrinter(); return toast('Printer disconnected.');

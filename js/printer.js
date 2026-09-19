@@ -269,6 +269,50 @@ if (typeof navigator !== 'undefined' && navigator.serial) {
   navigator.serial.addEventListener('disconnect', (e) => { if (e.target === serial) onDisconnected(); });
 }
 
+/* ---------- Golden Break tablet app (android-app/) ----------
+ * Inside the tablet app, the page gets a native Bluetooth bridge (window.GoldenBreakNativePrinter, see
+ * PrinterBridge.kt). It prints over classic Bluetooth, which browsers can't do, so cheap 58mm printers
+ * work with no RawBT: pair the printer once in Android Settings, then tap it in the printer panel.
+ */
+
+function nativeBridge() {
+  const bridge = typeof window !== 'undefined' ? window.GoldenBreakNativePrinter : null;
+  try { return bridge && bridge.isNative() ? bridge : null; } catch { return null; }
+}
+
+export const isNativeApp = () => Boolean(nativeBridge());
+
+const PRINTER_NAME_HINT = /printer|print|pos|rpp|mtp|xprinter|xp-|zjiang|jp58|jp-|thermal|gp-|58mm|80mm/i;
+
+/** Bluetooth devices paired in Android Settings, printer-looking ones only (or all if none match). */
+export function listNativePrinters() {
+  const bridge = nativeBridge();
+  if (!bridge) return [];
+  try {
+    const all = JSON.parse(bridge.listPairedJson()).filter((d) => d?.id && d?.name);
+    const printers = all.filter((d) => PRINTER_NAME_HINT.test(d.name));
+    return printers.length ? printers : all;
+  } catch { return []; }
+}
+
+export function connectNative(device) {
+  const bridge = nativeBridge();
+  if (!bridge) throw new Error('Open Golden Break from the tablet app to print over Bluetooth.');
+  const result = String(bridge.connect(device.id) ?? '');
+  if (result !== 'ok') throw new Error(result || 'Couldn’t connect to the printer.');
+  state.kind = 'native';
+  state.name = device.name;
+  saveStored({ kind: 'native', id: device.id, name: device.name });
+  emit();
+}
+
+function sendNative(bridge, data) {
+  let binary = '';
+  for (let i = 0; i < data.length; i++) binary += String.fromCharCode(data[i]);
+  const result = String(bridge.writeBase64(btoa(binary)) ?? '').trim();
+  if (result !== 'ok') throw new Error(result || 'The printer didn’t accept the job.');
+}
+
 /* ---------- RawBT (Android app for classic-Bluetooth printers) ---------- */
 
 /** Nothing to negotiate: RawBT pairs with the printer itself. We only remember to send jobs there. */
@@ -300,6 +344,13 @@ export function tryReconnect() {
   if (state.kind || reconnecting) return reconnecting;
   reconnecting = (async () => {
     const stored = loadStored();
+    // In the tablet app, reconnect to the saved printer (or the only paired printer) over native Bluetooth.
+    if (isNativeApp()) {
+      const paired = listNativePrinters();
+      const pick = paired.find((d) => d.id === stored?.id) || (stored?.kind === 'native' ? null : paired.length === 1 ? paired[0] : null);
+      try { if (pick) connectNative(pick); } catch { /* printer off: stay disconnected */ }
+      return;
+    }
     if (!stored) return;
     try {
       if (stored.kind === 'rawbt') connectRawBt();
@@ -320,6 +371,7 @@ export function tryReconnect() {
 }
 
 export function disconnectPrinter() {
+  if (state.kind === 'native') { try { nativeBridge()?.disconnect(); } catch { /* already gone */ } }
   try { if (ble?.device.gatt?.connected) ble.device.gatt.disconnect(); } catch { /* already gone */ }
   try { serial?.close(); } catch { /* already closed */ }
   onDisconnected();
@@ -339,6 +391,8 @@ export function printerErrorMessage(err) {
 }
 
 async function send(data) {
+  const bridge = state.kind === 'native' ? nativeBridge() : null;
+  if (bridge) { sendNative(bridge, data); return; }
   if (state.kind === 'rawbt') { sendViaRawBt(data); return; }
   let job;
   if (state.kind === 'bluetooth' && ble) job = writeBle(ble, data);
@@ -489,6 +543,13 @@ export function setDrawerEnabled(on) {
 /** Opens the cash drawer through the connected printer. */
 export async function openCashDrawer() {
   if (!state.kind) throw new Error('Connect the thermal printer first. The drawer is wired into it.');
+  // The tablet app sends both pulses on one Bluetooth connection (PrinterBridge.kickDrawer).
+  const bridge = state.kind === 'native' ? nativeBridge() : null;
+  if (bridge?.kickDrawer) {
+    const result = String(bridge.kickDrawer() ?? '').trim();
+    if (result !== 'ok') throw new Error(result || 'The drawer didn’t open.');
+    return;
+  }
   await send(Uint8Array.from([0x1b, 0x40, ...drawerPulse(1)]));
   try {
     await sleep(700);

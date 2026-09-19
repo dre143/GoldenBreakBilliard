@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Golden Break</string>
+    <!-- Live site the tablet app opens. Change this if the Vercel URL is different. -->
+    <string name="app_url">https://golden-break-billiard.vercel.app</string>
+</resources>
