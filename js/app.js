@@ -13,6 +13,7 @@ import * as dashboardView from './views/dashboard.js';
 import * as staffView from './views/staff.js';
 import * as reportsView from './views/reports.js';
 import * as printer from './printer.js';
+import { startTimeAlerts } from './time-alerts.js';
 import { printerDialog, cashDrawerDialog } from './dialogs.js';
 
 const root = document.getElementById('root');
@@ -110,6 +111,7 @@ function startData() {
     db.listenDoc('settings', 'cashDrawer', (doc) => set('settings', { ...state.settings, drawerPinSet: !!doc?.pinHash }), onDataError),
   ];
   printer.tryReconnect(); // quietly reconnect the last thermal printer, if the browser kept permission
+  dataCleanups.push(startTimeAlerts()); // 15- and 5-minutes-left chimes for booked tables
   const beat = () => state.user && svc.setPresence(state.user.uid, true).catch(() => {});
   beat();
   syncClock();

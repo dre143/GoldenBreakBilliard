@@ -195,6 +195,14 @@ printer gets. Receipts have **Print receipt / Preview print**. The Daily report 
 printer reconnects on its own if the browser kept the permission. Receipts are plain ASCII ("P" instead of "₱") so
 no-name printers print them correctly.
 
+### Time-left alerts
+
+For **Set Hours** (booked) tables, every signed-in screen plays a chime and shows an alert card when a table has
+**15 minutes left**, and a louder chime and a red card at **5 minutes left** (`js/time-alerts.js`, sounds in
+`js/alarm.js`, made with the Web Audio API like Marimar Inn's). Each alert plays once per table per game; the card
+stays until someone taps OK or opens the table. Open Time tables have no end time, so they don't alert. Browsers only
+allow sound after the screen has been tapped once, so tap anywhere after opening the app.
+
 ### Tablet app (full screen, direct Bluetooth)
 
 `android-app/` is the Golden Break tablet app, copied from Marimar Inn. It's a small Android app that opens the live

@@ -167,6 +167,25 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
   border: 1px dashed rgba(246, 243, 236, .22);
 }
 
+/* ---------- time-left alerts (15 and 5 minutes left on a booked table) ---------- */
+
+.time-alerts {
+  position: fixed; top: 16px; right: 16px; z-index: 60;
+  display: flex; flex-direction: column; gap: 10px; width: min(380px, calc(100vw - 32px));
+}
+.time-alert {
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+  background: var(--surface); border: 2px solid #E0A526; border-radius: var(--radius-md);
+  box-shadow: 0 10px 28px -10px rgba(0, 0, 0, .35);
+}
+.time-alert--urgent { border-color: var(--danger); background: #FFF1EF; animation: time-alert-pulse 1.2s ease-in-out 3; }
+.time-alert__text { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: 14px; line-height: 1.3; }
+.time-alert__text strong { font-size: 16px; }
+.time-alert--urgent .time-alert__text span { color: var(--danger-ink); font-weight: 700; }
+@keyframes time-alert-pulse { 50% { box-shadow: 0 0 0 6px rgba(200, 60, 40, .25); } }
+@media (prefers-reduced-motion: reduce) { .time-alert--urgent { animation: none; } }
+@media print { .time-alerts { display: none !important; } }
+
 /* ---------- thermal printer ---------- */
 
 .printer-btn {
