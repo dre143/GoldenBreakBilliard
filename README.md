@@ -38,11 +38,11 @@ open tables but keeps staff, tables and products.
 | Quick Sale (walk-in items, no table) | ✓ | ✓ |
 | Inventory | view only | add products, edit, add stock |
 | Transactions | ✓ | ✓ |
-| Shift Report (sales, cash to count), log expenses | ✓ | ✓ |
+| Reports: Daily sales report & log expenses | ✓ | ✓ |
 | Remove a mistaken expense, turn Day/Night shifts on or off | — | ✓ |
 | Void the table fee (session used ≤5 min) | own sales | any sale |
 | Owner Dashboard | — | ✓ |
-| Reports (sales, payments, shifts) | — | ✓ |
+| Reports: Custom range & Monthly | — | ✓ |
 | Staff & accounts, Manage Tables (names) | — | ✓ |
 
 The UI hides owner-only screens, and `firestore.rules` enforces the same limits on the server.
@@ -65,23 +65,21 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
 - `meta/setup` — marks that the first owner exists
 - `clock/{uid}` — private server-clock probe (lets each device show accurate timers)
 
-## Shift Report & expenses
+## Reports & expenses
 
-Adapted from the Marimar Inn daily sales report. **Shift Report** (all staff) lists every sale and expense for a business
-day (6:00 AM to 6:00 AM) and reconciles the drawer:
+Laid out like the Marimar Inn reports. Every tab has the same shape: pickers on the left, Export CSV / Print on the right,
+one row of number cards, then plain tables.
 
-- **Cash to count** = cash collected − expenses (expenses are paid out of the cash drawer)
-- **Net sales** = sales − expenses
+- **Daily** (everyone; cashiers see only this tab): the paper-style **Daily Sales Report** for one business day
+  (6:00 AM to 6:00 AM). It has one row per sale, the expenses, a cash/GCash line, the **Overall Sale** (sales minus
+  expenses) and signature lines. Below it: **End of shift**, where cash to count = cash collected − expenses.
+  The cashier on duty logs expenses (cash taken from the drawer) at the top of this tab.
+- **Custom range** (owner): totals, sales by day, sales/expenses/net per day, every expense, and table fee voids.
+- **Monthly** (owner): the month's totals, sales trend, revenue by table and top products.
 
-The cashier on duty logs expenses (several lines at once) from the same page. Each one is stamped with server time, so it
-lands on the shift that was actually working. Export CSV and Print produce the end-of-shift sheet.
-
-The hall runs **one shift** per business day. When a second shift starts, the owner ticks *Split the day into Day and Night
-shifts* on the Shift Report page. The report then offers Day (6:00 AM–6:00 PM), Night (6:00 PM–6:00 AM) and Full day.
+The hall runs **one shift** per business day. When a second shift starts, the owner ticks *Day and Night shifts* on the
+Daily tab. The tab then offers Day (6:00 AM–6:00 PM), Night (6:00 PM–6:00 AM) and Full day.
 `SHIFT_SPLIT_HOUR` in `js/reporting.js` sets the split.
-
-Reports (owner) show expenses and net on every tab: Sales (expenses, net sales, cash on hand), Payments (cash on hand per
-day), By cashier (cash to hand over per cashier per day) and a new Expenses tab.
 
 ## Table rate
 
@@ -156,8 +154,8 @@ It only ever waives the **table fee**, for the case where a customer decides not
   - **Transactions:** a "Table fee voided" badge on the row, with the reduced total.
   - **Owner Dashboard:** the Recent Transactions list carries the same badge, and a dedicated **Table fee voids
     today** card lists each one — table, cashier, reason, amount refunded — click to open its receipt.
-  - **Reports → Sales:** a **Table fee voids** table for the selected date range, with a count and total refunded,
-    and it's included in that tab's CSV export.
+  - **Reports:** the Daily sales sheet marks the row *Table fee voided*, and **Custom range** lists every void in the
+    range, with the count and total refunded.
 
 ## Quick Sale (walk-in items, no table)
 
@@ -185,17 +183,11 @@ Checkout takes **Cash** (optional cash tendered → change), **GCash**, or **Spl
 portion and the rest of the total goes on GCash. Every transaction stores `payments.cash` and `payments.gcash`, so
 reports can add up money by type whatever the method was. (Older `card` records still show up, as "Other".)
 
-## Reports (owner)
+## Business day
 
-Reports → **Sales / Payments / Shifts**, for Today, Yesterday, 7 or 30 days, or any range up to 92 days. Every tab can be
-exported to CSV or printed.
-
-- **Business day:** sales are grouped by business day, which starts at 6:00 AM, so a sale at 1:30 AM counts toward the night before.
-  Change `BUSINESS_DAY_START_HOUR` in `js/reporting.js` to adjust it. The Dashboard and Transactions screens still use calendar days.
-- **Sales:** gross, table revenue (hours played, rounds), product sales, daily breakdown, and top products.
-- **Payments:** cash vs GCash collected (splits counted in both), a breakdown by method, and collections per day.
-- **Shifts:** sales per cashier per business day: number of sales, items, table revenue, product sales, and cash vs GCash.
-
+Reports group sales by business day, which starts at 6:00 AM, so a sale at 1:30 AM counts toward the night before.
+Change `BUSINESS_DAY_START_HOUR` in `js/reporting.js` to adjust it. The Dashboard and Transactions screens still use calendar days.
+See **Reports & expenses** above for what each report tab shows.
 ## Tests
 
 ```bash

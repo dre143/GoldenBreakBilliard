@@ -7,7 +7,6 @@ export const ICONS = {
   chart: '<path d="M3 21h18"/><path d="M6 17v-6M11 17V5M16 17v-9M20 17v-3"/>',
   users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/>',
   report: '<path d="M6 3h9l4 4v14H6V3Z"/><path d="M14 3v5h5"/><path d="M9.5 17v-3M12.5 17v-6M15.5 17v-2"/>',
-  wallet: '<path d="M4 7.5V18a2 2 0 0 0 2 2h14V9H6a2 2 0 0 1-2-2Zm0 0A2.5 2.5 0 0 1 6.5 5H17v4"/><circle cx="16" cy="14.5" r="1.2"/>',
   download:'<path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/>',
   print: '<path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',

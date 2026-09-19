@@ -12,7 +12,6 @@ import * as transactionsView from './views/transactions.js';
 import * as dashboardView from './views/dashboard.js';
 import * as staffView from './views/staff.js';
 import * as reportsView from './views/reports.js';
-import * as shiftView from './views/shift.js';
 
 const root = document.getElementById('root');
 
@@ -22,9 +21,8 @@ const ROUTES = {
   checkout: { label: 'Checkout', icon: 'receipt', view: checkoutView },
   'quick-sale': { label: 'Quick Sale', icon: 'bag', view: quickSaleView },
   transactions: { label: 'Transactions', icon: 'list', view: transactionsView },
-  shift: { label: 'Shift Report', icon: 'wallet', view: shiftView },
   dashboard: { label: 'Owner Dashboard', icon: 'chart', view: dashboardView, owner: true },
-  reports: { label: 'Reports', icon: 'report', view: reportsView, owner: true },
+  reports: { label: 'Reports', icon: 'report', view: reportsView },
   staff: { label: 'Staff & Accounts', icon: 'users', view: staffView, owner: true },
 };
 
@@ -167,8 +165,8 @@ function renderShell() {
       <aside class="sidebar" id="sidebar">
         ${brand()}
         <nav class="nav" aria-label="Primary">
-          ${['tables', 'inventory', 'checkout', 'quick-sale', 'transactions', 'shift'].map(link).join('')}
-          ${owner ? `<p class="nav__label">Owner</p>${['dashboard', 'reports', 'staff'].map(link).join('')}` : ''}
+          ${['tables', 'inventory', 'checkout', 'quick-sale', 'transactions', 'reports'].map(link).join('')}
+          ${owner ? `<p class="nav__label">Owner</p>${['dashboard', 'staff'].map(link).join('')}` : ''}
         </nav>
         <div class="sidebar__spacer"></div>
         ${mode === 'demo' ? `<div class="demo-note">Demo mode · data is stored in this browser
