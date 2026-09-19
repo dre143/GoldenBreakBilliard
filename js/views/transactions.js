@@ -29,7 +29,7 @@ export function mount(el, ctx) {
     })}
     <div class="report-controls">
       <div class="report-controls__fields">
-        ${searchField('tx-search', 'Search transactions', 'Table, cashier, or item')}
+        ${searchField('tx-search', 'Search transactions', 'Table, cashier, item, or GCash ref')}
         <div class="field report-controls__shift">
           <label for="tx-range" class="sr-only">Date range</label>
           <select id="tx-range">
@@ -50,7 +50,7 @@ export function mount(el, ctx) {
 
   function filtered() {
     if (!query) return rows;
-    return rows.filter((r) => `${r.tableId ? r.tableName : 'Walk-in'} ${r.cashierName} ${METHOD_LABEL[r.method]} ${(r.items || []).map((i) => i.name).join(' ')}`
+    return rows.filter((r) => `${r.tableId ? r.tableName : 'Walk-in'} ${r.cashierName} ${METHOD_LABEL[r.method]} ${r.gcashRef || ''} ${(r.items || []).map((i) => i.name).join(' ')}`
       .toLowerCase().includes(query));
   }
 
@@ -84,7 +84,7 @@ export function mount(el, ctx) {
               ${r.tableFeeVoided ? `<span class="tx-voided">Table fee voided · ${peso(r.refundAmount)} refunded</span>` : ''}
             </td>
             <td class="cell-nowrap">${r.tableId ? fmtHuman(r.durationMs || 0) : '—'}</td>
-            <td class="cell-nowrap">${METHOD_LABEL[r.method] || esc(r.method)}</td>
+            <td class="cell-nowrap">${METHOD_LABEL[r.method] || esc(r.method)}${r.gcashRef ? `<span class="cell-sub">Ref ${esc(r.gcashRef)}</span>` : ''}</td>
             <td class="cell-nowrap">${esc(r.cashierName)}</td>
             <td class="t-right num"><strong>${peso(r.total)}</strong></td>
             <td class="t-right cell-nowrap">

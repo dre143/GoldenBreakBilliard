@@ -236,6 +236,10 @@ service cloud.firestore {
         && request.resource.data.cashierId == request.auth.uid
         && (request.resource.data.method in ['cash', 'gcash', 'split']
             || (request.resource.data.method == 'none' && request.resource.data.total == 0))
+        // Any GCash part needs the last 5 digits of the GCash reference number.
+        && (!(request.resource.data.method in ['gcash', 'split'])
+            || (request.resource.data.get('gcashRef', null) is string
+                && request.resource.data.gcashRef.matches('^[0-9]{5}$')))
         && request.resource.data.createdAt == request.time
         && ((request.resource.data.tableId == null && quickSaleOk(request.resource.data))
             || (request.resource.data.tableId != null && saleMatchesSession(request.resource.data, id)));

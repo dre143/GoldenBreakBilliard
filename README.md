@@ -174,7 +174,9 @@ playing at a table: no timer, no table fee, just the items and a payment.
 ## Payments
 
 Checkout takes **Cash** (optional cash tendered → change), **GCash**, or **Split**. For Split the cashier enters the cash
-portion and the rest of the total goes on GCash. Every transaction stores `payments.cash` and `payments.gcash`, so
+portion and the rest of the total goes on GCash. For **GCash and Split** the cashier must enter the **last 5 digits of the
+GCash reference number** (`gcashRef`, required by `firestore.rules`). It shows on the receipt, in the Transactions list
+(and search), and on the Daily sales report and its CSV. Every transaction stores `payments.cash` and `payments.gcash`, so
 reports can add up money by type whatever the method was. (Older `card` records still show up, as "Other".)
 
 ## Business day

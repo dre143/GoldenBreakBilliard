@@ -75,6 +75,22 @@ export const METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', split: 'Split', card
 
 /* ---------- small components ---------- */
 
+/** GCash reference input (last 5 digits), shown for GCash and Split payments on Checkout and Quick Sale. */
+export const gcashRefField = () => `
+  <div class="cash" data-region="gcash-ref" hidden>
+    <div class="field">
+      <label for="gcash-ref">GCash ref no. <span class="muted">(last 5 digits)</span></label>
+      <input id="gcash-ref" type="text" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="e.g. 48213">
+    </div>
+  </div>`;
+
+/** Keep only digits in the GCash reference input while typing. */
+export function wireGcashRef(root) {
+  const input = root.querySelector('#gcash-ref');
+  input?.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, 5); });
+  return input;
+}
+
 const STATUS = {
   available: ['Available', 'available'],
   in_use: ['In Use', 'in-use'],

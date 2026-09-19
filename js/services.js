@@ -124,6 +124,18 @@ export function changeItem(tableId, productId, delta) {
 
 export const PAYMENT_METHODS = ['cash', 'gcash', 'split'];
 
+/**
+ * GCash reference: the cashier types the last 5 digits of the customer's GCash reference number for
+ * any payment with a GCash part (GCash or Split), so the owner can match it to the GCash history.
+ * Returns the 5 digits, or null when nothing was paid by GCash.
+ */
+export function gcashRefFor(method, ref) {
+  if (method !== 'gcash' && method !== 'split') return null;
+  const digits = String(ref ?? '').replace(/\D/g, '');
+  if (digits.length !== 5) throw new Error('Enter the last 5 digits of the GCash reference number.');
+  return digits;
+}
+
 /** Thrown when stopping the clock changed the amount due from what the cashier was looking at. */
 export class TotalChangedError extends Error {
   constructor(total, durationMs) {
@@ -142,8 +154,9 @@ export class TotalChangedError extends Error {
  * expectedTotal: the total the cashier saw; if the final total differs, nothing is saved and
  * TotalChangedError tells the UI to show the final amount (the clock stays stopped).
  */
-export async function completeCheckout(tableId, { method, tendered, cashPart, expectedTotal = null }, user) {
+export async function completeCheckout(tableId, { method, tendered, cashPart, gcashRef, expectedTotal = null }, user) {
   if (!PAYMENT_METHODS.includes(method) && method !== 'none') throw new Error('Choose a payment method.');
+  gcashRefFor(method, gcashRef); // check before the clock is stopped
   await endSession(tableId);
 
   return db.transaction(async (tx) => {
@@ -200,6 +213,7 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, ex
       rounds: s.rounds || 0,
       tableFee: fee, items: lines, productTotal, total, method, payments,
       tendered: paid, change: paid == null ? null : round2(paid - total),
+      gcashRef: gcashRefFor(method, gcashRef),
       cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
       ...(cancelled ? {
         gameCancelled: true, cancelReason: cancelled.reason, cancelNote: cancelled.note || '',
@@ -217,9 +231,10 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, ex
  * view until checkout — stock is checked and deducted here, in the same transaction as the sale,
  * exactly like a table checkout, so two terminals still can't oversell stock.
  */
-export function completeQuickSale({ items, method, tendered, cashPart }, user) {
+export function completeQuickSale({ items, method, tendered, cashPart, gcashRef }, user) {
   if (!PAYMENT_METHODS.includes(method)) throw new Error('Choose a payment method.');
   if (!items || !items.length) throw new Error('Add at least one item to the sale.');
+  const ref = gcashRefFor(method, gcashRef);
 
   return db.transaction(async (tx) => {
     const products = await Promise.all(items.map((i) => tx.get('products', i.productId)));
@@ -257,6 +272,7 @@ export function completeQuickSale({ items, method, tendered, cashPart }, user) {
       plannedMs: null, billedMs: null, mode: null, rounds: 0,
       tableFee: 0, items: lines, productTotal, total, method, payments,
       tendered: paid, change: paid == null ? null : round2(paid - total),
+      gcashRef: ref,
       cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
     };
     tx.set('transactions', id, record);

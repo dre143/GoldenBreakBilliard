@@ -9,7 +9,7 @@ import { updateTableTimers } from './shared.js';
 import { poolCard } from './pool-card.js';
 import {
   esc, icon, peso, fmtDuration, fmtCountdown, fmtTime, fmtBooking, statusBadge, thumb, pageHeader,
-  loadingBlock, emptyBlock, preserveFocus, busy, toast, openDialog, METHOD_LABEL,
+  loadingBlock, emptyBlock, preserveFocus, busy, toast, openDialog, METHOD_LABEL, gcashRefField, wireGcashRef,
 } from '../ui.js';
 
 export function mount(el, ctx) {
@@ -117,6 +117,7 @@ function mountBill(el, ctx, tableId) {
                 <span class="num" data-live="split-gcash">—</span>
               </div>
             </div>
+            ${gcashRefField()}
             <button type="button" class="btn btn--amber btn--block btn--lg" data-action="complete">${icon('check')}Complete Transaction</button>
           </section>
         </aside>
@@ -127,10 +128,12 @@ function mountBill(el, ctx, tableId) {
       method = r.value;
       $('[data-region=cash]').hidden = method !== 'cash';
       $('[data-region=split]').hidden = method !== 'split';
+      $('[data-region=gcash-ref]').hidden = method === 'cash';
       tick();
     }));
     $('#cash-tendered').addEventListener('input', tick);
     $('#split-cash').addEventListener('input', tick);
+    wireGcashRef(body);
   }
 
   function renderTimer(t) {
@@ -366,12 +369,19 @@ function mountBill(el, ctx, tableId) {
       return;
     }
     const cashPart = method === 'split' ? Number(splitRaw) : null;
+    const gcashRef = $('#gcash-ref').value;
+    const total = round2(sessionFee(t.session, elapsedMs(t)) + itemsTotal(t.session.items));
+    if ((method === 'gcash' || method === 'split') && total > 0 && gcashRef.length !== 5) {
+      toast('Enter the last 5 digits of the GCash reference number.', 'error');
+      $('#gcash-ref').focus();
+      return;
+    }
     // The total on screen is an estimate while the clock runs; the server-stamped end time decides.
     const expectedTotal = round2(sessionFee(t.session, elapsedMs(t)) + itemsTotal(t.session.items));
     completing = true;
     btn.disabled = true;
     try {
-      const record = await svc.completeCheckout(tableId, { method, tendered, cashPart, expectedTotal }, ctx.user);
+      const record = await svc.completeCheckout(tableId, { method, tendered, cashPart, gcashRef, expectedTotal }, ctx.user);
       location.hash = '#/tables';
       receiptDialog(record, { fresh: true });
     } catch (err) {

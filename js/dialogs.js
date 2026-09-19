@@ -327,6 +327,7 @@ export function receiptDialog(tx, { fresh = false } = {}) {
         </div>
         <dl class="sum-lines">
           <div class="sum-row"><dt>Paid via</dt><dd>${METHOD_LABEL[tx.method] || esc(tx.method)}</dd></div>
+          ${tx.gcashRef ? `<div class="sum-row"><dt>GCash ref no. (last 5)</dt><dd class="num">${esc(tx.gcashRef)}</dd></div>` : ''}
           ${tx.method === 'split' && tx.payments ? `
           <div class="sum-row"><dt>Cash</dt><dd class="num">${peso(tx.payments.cash)}</dd></div>
           <div class="sum-row"><dt>GCash</dt><dd class="num">${peso(tx.payments.gcash)}</dd></div>` : ''}

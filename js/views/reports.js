@@ -87,8 +87,9 @@ const longDate = (key) => rep.keyLabel(key, { weekday: 'long', month: 'long', da
 
 function paymentLabel(tx) {
   const p = rep.paymentsOf(tx);
-  if (p.cash > 0 && p.gcash > 0) return `Cash ${peso(p.cash)} + GCash ${peso(p.gcash)}`;
-  return METHOD_LABEL[tx.method] || esc(tx.method);
+  const ref = tx.gcashRef ? ` (Ref ${esc(tx.gcashRef)})` : '';
+  if (p.cash > 0 && p.gcash > 0) return `Cash ${peso(p.cash)} + GCash ${peso(p.gcash)}${ref}`;
+  return `${METHOD_LABEL[tx.method] || esc(tx.method)}${ref}`;
 }
 
 /** Listen to sales and expenses in [start, end); calls back once both have loaded, and on every change. */
@@ -454,18 +455,18 @@ function dailyTab(panel, ctx) {
     const withShift = twoShifts();
     downloadCsv(`golden-break-daily-${key}${shift === 'full' ? '' : `-${shift}`}.csv`, [
       [HALL], ['Daily Sales Report'], [`Date: ${longDate(key)}`, `Time: ${timeText()}`, shiftName()], [],
-      ['Table', 'Ref #', 'Start', 'End', 'Booked', 'Played (min)', 'Table fee', 'Products', 'Paid', 'Payment', 'Cash', 'GCash', 'Staff', 'Remarks'],
+      ['Table', 'Ref #', 'Start', 'End', 'Booked', 'Played (min)', 'Table fee', 'Products', 'Paid', 'Payment', 'Cash', 'GCash', 'GCash ref (last 5)', 'Staff', 'Remarks'],
       ...txs.map((x) => {
         const p = rep.paymentsOf(x);
         return [
           x.tableId ? x.tableName : 'Walk-in', refNo(x.id), fmtTime(x.tableId ? x.startedAt : x.createdAt),
           x.tableId ? fmtTime(x.endedAt) : '', x.tableId ? (x.plannedMs ? fmtBooking(x.plannedMs) : 'Open') : '',
           x.tableId ? Math.round((x.durationMs || 0) / 60000) : '', x.tableId ? x.tableFee : '', x.productTotal, x.total,
-          METHOD_LABEL[x.method] || x.method, p.cash, p.gcash, x.cashierName,
+          METHOD_LABEL[x.method] || x.method, p.cash, p.gcash, x.gcashRef || '', x.cashierName,
           rep.cancelInfo(x)?.remark ?? '',
         ];
       }),
-      ['Totals', '', '', '', '', '', t.tableFee, t.productTotal, t.total, '', t.cash, t.gcash, '', ''],
+      ['Totals', '', '', '', '', '', t.tableFee, t.productTotal, t.total, '', t.cash, t.gcash, '', '', ''],
       [], ['Expenses'], ['Time', ...(withShift ? ['Shift'] : []), 'What for', 'Staff', 'Amount'],
       ...expenses.map((e) => [fmtTime(e.createdAt), ...(withShift ? [rep.SHIFT_SHORT[rep.shiftOf(e.createdAt)]] : []), e.description, e.cashierName, e.amount]),
       ['Total expenses', ...(withShift ? [''] : []), '', '', t.expenses],

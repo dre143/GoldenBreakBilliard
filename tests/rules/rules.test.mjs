@@ -224,6 +224,23 @@ test('quick sale: backdated sale time is rejected, same as a table sale', async 
   await assertFails(quickSale(as('joy'), { createdAt: ts(Date.now() - 60 * MIN) }));
 });
 
+test('GCash and split payments need the last 5 digits of the GCash reference number', async () => {
+  const joy = as('joy');
+  const gcash = (gcashRef, txId) => quickSale(joy, { txId, extra: { method: 'gcash', payments: { cash: 0, gcash: 170 }, tendered: null, change: null, ...(gcashRef === undefined ? {} : { gcashRef }) } });
+  const split = (gcashRef, txId) => quickSale(joy, { txId, extra: { method: 'split', payments: { cash: 70, gcash: 100 }, tendered: null, change: null, gcashRef } });
+  await assertFails(gcash(undefined, 'g1'));
+  await assertFails(gcash(null, 'g2'));
+  await assertFails(gcash('1234', 'g3'));
+  await assertFails(gcash('123456', 'g4'));
+  await assertFails(gcash('12a45', 'g5'));
+  await assertFails(gcash(48213, 'g6')); // must be text, so a leading 0 is kept
+  await assertSucceeds(gcash('48213', 'g7'));
+  await assertSucceeds(gcash('00917', 'g8'));
+  await assertFails(split(null, 's1'));
+  await assertSucceeds(split('55120', 's2'));
+  await assertSucceeds(quickSale(joy, { txId: 'c1', extra: { gcashRef: null } })); // cash needs no reference
+});
+
 /* ---------------- booked hours (Set Hours) ---------------- */
 
 test('booked 2h, stopped after 45 min: ₱400 (booking is the minimum); ₱200 rejected', async () => {
