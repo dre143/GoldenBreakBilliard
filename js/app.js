@@ -13,10 +13,14 @@ import * as dashboardView from './views/dashboard.js';
 import * as staffView from './views/staff.js';
 import * as reportsView from './views/reports.js';
 import * as printer from './printer.js';
+import { watchStackedTables } from './responsive.js';
 import { startTimeAlerts } from './time-alerts.js';
 import { mountPrinterPanel, mountDrawerPanel } from './dialogs.js';
 
 const root = document.getElementById('root');
+
+// Wide tables reflow into stacked cards on phones (labels are copied onto cells; see responsive.js).
+watchStackedTables(document.body);
 
 // Offline safety net (sw.js): lets the app reopen from its saved copy when the tablet has no internet.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
@@ -151,6 +155,7 @@ async function signOut(button) {
 const brand = () => `
   <a class="brand" href="#/tables" aria-label="Golden Break Billiard Hall, go to Tables">
     <img class="brand__logo" src="assets/logo-golden-break.png" alt="Golden Break Billiard Hall" width="1200" height="528">
+    <img class="brand__mark-img brand__mark--rail" src="assets/logo-mark.png" alt="" width="160" height="160">
   </a>`;
 
 // Compact fallback for the slim mobile topbar, where the full lockup would be too wide: the
@@ -165,7 +170,7 @@ function renderShell() {
   const owner = u.role === 'owner';
   const link = (key) => {
     const r = ROUTES[key];
-    return `<a class="nav__link" href="#/${key}" data-route="${key}">${icon(r.icon)}<span>${r.label}</span></a>`;
+    return `<a class="nav__link" href="#/${key}" data-route="${key}" aria-label="${r.label}" title="${r.label}">${icon(r.icon)}<span>${r.label}</span></a>`;
   };
   root.innerHTML = `
     <a class="skip-link" href="#main">Skip to content</a>

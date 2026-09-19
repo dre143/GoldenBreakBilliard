@@ -345,7 +345,7 @@ function dailyTab(panel, ctx) {
     const cols = 12;
     return `
       <div class="table-wrap">
-        <table class="sheet">
+        <table class="sheet" data-scroll>
           <thead><tr>
             <th scope="col">Table</th>
             <th scope="col">Ref #</th>

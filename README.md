@@ -227,6 +227,28 @@ thermal printer must be connected. The **cash drawer icon in the top bar** opens
 The kick is the same as Marimar Inn's: an ESC p pulse on pin 5, then pin 2 as a second job, because drawers are wired
 to either pin.
 
+## Responsive layout
+
+One responsive design system for every page (`css/styles.css`: tokens at the top of `:root`, structure in the
+"RESPONSIVE SYSTEM" section near the end; `js/responsive.js` for tables). Nothing is scaled or zoomed: layouts reflow.
+
+| Width | Navigation | Tables grid | Pages |
+|---|---|---|---|
+| 1280+ | full sidebar (232px) | 4–5 cards per row | header on one row |
+| 901–1279 | icon rail (76px, tooltips) | 3–4 cards | header on one row |
+| 641–900 | slide-out drawer + top bar | 2–3 cards | actions wrap under the title |
+| ≤ 640 | slide-out drawer + top bar | 2 cards, then 1 (≤ ~494px) | actions stacked full-width, chips 2-up, wide tables become cards |
+
+- **Table cards** are one component: `--card-min`/`--card-max` bound their width, a fixed aspect ratio keeps the
+  billiard-table proportions, and text sizes follow the card's own width (container queries). The grid never packs
+  more than `--tables-max-cols` (default 5; set 4 for at most four) per row, and pages stop growing at `--content-max`
+  (1480px) and centre on very wide screens.
+- **Wide tables** (5+ columns) turn into stacked cards on phones. `js/responsive.js` copies each column header onto its
+  cells (`data-label`), so no page template needs to change. The Daily Sales sheet is marked `data-scroll` and keeps a
+  sideways scroll, being a paper-style report.
+- **Dialogs** use the dynamic viewport height, near-full width on phones, and full-width stacked buttons.
+- Touch: every control is at least 44px, the top bar and dialogs respect notches (`viewport-fit=cover`).
+
 ## Business day
 
 Reports group sales by business day, which starts at 6:00 AM, so a sale at 1:30 AM counts toward the night before.
