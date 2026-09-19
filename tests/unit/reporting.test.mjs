@@ -34,16 +34,18 @@ test('CSV escaping', () => {
   assert.equal(r.toCsv([['a', 'b,c'], ['say "hi"', null]]), 'a,"b,c"\r\n"say ""hi""",');
 });
 
-test('voidedSales / voidedTotals: the owner’s audit trail for waived table fees', () => {
+test('cancelledGames / cancelInfo: the owner’s audit trail for games with no table fee', () => {
   const txs = [
-    { id: 'a', total: 30, tableFeeVoided: true, refundAmount: 200, tableFeeVoidedAt: 100 },
-    { id: 'b', total: 500, tableFeeVoided: false },
-    { id: 'c', total: 50, tableFeeVoided: true, refundAmount: 200, tableFeeVoidedAt: 300 },
+    { id: 'old', tableFeeVoided: true, voidReason: 'Accidental start', tableFeeVoidedByName: 'Ann', tableFeeVoidedAt: 100, refundAmount: 200, createdAt: 90 },
+    { id: 'paid', createdAt: 500 },
+    { id: 'new', gameCancelled: true, cancelReason: 'Customer decided not to play', cancelledByName: 'Ben', createdAt: 300 },
   ];
-  assert.deepEqual(r.voidedSales(txs).map((t) => t.id), ['c', 'a'], 'most recently voided first');
-  assert.deepEqual(r.voidedTotals(txs), { count: 2, refunded: 400 });
-  assert.deepEqual(r.voidedTotals([]), { count: 0, refunded: 0 });
+  assert.deepEqual(r.cancelledGames(txs).map((t) => t.id), ['new', 'old'], 'newest first, older voids included');
+  assert.deepEqual(r.cancelInfo(txs[2]), { at: 300, by: 'Ben', reason: 'Customer decided not to play', note: undefined, remark: 'Game cancelled (Customer decided not to play)' });
+  assert.equal(r.cancelInfo(txs[0]).by, 'Ann');
+  assert.equal(r.cancelInfo(txs[1]), null);
 });
+
 
 test('shifts: Day 6 AM–6 PM, Night 6 PM–6 AM, half-open boundaries', () => {
   assert.equal(r.shiftOf(at(2026, 9, 18, 6, 0)), 'day');

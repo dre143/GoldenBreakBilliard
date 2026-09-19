@@ -306,28 +306,25 @@ function seed() {
     }
   }
 
-  // One table-fee-voided sale from yesterday, so Transactions and Reports show how it appears:
-  // a customer bought a bottled water, then decided not to play after all. The ₱200 table fee is
-  // waived and refunded in cash; the water is still sold and still counted.
+  // One game cancelled yesterday within its first 5 minutes, so Transactions and Reports show how it
+  // appears: the customer bought a bottled water, then decided not to play. No table fee; the water
+  // is still sold and paid for.
   {
     const createdAt = today0 - D + 19 * H + 12 * MIN;
     const durationMs = 3 * MIN + 10000; // under the 5-minute limit
     const productTotal = 30; // 1x Bottled Water
-    const originalTotal = round2(200 + productTotal); // what was actually paid, before the void
-    transactions['x-void-sample'] = {
+    transactions['x-cancel-sample'] = {
       tableId: 't-05', tableName: 'Table 05', pricing: { ...PRICING },
       startedAt: createdAt - durationMs, endedAt: createdAt, durationMs,
       plannedMs: 0, billedMs: durationMs, mode: 'open', rounds: 0,
       tableFee: 0, items: [{ productId: 'p-water', name: 'Bottled Water 500ml', category: 'Beverages', price: 30, qty: 1, total: 30 }],
       productTotal, total: productTotal, method: 'cash', payments: { cash: productTotal, gcash: 0 },
-      tendered: originalTotal, change: 0, // untouched historical checkout fields; the void only adjusts tableFee/total/payments
+      tendered: productTotal, change: 0,
       cashierId: 'u-joy', cashierName: 'Joy Santos', createdAt,
-      tableFeeVoided: true, tableFeeVoidedAt: createdAt + 2 * MIN, tableFeeVoidedById: 'u-joy', tableFeeVoidedByName: 'Joy Santos',
-      voidReason: 'Customer decided not to play', voidNote: '',
-      originalTableFee: 200, originalTotal, refundAmount: 200, refundMethod: 'cash',
+      gameCancelled: true, cancelReason: 'Customer decided not to play', cancelNote: '',
+      cancelledById: 'u-joy', cancelledByName: 'Joy Santos',
     };
   }
-
   // Cash paid out of the drawer by whoever was on duty: a few small expenses most days.
   const EXPENSES = [['Drinking water refill', 60], ['Ice', 80], ['Tricycle fare (supplies)', 40], ['Cleaning supplies', 150], ['Chalk (market)', 120], ['LPG refill', 950]];
   const expenses = {};

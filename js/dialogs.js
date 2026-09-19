@@ -1,10 +1,10 @@
 import { state, on } from './state.js';
 import * as svc from './services.js';
 import {
-  esc, icon, peso, fmtDuration, fmtDateTime, fmtTime, fmtBooking, METHOD_LABEL, openDialog, toast, preserveFocus,
+  esc, icon, peso, fmtDuration, fmtCountdown, fmtDateTime, fmtTime, fmtBooking, METHOD_LABEL, openDialog, toast, preserveFocus,
 } from './ui.js';
 import {
-  canVoidTableFee, VOID_REASONS, VOID_ELIGIBLE_DURATION_MS, feeBreakdown, PRICING_LABEL, PRICING, tableFee, BOOKING_PRESETS,
+  canCancelGame, cancelTimeLeft, CANCEL_REASONS, elapsedMs, feeBreakdown, PRICING_LABEL, PRICING, tableFee, BOOKING_PRESETS,
 } from './billing.js';
 import { serverNow } from './clock.js';
 
@@ -280,22 +280,28 @@ export function staffDialog(member, currentUser) {
 }
 
 /**
- * Receipt for a completed sale. Table fee void is offered only while the table was used
- * VOID_ELIGIBLE_DURATION_MS or less — that eligibility is fixed the moment checkout happened, so
- * (unlike the old whole-sale void) there's nothing here that decays in real time to count down.
+ * Receipt for a completed sale. A game cancelled within 5 minutes shows its ₱0 table fee and why.
+ * (Sales from before Cancel game existed may carry a table-fee void instead; those still display.)
  */
 export function receiptDialog(tx, { fresh = false } = {}) {
+  const cancelled = Boolean(tx.gameCancelled);
   const voided = Boolean(tx.tableFeeVoided);
-  const { dlg, close } = openDialog({
-    title: voided ? 'Table fee voided' : fresh ? 'Transaction complete' : 'Receipt',
+  openDialog({
+    title: cancelled ? 'Game cancelled' : voided ? 'Table fee voided' : fresh ? 'Transaction complete' : 'Receipt',
     cancelLabel: 'Close',
     body: `
-      <div class="receipt ${voided ? 'is-voided' : ''}">
+      <div class="receipt ${cancelled || voided ? 'is-voided' : ''}">
+        ${cancelled ? `
+        <div class="void-banner" role="note">
+          <span class="badge badge--danger">Game cancelled</span>
+          <span>${esc(tx.cancelReason)}${tx.cancelNote ? ` · “${esc(tx.cancelNote)}”` : ''}<br>
+            <span class="muted small">Cancelled by ${esc(tx.cancelledByName)} within the first 5 minutes, so there is no table fee.${tx.productTotal ? ' Items were still charged.' : ''}</span></span>
+        </div>` : ''}
         ${voided ? `
         <div class="void-banner" role="note">
           <span class="badge badge--danger">Table fee voided</span>
           <span>${esc(tx.voidReason)}${tx.voidNote ? ` · “${esc(tx.voidNote)}”` : ''}<br>
-            <span class="muted small">By ${esc(tx.tableFeeVoidedByName)} at ${fmtDateTime(tx.tableFeeVoidedAt)}. ₱${tx.refundAmount.toFixed(2)} refunded via ${tx.refundMethod === 'gcash' ? 'GCash' : 'Cash'}. Items already sold still count as sold.</span></span>
+            <span class="muted small">By ${esc(tx.tableFeeVoidedByName)} at ${fmtDateTime(tx.tableFeeVoidedAt)}. ${peso(tx.refundAmount)} refunded via ${tx.refundMethod === 'gcash' ? 'GCash' : 'Cash'}.</span></span>
         </div>` : ''}
         <div class="receipt__head">
           <p class="receipt__table">${tx.tableId ? esc(tx.tableName) : 'Walk-in sale'}</p>
@@ -304,8 +310,8 @@ export function receiptDialog(tx, { fresh = false } = {}) {
         <dl class="sum-lines">
           ${tx.tableId ? `
           <div class="sum-row">
-            <dt>Table fee<span class="sum-sub">${fmtDuration(tx.durationMs)} played${tx.plannedMs ? ` · ${fmtBooking(tx.plannedMs)} booked` : ' · open time'} · ${tx.pricing ? feeBreakdown(tx.billedMs ?? tx.durationMs, tx.pricing) : `${peso(tx.rate)}/hr (old rate)`}</span></dt>
-            <dd class="num">${voided ? `<s class="muted">${peso(tx.originalTableFee)}</s> Waived` : peso(tx.tableFee)}</dd>
+            <dt>Table fee<span class="sum-sub">${fmtDuration(tx.durationMs)} played${tx.plannedMs ? ` · ${fmtBooking(tx.plannedMs)} booked` : ' · open time'}${cancelled ? ' · cancelled' : ` · ${tx.pricing ? feeBreakdown(tx.billedMs ?? tx.durationMs, tx.pricing) : `${peso(tx.rate)}/hr (old rate)`}`}</span></dt>
+            <dd class="num">${voided ? `<s class="muted">${peso(tx.originalTableFee)}</s> Waived` : cancelled ? 'No charge' : peso(tx.tableFee)}</dd>
           </div>
           ${tx.rounds ? `<div class="sum-row sum-row--muted"><dt>Rounds played</dt><dd class="num">${tx.rounds}</dd></div>` : ''}` : ''}
           ${(tx.items || []).map((i) => `
@@ -316,7 +322,7 @@ export function receiptDialog(tx, { fresh = false } = {}) {
         </dl>
         <hr class="divider">
         <div class="summary-total">
-          <span class="summary-total__label">Total${voided ? ' due' : ''}</span>
+          <span class="summary-total__label">Total</span>
           <span class="num summary-total__value">${peso(tx.total)}</span>
         </div>
         <dl class="sum-lines">
@@ -329,59 +335,42 @@ export function receiptDialog(tx, { fresh = false } = {}) {
           <div class="sum-row sum-row--strong"><dt>Change</dt><dd class="num">${peso(tx.change)}</dd></div>` : ''}
           ${voided ? `<div class="sum-row sum-row--strong"><dt>Refunded (table fee)</dt><dd class="num">${peso(tx.refundAmount)}</dd></div>` : ''}
         </dl>
-        <div class="void-offer" data-region="void" ${canVoidTableFee(tx, state.user) ? '' : 'hidden'}>
-          <button type="button" class="btn btn--danger-ghost" data-action="void">${icon('x')}Void table fee</button>
-          <span class="void-offer__timer">Table was used ${fmtDuration(tx.durationMs)} — under the 5-minute limit, so the ₱${tx.tableFee} table fee can still be waived. Items stay charged either way.</span>
-        </div>
       </div>`,
   });
-
-  if (canVoidTableFee(tx, state.user)) {
-    dlg.querySelector('[data-action=void]').addEventListener('click', () => voidTableFeeDialog(tx, { onVoided: close }));
-  }
 }
 
 /**
- * Confirm a table-fee void: reason (required), optional note, and — only when the original payment
- * was split between cash and GCash — which channel the refund comes out of. Items are never part of
- * this: they were already sold and stay charged, so there's nothing here about reopening the table
- * or returning stock.
+ * Cancel a game in its first 5 minutes, before anyone pays: reason (required), optional note.
+ * No items on the bill → the table is freed straight away with no charge.
+ * Items on the bill → the table fee becomes ₱0 and the cashier takes payment for the items.
  */
-export function voidTableFeeDialog(tx, { onVoided } = {}) {
-  const payments = tx.payments || { cash: tx.method === 'cash' ? tx.total : 0, gcash: tx.method === 'gcash' ? tx.total : 0 };
-  const needsChoice = payments.cash > 0 && payments.gcash > 0;
-  const inferredMethod = payments.cash >= tx.tableFee ? 'cash' : 'gcash';
+export function cancelGameDialog(table, { onDone } = {}) {
+  const items = table.session.items || [];
+  const itemsDue = items.reduce((s, i) => s + i.price * i.qty, 0);
   const { dlg } = openDialog({
-    title: `Void table fee · ${esc(tx.tableName)}`,
-    submitLabel: 'Void table fee',
+    title: `Cancel game · ${esc(table.name)}`,
+    submitLabel: items.length ? 'Cancel game' : 'Cancel game, no charge',
     submitClass: 'btn--danger',
-    cancelLabel: 'Keep charge',
+    cancelLabel: 'Keep playing',
     body: `
-      <p><strong>${esc(tx.tableName)}</strong> · used ${fmtDuration(tx.durationMs)} · ${fmtDateTime(tx.createdAt)} · ${esc(tx.cashierName)}</p>
-      <dl class="kv">
-        <div><dt>Table fee to waive</dt><dd class="num">${peso(tx.tableFee)}</dd></div>
-        <div><dt>Items stay charged</dt><dd class="num">${peso(tx.productTotal)}</dd></div>
-        <div><dt>New total</dt><dd class="num">${peso(tx.productTotal)}</dd></div>
-      </dl>
+      <p><strong>${esc(table.name)}</strong> · played <span class="num" data-live="played"></span> ·
+        <span data-live="left"></span></p>
+      <p>${items.length
+        ? `The table fee becomes <strong>₱0</strong>. The items on the bill (<strong class="num">${peso(itemsDue)}</strong>) still need to be paid, so take payment for them next.`
+        : 'The clock stops and the table is freed with <strong>no charge</strong>.'}</p>
       <fieldset class="reason-list">
         <legend>Reason</legend>
-        ${VOID_REASONS.map((r, i) => `
+        ${CANCEL_REASONS.map((r, i) => `
         <label class="reason">
           <input type="radio" name="reason" value="${esc(r)}" ${i === 0 ? 'required' : ''}>
           <span>${esc(r)}</span>
         </label>`).join('')}
       </fieldset>
       <div class="field">
-        <label for="void-note">Note <span class="muted" data-note-hint>(optional)</span></label>
-        <input id="void-note" name="note" maxlength="140" placeholder="What happened?">
+        <label for="cancel-note">Note <span class="muted" data-note-hint>(optional)</span></label>
+        <input id="cancel-note" name="note" maxlength="140" placeholder="What happened?">
       </div>
-      ${needsChoice ? `
-      <fieldset class="reason-list">
-        <legend>Refund from</legend>
-        <label class="reason"><input type="radio" name="refundMethod" value="cash" ${inferredMethod === 'cash' ? 'checked' : ''}><span>Cash (${peso(payments.cash)} paid)</span></label>
-        <label class="reason"><input type="radio" name="refundMethod" value="gcash" ${inferredMethod === 'gcash' ? 'checked' : ''}><span>GCash (${peso(payments.gcash)} paid)</span></label>
-      </fieldset>` : `<input type="hidden" name="refundMethod" value="${inferredMethod}">`}
-      <p class="muted small">Only the table fee changes — items already sold stay charged and stay sold. This can’t be undone.</p>`,
+      <p class="muted small">Only possible in the first 5 minutes. This can’t be undone.</p>`,
     onOpen(d) {
       d.querySelectorAll('input[name=reason]').forEach((r) => r.addEventListener('change', () => {
         d.querySelector('[data-note-hint]').textContent = r.value === 'Other' ? '(required)' : '(optional)';
@@ -389,13 +378,32 @@ export function voidTableFeeDialog(tx, { onVoided } = {}) {
     },
     async onSubmit(fd) {
       const reason = fd.get('reason');
-      if (!reason) throw new Error('Choose a reason for the void.');
-      const result = await svc.voidTableFee(tx.id, {
-        reason, note: String(fd.get('note') || ''), refundMethod: fd.get('refundMethod'),
-      }, state.user);
-      toast(`Table fee voided · ₱${result.refund.toFixed(2)} refunded via ${result.method === 'gcash' ? 'GCash' : 'cash'}`);
-      onVoided?.();
+      if (!reason) throw new Error('Choose a reason for cancelling.');
+      const live = state.tables.find((t) => t.id === table.id) || table;
+      if (!canCancelGame(live)) throw new Error('This game has run for more than 5 minutes, so it can no longer be cancelled.');
+      const result = await svc.cancelGame(table.id, { reason, note: String(fd.get('note') || '') }, state.user);
+      if (!result.hasItems) {
+        await svc.completeCheckout(table.id, { method: 'none' }, state.user);
+        toast(`${result.tableName}: game cancelled, no charge. The table is free.`);
+      } else {
+        toast(`${result.tableName}: game cancelled. Table fee is ₱0. Take payment for the items.`);
+      }
+      onDone?.(result);
     },
   });
+
+  // Live countdown while the dialog is open; the window closing disables the button.
+  const tick = () => {
+    if (!dlg.isConnected) { off(); return; }
+    const live = state.tables.find((t) => t.id === table.id);
+    if (!live?.session) return;
+    const setText = (k, v) => { const n = dlg.querySelector(`[data-live=${k}]`); if (n) n.textContent = v; };
+    setText('played', fmtDuration(elapsedMs(live)));
+    const left = cancelTimeLeft(live);
+    setText('left', left > 0 ? `${fmtCountdown(left)} left to cancel` : 'the 5 minutes are up');
+    if (left <= 0) dlg.querySelector('[type=submit]').disabled = true;
+  };
+  const off = on('tick', tick);
+  tick();
   return dlg;
 }

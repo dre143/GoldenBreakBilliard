@@ -1,8 +1,8 @@
 // Transactions: find one sale, reprint its receipt, or void a short game's table fee.
 // Money totals (sales, expenses, cash to count) live in Reports, so this page is only a searchable list.
 import { db } from '../db.js';
-import { canVoidTableFee, VOID_ELIGIBLE_DURATION_MS } from '../billing.js';
-import { receiptDialog, voidTableFeeDialog } from '../dialogs.js';
+import { CANCEL_WINDOW_MS } from '../billing.js';
+import { receiptDialog } from '../dialogs.js';
 import {
   esc, peso, fmtTime, fmtDate, fmtHuman, startOfDay, addDays, METHOD_LABEL,
   pageHeader, searchField, loadingBlock, emptyBlock, toast,
@@ -14,7 +14,7 @@ const RANGES = [
   { key: '30d', label: 'Last 30 days', since: () => addDays(startOfDay(), -29) },
 ];
 
-const VOID_MINUTES = VOID_ELIGIBLE_DURATION_MS / 60000;
+const CANCEL_MINUTES = CANCEL_WINDOW_MS / 60000;
 
 export function mount(el, ctx) {
   let range = 'today';
@@ -25,7 +25,7 @@ export function mount(el, ctx) {
   el.innerHTML = `
     ${pageHeader({
       title: 'Transactions',
-      subtitle: 'Find a sale, reprint its receipt, or void a short game. For totals and cash to count, see Reports.',
+      subtitle: 'Find a sale and reprint its receipt. For totals and cash to count, see Reports.',
     })}
     <div class="report-controls">
       <div class="report-controls__fields">
@@ -39,8 +39,8 @@ export function mount(el, ctx) {
       </div>
       <p class="muted small" data-region="count"></p>
     </div>
-    <p class="tx-rule">A game's table fee can be voided only if the table was used ${VOID_MINUTES} minutes or less.
-      After ${VOID_MINUTES} minutes there is no void. Items bought stay charged either way.</p>
+    <p class="tx-rule">To cancel a game with no table fee, open the table and use <strong>Cancel game</strong> in its first
+      ${CANCEL_MINUTES} minutes, before paying. After ${CANCEL_MINUTES} minutes there is no cancel, and a paid sale can't be changed.</p>
     <section class="card" aria-label="Transactions">
       <div class="table-wrap" data-region="table"></div>
     </section>`;
@@ -80,6 +80,7 @@ export function mount(el, ctx) {
             <td class="cell-nowrap">${showDate ? `${fmtDate(r.createdAt)}, ` : ''}${fmtTime(r.createdAt)}</td>
             <td>
               <strong>${r.tableId ? esc(r.tableName) : 'Walk-in'}</strong>
+              ${r.gameCancelled ? `<span class="tx-voided">Game cancelled · ${esc(r.cancelReason)}</span>` : ''}
               ${r.tableFeeVoided ? `<span class="tx-voided">Table fee voided · ${peso(r.refundAmount)} refunded</span>` : ''}
             </td>
             <td class="cell-nowrap">${r.tableId ? fmtHuman(r.durationMs || 0) : '—'}</td>
@@ -87,7 +88,6 @@ export function mount(el, ctx) {
             <td class="cell-nowrap">${esc(r.cashierName)}</td>
             <td class="t-right num"><strong>${peso(r.total)}</strong></td>
             <td class="t-right cell-nowrap">
-              ${canVoidTableFee(r, ctx.user) ? `<button type="button" class="link-btn link-btn--danger" data-void="${esc(r.id)}" aria-label="Void table fee for ${esc(r.tableName)}, ${fmtTime(r.createdAt)}">Void fee</button> · ` : ''}
               <button type="button" class="link-btn" data-id="${esc(r.id)}" aria-label="Receipt for ${r.tableId ? esc(r.tableName) : 'walk-in sale'}, ${fmtTime(r.createdAt)}">Receipt</button>
             </td>
           </tr>`).join('')}
@@ -109,12 +109,9 @@ export function mount(el, ctx) {
   el.querySelector('#tx-range').addEventListener('change', (e) => { range = e.target.value; subscribe(); });
   el.querySelector('#tx-search').addEventListener('input', (e) => { query = e.target.value.trim().toLowerCase(); render(); });
   wrap.addEventListener('click', (e) => {
-    const voidBtn = e.target.closest('button[data-void]');
-    const b = voidBtn || e.target.closest('button[data-id]');
-    const tx = b && rows?.find((r) => r.id === (voidBtn ? voidBtn.dataset.void : b.dataset.id));
-    if (!tx) return;
-    if (voidBtn) voidTableFeeDialog(tx);
-    else receiptDialog(tx);
+    const b = e.target.closest('button[data-id]');
+    const tx = b && rows?.find((r) => r.id === b.dataset.id);
+    if (tx) receiptDialog(tx);
   });
 
   subscribe();

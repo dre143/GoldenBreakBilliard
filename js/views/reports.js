@@ -370,7 +370,7 @@ function dailyTab(panel, ctx) {
               <td class="t-right num">${peso(x.total)}</td>
               <td class="cell-nowrap">${paymentLabel(x)}</td>
               <td class="cell-nowrap">${esc(x.cashierName)}</td>
-              <td>${x.tableFeeVoided ? `Table fee voided, ${peso(x.refundAmount)} refunded` : ''}</td>
+              <td>${esc(rep.cancelInfo(x)?.remark ?? '')}</td>
               <td class="no-print"><button type="button" class="link-btn" data-tx-id="${esc(x.id)}" aria-label="View receipt ${refNo(x.id)}">Receipt</button></td>
             </tr>`).join('') : `<tr><td colspan="${cols + 1}" class="sheet__empty">No sales ${shift === 'full' ? 'this business day' : 'this shift'} yet.</td></tr>`}
           </tbody>
@@ -462,7 +462,7 @@ function dailyTab(panel, ctx) {
           x.tableId ? fmtTime(x.endedAt) : '', x.tableId ? (x.plannedMs ? fmtBooking(x.plannedMs) : 'Open') : '',
           x.tableId ? Math.round((x.durationMs || 0) / 60000) : '', x.tableId ? x.tableFee : '', x.productTotal, x.total,
           METHOD_LABEL[x.method] || x.method, p.cash, p.gcash, x.cashierName,
-          x.tableFeeVoided ? `Table fee voided (${x.voidReason}), ${x.refundAmount} refunded` : '',
+          rep.cancelInfo(x)?.remark ?? '',
         ];
       }),
       ['Totals', '', '', '', '', '', t.tableFee, t.productTotal, t.total, '', t.cash, t.gcash, '', ''],
@@ -610,7 +610,7 @@ function rangeTab(panel, ctx) {
     const t = rep.totals(txs, expenses);
     const days = rep.byDay(txs, fromKey, toKey, expenses);
     const sessions = txs.filter((x) => x.tableId).length;
-    const voids = rep.voidedSales(txs);
+    const cancels = rep.cancelledGames(txs);
     body.innerHTML = `
       ${reportHead('Sales Report', [rangeLabel()])}
       <div class="stats stats--6">
@@ -665,22 +665,24 @@ function rangeTab(panel, ctx) {
           <p class="card-sub">${expenses.length ? `${expenses.length} ${expenses.length === 1 ? 'entry' : 'entries'} · ${peso(t.expenses)}` : 'No expenses in this range.'}</p></div>
         ${expenses.length ? expenseTable(expenses, { owner: true, withDate: true }) : ''}
       </section>
-      ${voids.length ? `
-      <section class="card" aria-labelledby="range-voids-title">
-        <div><h2 class="card-title" id="range-voids-title">Table fee voids</h2>
-          <p class="card-sub">${voids.length} waived · ${peso(rep.voidedTotals(txs).refunded)} refunded</p></div>
+      ${cancels.length ? `
+      <section class="card" aria-labelledby="range-cancels-title">
+        <div><h2 class="card-title" id="range-cancels-title">Cancelled games</h2>
+          <p class="card-sub">${cancels.length} game${cancels.length === 1 ? '' : 's'} cancelled in the first 5 minutes, with no table fee</p></div>
         <div class="table-wrap">
           <table class="plain-table">
-            <thead><tr><th scope="col">Voided</th><th scope="col">Table</th><th scope="col">Cashier</th><th scope="col">Reason</th><th scope="col" class="t-right">Refunded</th><th scope="col" class="no-print"><span class="sr-only">Receipt</span></th></tr></thead>
-            <tbody>${voids.map((x) => `
+            <thead><tr><th scope="col">When</th><th scope="col">Table</th><th scope="col">By</th><th scope="col">Reason</th><th scope="col" class="no-print"><span class="sr-only">Receipt</span></th></tr></thead>
+            <tbody>${cancels.map((x) => {
+              const c = rep.cancelInfo(x);
+              return `
               <tr>
-                <td class="cell-nowrap">${fmtDateTime(x.tableFeeVoidedAt)}</td>
+                <td class="cell-nowrap">${fmtDateTime(c.at)}</td>
                 <td>${esc(x.tableName)}</td>
-                <td>${esc(x.cashierName)}</td>
-                <td>${esc(x.voidReason)}${x.voidNote ? ` · ${esc(x.voidNote)}` : ''}</td>
-                <td class="t-right num">${peso(x.refundAmount)}</td>
+                <td>${esc(c.by)}</td>
+                <td>${esc(c.reason)}${c.note ? ` · ${esc(c.note)}` : ''}</td>
                 <td class="no-print"><button type="button" class="link-btn" data-tx-id="${esc(x.id)}">Receipt</button></td>
-              </tr>`).join('')}</tbody>
+              </tr>`;
+            }).join('')}</tbody>
           </table>
         </div>
       </section>` : ''}`;

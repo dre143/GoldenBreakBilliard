@@ -199,14 +199,24 @@ export function byShift(txs, expenses = []) {
 
 export const shiftId = (day, cashierId) => `${day}_${cashierId}`;
 
-/** Table-fee-voided sales, most recently voided first — the owner's audit trail for waived fees. */
-export function voidedSales(txs) {
-  return txs.filter((t) => t.tableFeeVoided).sort((a, b) => (b.tableFeeVoidedAt || 0) - (a.tableFeeVoidedAt || 0));
+/**
+ * Games cancelled in their first 5 minutes (no table fee), newest first. This is the owner's audit
+ * trail for waived fees. Older sales whose table fee was voided after payment are included too.
+ */
+/** One shape for a cancelled game or an older post-payment void: when, who, why, and the remark to show. */
+export function cancelInfo(t) {
+  if (t.gameCancelled) {
+    return { at: t.createdAt, by: t.cancelledByName, reason: t.cancelReason, note: t.cancelNote, remark: `Game cancelled (${t.cancelReason})` };
+  }
+  if (t.tableFeeVoided) {
+    return { at: t.tableFeeVoidedAt, by: t.tableFeeVoidedByName, reason: t.voidReason, note: t.voidNote, remark: `Table fee voided (${t.voidReason}), ${t.refundAmount} refunded` };
+  }
+  return null;
 }
 
-export function voidedTotals(txs) {
-  const list = voidedSales(txs);
-  return { count: list.length, refunded: round2(list.reduce((s, t) => s + (t.refundAmount || 0), 0)) };
+export function cancelledGames(txs) {
+  const at = (t) => (t.gameCancelled ? t.createdAt : t.tableFeeVoidedAt) || 0;
+  return txs.filter((t) => t.gameCancelled || t.tableFeeVoided).sort((a, b) => at(b) - at(a));
 }
 
 /** RFC 4180 CSV from a header row + data rows. */

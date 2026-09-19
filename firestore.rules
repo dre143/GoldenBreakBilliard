@@ -75,9 +75,9 @@ service cloud.firestore {
     //   start  → available → in_use, startedAt = server time
     //   end    → clock stops once, endedAt = server time (no pause, no resume)
     //   edit   → items / rounds only; start and end times can never be edited
+    //   cancel → within the first 5 minutes only: the table fee becomes ₱0 (see cancelsGame)
     //   close  → in_use (ended) → available, only together with a matching new sale
-    // There is no "reopen": voiding a sale only waives its table fee (see transactions below) and
-    // never touches the table, so a table freed at checkout stays freed.
+    // There is no "reopen", and a completed sale can never be changed, so a table freed at checkout stays freed.
 
     function startsSession() {
       let before = resource.data;
@@ -117,6 +117,33 @@ service cloud.firestore {
         && after.session.plannedMs >= before.session.plannedMs;
     }
 
+    // Cancel game: within the first 5 minutes (CANCEL_WINDOW_MS in js/billing.js), measured on server
+    // time, the table fee becomes ₱0. Either the running clock stops in this same write, or a clock
+    // that was already stopped ran 5 minutes or less. Allowed once; items stay on the bill.
+    function cancelsGame() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let c = after.session.cancelled;
+      return onlyChanges(['session', 'updatedAt'])
+        && before.status == 'in_use' && after.status == 'in_use'
+        && before.session.get('cancelled', null) == null
+        && c.keys().hasOnly(['reason', 'note', 'byId', 'byName', 'at'])
+        && c.reason is string && c.reason.size() > 0 && c.reason.size() <= 80
+        && c.note is string && c.note.size() <= 140
+        && c.byId == request.auth.uid
+        && c.at == request.time
+        && (
+          (before.session.ended == false
+            && after.session.diff(before.session).affectedKeys().hasOnly(['ended', 'endedAt', 'cancelled'])
+            && after.session.ended == true
+            && after.session.endedAt == request.time
+            && request.time <= before.session.startedAt + duration.value(300, 's'))
+          || (before.session.ended == true
+            && after.session.diff(before.session).affectedKeys().hasOnly(['cancelled'])
+            && before.session.endedAt.toMillis() - before.session.startedAt.toMillis() <= 300000)
+        );
+    }
+
     function closesWithSale(tableId) {
       let before = resource.data;
       let after = request.resource.data;
@@ -142,6 +169,7 @@ service cloud.firestore {
             || onlyChanges(['light', 'updatedAt'])
             || startsSession()
             || endsSession()
+            || cancelsGame()
             || editsSession()
             || closesWithSale(tableId));
     }
@@ -186,63 +214,35 @@ service cloud.firestore {
         && sale.endedAt.toMillis() == before.session.endedAt.toMillis()
         && sale.durationMs == before.session.endedAt.toMillis() - before.session.startedAt.toMillis()
         && sale.plannedMs == before.session.plannedMs
-        && billedOk(sale.billedMs, sale.durationMs, sale.plannedMs)
-        && feeOk(sale.tableFee, sale.billedMs)
+        // A normal sale is billed at the rate; a game cancelled within 5 minutes has no table fee.
+        && ((before.session.get('cancelled', null) == null
+              && sale.get('gameCancelled', false) == false
+              && billedOk(sale.billedMs, sale.durationMs, sale.plannedMs)
+              && feeOk(sale.tableFee, sale.billedMs))
+            || (before.session.get('cancelled', null) != null
+              && sale.gameCancelled == true
+              && sale.durationMs <= 300000
+              && sale.billedMs == sale.durationMs
+              && sale.tableFee == 0))
         && sale.productTotal is number && sale.productTotal >= 0
         && math.abs(sale.total - (sale.tableFee + sale.productTotal)) < 0.005
         && after.status == 'available' && after.session == null && after.lastTxId == id;
     }
 
-    // A table-fee void waives only the table charge and refunds it through whichever payment channel
-    // covered it; items, their stock, and the table itself are never touched. It's allowed once, only
-    // by the cashier who rang the sale or the owner, and only when the table was used
-    // VOID_ELIGIBLE_DURATION_MS (5 minutes, mirrors js/billing.js) or less — a real-time deadline would
-    // be pointless here since the eligibility itself never changes after checkout.
-    function tableFeeVoidOk() {
-      let before = resource.data;
-      let after = request.resource.data;
-      let refund = before.tableFee;
-      return before.get('tableFeeVoided', false) != true
-        && before.durationMs <= 300000
-        && after.tableFeeVoided == true
-        && after.tableFeeVoidedById == request.auth.uid
-        && after.tableFeeVoidedAt == request.time
-        && refund is number && refund > 0
-        && after.originalTableFee == before.tableFee
-        && after.originalTotal == before.total
-        && after.tableFee == 0
-        && math.abs(after.total - before.productTotal) < 0.005
-        && after.refundAmount is number && math.abs(after.refundAmount - refund) < 0.005
-        && after.refundMethod in ['cash', 'gcash']
-        && after.payments.cash is number && after.payments.gcash is number
-        && (
-          (after.refundMethod == 'cash'
-            && math.abs(after.payments.cash - (before.payments.cash - refund)) < 0.005
-            && after.payments.gcash == before.payments.gcash)
-          || (after.refundMethod == 'gcash'
-            && math.abs(after.payments.gcash - (before.payments.gcash - refund)) < 0.005
-            && after.payments.cash == before.payments.cash)
-        )
-        && after.payments.cash >= -0.005 && after.payments.gcash >= -0.005
-        && onlyChanges(['tableFeeVoided', 'tableFeeVoidedAt', 'tableFeeVoidedById', 'tableFeeVoidedByName',
-             'voidReason', 'voidNote', 'originalTableFee', 'originalTotal', 'tableFee', 'total',
-             'payments', 'refundAmount', 'refundMethod']);
-    }
-
     match /transactions/{id} {
       allow read: if isStaff();
+      // Nothing to pay (a cancelled game with no items) is recorded as method 'none'.
       allow create: if isStaff()
         && request.resource.data.cashierId == request.auth.uid
-        && request.resource.data.method in ['cash', 'gcash', 'split']
+        && (request.resource.data.method in ['cash', 'gcash', 'split']
+            || (request.resource.data.method == 'none' && request.resource.data.total == 0))
         && request.resource.data.createdAt == request.time
         && ((request.resource.data.tableId == null && quickSaleOk(request.resource.data))
             || (request.resource.data.tableId != null && saleMatchesSession(request.resource.data, id)));
-      allow update: if isStaff()
-        && (isOwner() || resource.data.cashierId == request.auth.uid)
-        && tableFeeVoidOk();
-      allow delete: if false;
+      // The ledger is append-only. A game is cancelled on the table before payment (cancelsGame),
+      // never by changing a completed sale.
+      allow update, delete: if false;
     }
-
     // Hall-wide settings (e.g. settings/shifts: whether the hall runs one shift or Day + Night).
     match /settings/{id} {
       allow read: if isStaff();

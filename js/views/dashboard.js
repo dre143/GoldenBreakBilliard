@@ -1,7 +1,7 @@
 import { db } from '../db.js';
 import { state, on } from '../state.js';
 import { isLowStock, activeSales } from '../billing.js';
-import { voidedSales } from '../reporting.js';
+import { cancelledGames, cancelInfo } from '../reporting.js';
 import { addStockDialog } from '../dialogs.js';
 import { receiptDialog } from '../dialogs.js';
 import { barChart } from './charts.js';
@@ -49,7 +49,7 @@ export function mount(el, ctx) {
         </section>
         <section class="card" aria-labelledby="voids-title">
           <div class="card-head">
-            <h2 class="card-title" id="voids-title">Table fee voids today</h2>
+            <h2 class="card-title" id="voids-title">Cancelled games today</h2>
             <span class="badge badge--danger" data-region="voids-count"></span>
           </div>
           <ul class="alert-list" data-region="voids"></ul>
@@ -142,7 +142,7 @@ export function mount(el, ctx) {
       <li>
         <button type="button" class="tx-row" data-id="${esc(x.id)}">
           <span class="tx-row__main">
-            <span class="tx-row__title">${x.tableId ? esc(x.tableName) : '<span class="badge badge--neutral">Walk-in</span>'}${x.tableFeeVoided ? ' <span class="badge badge--danger">Table fee voided</span>' : ''}</span>
+            <span class="tx-row__title">${x.tableId ? esc(x.tableName) : '<span class="badge badge--neutral">Walk-in</span>'}${cancelInfo(x) ? ' <span class="badge badge--danger">Cancelled</span>' : ''}</span>
             <span class="tx-row__sub">${fmtTime(x.createdAt)} · ${METHOD_LABEL[x.method] || esc(x.method)} · ${esc(x.cashierName)}</span>
           </span>
           <span class="tx-row__amount num">${peso(x.total)}</span>
@@ -150,24 +150,27 @@ export function mount(el, ctx) {
       </li>`).join('') : `<li>${emptyBlock('No transactions this week yet.')}</li>`;
   }
 
-  /** Every table fee a cashier waived today — the owner's at-a-glance audit trail, since it needs no approval. */
+  /** Every game a cashier cancelled today (no table fee) — the owner's at-a-glance audit trail, since it needs no approval. */
   function renderVoids() {
     const countEl = $('[data-region=voids-count]');
     const list = $('[data-region=voids]');
     if (!txs) { countEl.textContent = ''; list.innerHTML = `<li>${loadingBlock()}</li>`; return; }
     const t0 = startOfDay();
-    const todays = voidedSales(txs.filter((x) => x.createdAt >= t0));
-    countEl.textContent = `${todays.length} item${todays.length === 1 ? '' : 's'}`;
-    list.innerHTML = todays.length ? todays.map((x) => `
+    const todays = cancelledGames(txs.filter((x) => x.createdAt >= t0));
+    countEl.textContent = `${todays.length} game${todays.length === 1 ? '' : 's'}`;
+    list.innerHTML = todays.length ? todays.map((x) => {
+      const c = cancelInfo(x);
+      return `
       <li>
         <button type="button" class="alert-item alert-item--action" data-id="${esc(x.id)}" aria-label="View receipt for ${esc(x.tableName)}, ${fmtTime(x.createdAt)}">
           <span class="alert-item__icon" aria-hidden="true">${icon('x')}</span>
           <span class="alert-item__text">
-            <span class="alert-item__name">${esc(x.tableName)} · ${esc(x.cashierName)}</span>
-            <span class="alert-item__sub">${esc(x.voidReason)} · ${fmtTime(x.tableFeeVoidedAt)} · <span class="num">${peso(x.refundAmount)}</span> refunded</span>
+            <span class="alert-item__name">${esc(x.tableName)} · ${esc(c.by)}</span>
+            <span class="alert-item__sub">${esc(c.reason)} · ${fmtTime(c.at)}</span>
           </span>
         </button>
-      </li>`).join('') : `<li class="all-good">${icon('check')}No table fees waived today.</li>`;
+      </li>`;
+    }).join('') : `<li class="all-good">${icon('check')}No games cancelled today.</li>`;
   }
 
   function renderLowStock() {

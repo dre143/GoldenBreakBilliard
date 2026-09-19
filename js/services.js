@@ -6,8 +6,8 @@
 // firestore.rules re-computes and verifies it, so changing a till's clock can't change a bill.
 import { db, auth } from './db.js';
 import {
-  elapsedMs, tableFee, round2, itemsTotal, canVoidTableFee, VOID_REASONS, PRICING,
-  billableMs, plannedMs, BOOKING_STEP_MS,
+  elapsedMs, round2, itemsTotal, CANCEL_REASONS, CANCEL_WINDOW_MS, PRICING,
+  billableMs, sessionFee, plannedMs, BOOKING_STEP_MS,
 } from './billing.js';
 import { SERVER_TIME, serverNow } from './clock.js';
 
@@ -57,6 +57,31 @@ export function endSession(tableId) {
     if (!t?.session) throw new Error('This table has no open session.');
     if (t.session.ended) return;
     tx.update('tables', tableId, { 'session.ended': true, 'session.endedAt': SERVER_TIME, updatedAt: SERVER_TIME });
+  });
+}
+
+/**
+ * Cancel a game within the first CANCEL_WINDOW_MS (5 minutes): the customer changed their mind, so
+ * the table fee is ₱0. A running clock stops in the same write (server-stamped); a clock that was
+ * already stopped must have run 5 minutes or less. firestore.rules checks the window against server
+ * time. Items already on the bill are still owed and are paid at checkout.
+ */
+export function cancelGame(tableId, { reason, note = '' } = {}, user) {
+  if (!CANCEL_REASONS.includes(reason)) return Promise.reject(new Error('Choose a reason for cancelling.'));
+  if (reason === 'Other' && !note.trim()) return Promise.reject(new Error('Add a note explaining why.'));
+  return db.transaction(async (tx) => {
+    const t = await tx.get('tables', tableId);
+    const s = t?.session;
+    if (!s) throw new Error('This table has no open session.');
+    if (s.cancelled) throw new Error('This game has already been cancelled.');
+    if (elapsedMs(t, serverNow()) > CANCEL_WINDOW_MS) {
+      throw new Error('This game has run for more than 5 minutes, so it can no longer be cancelled.');
+    }
+    const cancelled = { reason, note: note.trim(), byId: user.uid, byName: user.name, at: SERVER_TIME };
+    tx.update('tables', tableId, s.ended
+      ? { 'session.cancelled': cancelled, updatedAt: SERVER_TIME }
+      : { 'session.ended': true, 'session.endedAt': SERVER_TIME, 'session.cancelled': cancelled, updatedAt: SERVER_TIME });
+    return { tableName: t.name, hasItems: (s.items || []).length > 0 };
   });
 }
 
@@ -118,7 +143,7 @@ export class TotalChangedError extends Error {
  * TotalChangedError tells the UI to show the final amount (the clock stays stopped).
  */
 export async function completeCheckout(tableId, { method, tendered, cashPart, expectedTotal = null }, user) {
-  if (!PAYMENT_METHODS.includes(method)) throw new Error('Choose a payment method.');
+  if (!PAYMENT_METHODS.includes(method) && method !== 'none') throw new Error('Choose a payment method.');
   await endSession(tableId);
 
   return db.transaction(async (tx) => {
@@ -135,16 +160,24 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, ex
     });
 
     const durationMs = s.endedAt - s.startedAt;
-    const billedMs = billableMs(s, durationMs); // booked hours are the minimum charge
-    const fee = tableFee(billedMs);
+    const cancelled = s.cancelled || null;
+    // Booked hours are the minimum charge, except on a cancelled game, which has no table fee.
+    const billedMs = cancelled ? durationMs : billableMs(s, durationMs);
+    const fee = sessionFee(s, durationMs);
     const lines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
     const productTotal = itemsTotal(items);
     const total = round2(fee + productTotal);
     if (expectedTotal != null && round2(expectedTotal) !== total) throw new TotalChangedError(total, durationMs);
 
+    // Nothing to pay (a cancelled game with no items): no payment method is recorded.
+    if (total === 0) method = 'none';
+    else if (method === 'none') throw new Error('Choose a payment method.');
+
     let paid = null;
     let payments;
-    if (method === 'cash') {
+    if (method === 'none') {
+      payments = { cash: 0, gcash: 0 };
+    } else if (method === 'cash') {
       paid = tendered == null ? total : round2(tendered);
       if (paid < total) throw new Error('Cash tendered is less than the total.');
       payments = { cash: total, gcash: 0 };
@@ -168,6 +201,10 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, ex
       tableFee: fee, items: lines, productTotal, total, method, payments,
       tendered: paid, change: paid == null ? null : round2(paid - total),
       cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
+      ...(cancelled ? {
+        gameCancelled: true, cancelReason: cancelled.reason, cancelNote: cancelled.note || '',
+        cancelledById: cancelled.byId, cancelledByName: cancelled.byName,
+      } : {}),
     };
     tx.set('transactions', id, record);
     tx.update('tables', tableId, { status: 'available', session: null, lastTxId: id, updatedAt: SERVER_TIME });
@@ -224,47 +261,6 @@ export function completeQuickSale({ items, method, tendered, cashPart }, user) {
     };
     tx.set('transactions', id, record);
     return { id, ...record, createdAt: serverNow() };
-  });
-}
-
-/**
- * Waive the table fee on a completed sale, once, if the table was used for
- * billing.VOID_ELIGIBLE_DURATION_MS (5 minutes) or less — e.g. the customer decided not to play
- * after all. Items on the sale are never touched: no stock is returned, and their charge stays owed.
- * The waived amount is refunded through whichever payment channel (cash/GCash) covers it; for a
- * split payment the caller picks the channel (refundMethod), otherwise it's inferred.
- */
-export function voidTableFee(txId, { reason, note = '', refundMethod } = {}, user) {
-  if (!VOID_REASONS.includes(reason)) return Promise.reject(new Error('Choose a reason for the void.'));
-  if (reason === 'Other' && !note.trim()) return Promise.reject(new Error('Add a note explaining the void.'));
-  return db.transaction(async (tx) => {
-    const sale = await tx.get('transactions', txId);
-    if (!sale) throw new Error('Transaction not found.');
-    if (sale.tableFeeVoided) throw new Error('The table fee for this sale has already been voided.');
-    if (user.role !== 'owner' && sale.cashierId !== user.uid) {
-      throw new Error('Only the cashier who completed this sale or the owner can void the table fee.');
-    }
-    if (!canVoidTableFee(sale, user)) {
-      throw new Error('The table was used for more than 5 minutes, so the table fee can no longer be voided.');
-    }
-
-    const refund = sale.tableFee;
-    const payments = { cash: sale.payments?.cash || 0, gcash: sale.payments?.gcash || 0 };
-    const method = refundMethod || (payments.cash >= refund ? 'cash' : 'gcash');
-    if (method !== 'cash' && method !== 'gcash') throw new Error('Choose how the refund was given.');
-    if (round2(payments[method]) < round2(refund)) {
-      throw new Error(`Not enough was paid via ${method === 'cash' ? 'cash' : 'GCash'} to refund ₱${refund.toFixed(2)} that way.`);
-    }
-    payments[method] = round2(payments[method] - refund);
-
-    tx.update('transactions', txId, {
-      tableFeeVoided: true, tableFeeVoidedAt: SERVER_TIME, tableFeeVoidedById: user.uid, tableFeeVoidedByName: user.name,
-      voidReason: reason, voidNote: note.trim(),
-      originalTableFee: sale.tableFee, originalTotal: sale.total,
-      tableFee: 0, total: round2(sale.productTotal || 0),
-      payments, refundAmount: round2(refund), refundMethod: method,
-    });
-    return { tableName: sale.tableName, refund: round2(refund), method };
   });
 }
 

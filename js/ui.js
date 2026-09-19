@@ -21,6 +21,11 @@ export function fmtDuration(ms) {
   const s = Math.floor(ms / 1000);
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
+/** Short countdown, e.g. "4:58". */
+export function fmtCountdown(ms) {
+  const s = Math.ceil(Math.max(0, ms) / 1000);
+  return `${Math.floor(s / 60)}:${pad(s % 60)}`;
+}
 export function fmtHuman(ms) {
   const m = Math.ceil(ms / 60000);
   const h = Math.floor(m / 60);
@@ -66,7 +71,7 @@ export const initials = (name) =>
 export const isOnline = (u) => !!u.online && (u.demoPresence || serverNow() - (u.lastSeen || 0) < 3 * 60000);
 
 // 'card' is kept only so older transactions still display a label; it's no longer offered.
-export const METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', split: 'Split', card: 'Card' };
+export const METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', split: 'Split', card: 'Card', none: 'No charge' };
 
 /* ---------- small components ---------- */
 
