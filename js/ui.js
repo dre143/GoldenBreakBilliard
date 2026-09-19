@@ -106,6 +106,14 @@ export function thumb(name, category, size = '') {
   return `<span class="thumb thumb--${tone} ${size}" aria-hidden="true">${esc(initials(name))}</span>`;
 }
 
+/** Icon-only Refresh / Thermal printer / Cash drawer buttons. Clicks are handled once, in app.js (data-tool). */
+export const toolIcons = (cls = '') => `
+  <div class="tool-icons ${cls}" role="group" aria-label="Tools">
+    <button type="button" class="tool-btn" data-tool="refresh" aria-label="Refresh" title="Refresh">${icon('refresh')}</button>
+    <button type="button" class="tool-btn" data-tool="printer" aria-label="Thermal printer" title="Thermal printer">${icon('print')}<span class="tool-dot" aria-hidden="true"></span></button>
+    <button type="button" class="tool-btn" data-tool="drawer" aria-label="Cash drawer" title="Cash drawer">${icon('box')}</button>
+  </div>`;
+
 export const pageHeader = ({ title, subtitle = '', actions = '' }) => `
   <header class="page-head">
     <div class="page-head__text">

@@ -1,6 +1,6 @@
 import { db, auth, mode } from './db.js';
 import { state, set, emit, reset } from './state.js';
-import { icon, esc, initials, toast, addDays } from './ui.js';
+import { icon, esc, initials, toast, addDays, toolIcons } from './ui.js';
 import { setServerOffset } from './clock.js';
 import * as svc from './services.js';
 import { renderAuth, renderPending } from './views/auth.js';
@@ -17,6 +17,16 @@ import { startTimeAlerts } from './time-alerts.js';
 import { printerDialog, cashDrawerDialog } from './dialogs.js';
 
 const root = document.getElementById('root');
+
+// Phones, tablets (either orientation) and narrow windows get the top bar + slide-out menu; a desktop with
+// a mouse keeps the sidebar. Detected here because tablet browsers/WebViews don't reliably report a
+// touch screen through CSS media queries.
+const isTouchTablet = /Android|iPad|iPhone|Tablet/i.test(navigator.userAgent)
+  || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+const narrow = window.matchMedia('(max-width: 1180px)');
+const syncCompactNav = () => document.documentElement.classList.toggle('compact-nav', isTouchTablet || narrow.matches);
+syncCompactNav();
+narrow.addEventListener('change', syncCompactNav);
 
 // Offline safety net (sw.js): lets the app reopen from its saved copy when the tablet has no internet.
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
@@ -171,6 +181,7 @@ function renderShell() {
       <header class="topbar">
         <button type="button" class="icon-btn icon-btn--light" data-action="toggle-nav" aria-controls="sidebar" aria-expanded="false" aria-label="Open navigation">${icon('menu')}</button>
         ${brandCompact()}
+        ${toolIcons('tool-icons--topbar')}
       </header>
       <aside class="sidebar" id="sidebar">
         ${brand()}
@@ -181,12 +192,12 @@ function renderShell() {
         <div class="sidebar__spacer"></div>
         ${mode === 'demo' ? `<div class="demo-note">Demo mode · data is stored in this browser
           <button type="button" class="demo-note__btn" data-action="clear-demo">${icon('x')}Clear all sales</button></div>` : ''}
-        <button type="button" class="printer-btn" data-action="printer">
+        <button type="button" class="printer-btn" data-tool="printer">
           ${icon('print')}<span class="printer-btn__text">Thermal printer</span>
           <span class="printer-dot" data-region="printer-dot" aria-hidden="true"></span>
           <span class="sr-only" data-region="printer-state"></span>
         </button>
-        <button type="button" class="printer-btn printer-btn--drawer" data-action="drawer">
+        <button type="button" class="printer-btn printer-btn--drawer" data-tool="drawer">
           ${icon('box')}<span class="printer-btn__text">Cash drawer</span>
         </button>
         <div class="user-chip">
@@ -205,10 +216,17 @@ function renderShell() {
   const shell = root.querySelector('.shell');
   const toggle = root.querySelector('[data-action=toggle-nav]');
   root.querySelector('[data-action=sign-out]').addEventListener('click', (e) => signOut(e.currentTarget));
-  root.querySelector('[data-action=printer]').addEventListener('click', () => { setNav(false); printerDialog(); });
-  root.querySelector('[data-action=drawer]').addEventListener('click', () => { setNav(false); cashDrawerDialog(); });
+  shell.addEventListener('click', (e) => {
+    const tool = e.target.closest('[data-tool]')?.dataset.tool;
+    if (!tool) return;
+    setNav(false);
+    if (tool === 'printer') printerDialog();
+    else if (tool === 'drawer') cashDrawerDialog();
+    else if (tool === 'refresh') location.reload();
+  });
   printerCleanup?.();
   printerCleanup = printer.subscribePrinter((s) => {
+    shell.classList.toggle('printer-on', Boolean(s.kind));
     const dot = root.querySelector('[data-region=printer-dot]');
     if (!dot) return;
     dot.classList.toggle('is-on', Boolean(s.kind));

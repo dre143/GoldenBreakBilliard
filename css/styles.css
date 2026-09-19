@@ -206,6 +206,27 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 .printer-btn__text { flex: 1; text-align: left; }
 .printer-dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(160, 160, 160, .55); flex: none; }
 .printer-dot.is-on { background: #3FB67A; box-shadow: 0 0 0 3px rgba(63, 182, 122, .2); }
+
+/* Icon-only Refresh / Printer / Cash drawer: in the top bar on phones and tablets (the sidebar keeps labeled copies on desktop). */
+.tool-icons { display: none; align-items: center; gap: 6px; }
+.tool-btn {
+  position: relative; display: grid; place-items: center;
+  width: var(--tap); height: var(--tap); padding: 0;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: var(--surface); color: var(--ink); cursor: pointer;
+}
+.tool-btn:hover { background: var(--ground-deep); }
+.tool-btn:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+.tool-btn .ico { width: 20px; height: 20px; }
+.tool-dot { position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: rgba(160, 160, 160, .75); border: 1.5px solid var(--surface); }
+.shell.printer-on .tool-dot { background: #3FB67A; }
+.tool-icons--topbar { margin-left: auto; }
+.tool-icons--topbar .tool-btn { border-color: transparent; background: transparent; color: var(--ivory); }
+.tool-icons--topbar .tool-btn:hover { background: rgba(255, 255, 255, .1); }
+.tool-icons--topbar .tool-dot { border-color: var(--felt-deep); }
+/* html.compact-nav is set in app.js: phones, tablets (any orientation) and narrow windows. */
+html.compact-nav .tool-icons--topbar { display: flex; }
+html.compact-nav .sidebar .printer-btn { display: none; }
 .printer-status { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 .printer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .printer-actions--stack { flex-direction: column; align-items: stretch; }
@@ -1210,27 +1231,35 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
   .split { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Phones and tablets (any orientation): the sidebar becomes a slide-out menu and a top bar
+   (menu, logo, tools) takes over. Desktop with a mouse keeps the sidebar. */
+html.compact-nav .shell {
+  grid-template-columns: minmax(0, 1fr);
+  /* Top bar keeps its own height; the page fills the rest. Without this, a short page (e.g. Checkout with one
+     table) makes the shell share its leftover height with the top bar row and the bar grows tall. */
+  grid-template-rows: auto 1fr;
+}
+html.compact-nav .topbar {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 4px;
+  padding: calc(6px + env(safe-area-inset-top)) 12px 6px 6px;
+  background: var(--felt-deep); color: var(--ivory);
+}
+html.compact-nav .sidebar {
+  position: fixed; inset: 0 auto 0 0; z-index: 50;
+  height: 100vh;
+  height: 100dvh; /* fixed + inset 0/0 can over-constrain against the plain 100vh above otherwise */
+  width: min(280px, 85vw);
+  padding-top: calc(24px + env(safe-area-inset-top));
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform .2s ease, visibility .2s;
+}
+html.compact-nav .shell.nav-open .sidebar { transform: none; visibility: visible; }
+html.compact-nav .scrim { display: block; position: fixed; inset: 0; z-index: 40; background: rgba(14, 47, 33, .5); }
+html.compact-nav .scrim[hidden] { display: none; }
+
 @media (max-width: 900px) {
-  .shell { grid-template-columns: minmax(0, 1fr); }
-  .topbar {
-    position: sticky; top: 0; z-index: 30;
-    display: flex; align-items: center; gap: 4px;
-    padding: calc(6px + env(safe-area-inset-top)) 12px 6px 6px;
-    background: var(--felt-deep); color: var(--ivory);
-  }
-  .sidebar {
-    position: fixed; inset: 0 auto 0 0; z-index: 50;
-    height: 100vh;
-    height: 100dvh; /* fixed + inset 0/0 can over-constrain against the plain 100vh above otherwise */
-    width: min(280px, 85vw);
-    padding-top: calc(24px + env(safe-area-inset-top));
-    transform: translateX(-100%);
-    visibility: hidden;
-    transition: transform .2s ease, visibility .2s;
-  }
-  .shell.nav-open .sidebar { transform: none; visibility: visible; }
-  .scrim { display: block; position: fixed; inset: 0; z-index: 40; background: rgba(14, 47, 33, .5); }
-  .scrim[hidden] { display: none; }
   .main { padding: 22px 16px 40px; }
   .page-head__actions { width: 100%; }
   .search { flex: 1; min-width: 180px; }
@@ -1274,3 +1303,11 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
 /* Actions panel that opens when a table card is tapped. */
 .table-actions { display: grid; gap: 10px; }
 .table-actions .btn { width: 100%; }
+
+/* Small-tablet floor view (kept last so it overrides the base rules above): four narrower tables per row. */
+@media (min-width: 601px) and (max-width: 900px) {
+  .pool-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 30px 12px; }
+  .main { padding-top: 22px; padding-bottom: 32px; }
+  .pool__table { padding: 12px; }
+  .pool__cloth { padding: 10px 8px; }
+}

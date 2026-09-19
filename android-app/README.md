@@ -16,7 +16,7 @@ Copied from the Marimar Inn tablet app. This small Android app opens the live Go
    if Android asks.
 2. Pair the thermal printer in **Android Settings → Bluetooth** (not inside the app).
 3. Open **Golden Break**. Allow **Nearby devices** when Android asks (needed for Bluetooth).
-4. In the app: sidebar → **Thermal printer** → tap the printer's name → **Print test**.
+4. In the app: top bar → printer icon → **Connect via Bluetooth** → tap the printer's name → **Print test**.
 
 Optional kiosk lock: Android **Settings → Security → App pinning** (or "Pin app"), then pin Golden Break so
 staff can't leave the app without the PIN.
@@ -40,6 +40,8 @@ Each update is a **new file** with a higher number, and `versionCode` in `app/bu
 
 - `releases/GoldenBreak-tablet-v1.apk`: first version (full screen, direct Bluetooth printing, cash drawer,
   offline reload)
-- The next change will be `v2`, and so on.
+- `releases/GoldenBreak-tablet-v2.apk`: same app with the version raised so it installs over v1 as an update. The site
+  itself (top bar with refresh/printer/cash drawer, Connect via Bluetooth) updates from the web, not from the APK.
+- The next change will be `v3`, and so on.
 
 Install the **highest** version number.

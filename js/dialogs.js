@@ -468,10 +468,12 @@ export function printerDialog() {
     onClose: () => off(),
   });
   const region = dlg.querySelector('[data-region=printer]');
+  let picking = false; // tablet app: the paired-printer list opens after tapping Connect via Bluetooth
 
   const render = (s) => {
     const kindLabel = { bluetooth: 'Bluetooth', serial: 'USB', rawbt: 'via RawBT app', native: 'Tablet Bluetooth' }[s.kind] || '';
-    const paired = !s.kind && printer.isNativeApp() ? printer.listNativePrinters() : null;
+    const inApp = !s.kind && printer.isNativeApp();
+    const paired = inApp && picking ? printer.listNativePrinters() : null;
     region.innerHTML = `
       <p class="printer-status">
         <span class="printer-dot ${s.kind ? 'is-on' : ''}" aria-hidden="true"></span>
@@ -482,17 +484,18 @@ export function printerDialog() {
         <button type="button" class="btn btn--neutral" data-p="test">${icon('print')}Print test</button>
         <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
         <button type="button" class="btn btn--neutral" data-p="disconnect">Disconnect</button>
-      </div>` : paired ? `
+      </div>` : inApp ? `
       <div class="printer-actions printer-actions--stack">
-        ${paired.length ? paired.map((d) => `<button type="button" class="btn btn--neutral" data-p="native" data-id="${esc(d.id)}">${esc(d.name)}</button>`).join('')
+        <button type="button" class="btn btn--primary" data-p="native-connect">Connect via Bluetooth</button>
+        ${paired ? `${paired.length ? paired.map((d) => `<button type="button" class="btn btn--neutral" data-p="native" data-id="${esc(d.id)}">${esc(d.name)}</button>`).join('')
           : '<p class="muted small">No paired printers yet. Pair the thermal printer in Android Settings → Bluetooth first, then tap Refresh.</p>'}
-        <button type="button" class="btn btn--neutral" data-p="refresh">Refresh printer list</button>
+        <button type="button" class="btn btn--neutral" data-p="refresh">Refresh printer list</button>` : ''}
         <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
       </div>
-      <p class="muted small">Tap the printer to connect. It connects over the tablet's own Bluetooth, so no extra app is needed.</p>` : `
+      <p class="muted small">Pair the printer once in Android Settings → Bluetooth, then tap Connect via Bluetooth and choose it. It connects over the tablet's own Bluetooth, so no extra app is needed.</p>` : `
       <div class="printer-actions printer-actions--stack">
-        <button type="button" class="btn btn--neutral" data-p="bluetooth" ${printer.supports.bluetooth() ? '' : 'disabled'}>Connect via Bluetooth</button>
-        <button type="button" class="btn btn--neutral" data-p="serial" ${printer.supports.serial() ? '' : 'disabled'}>Connect via USB cable</button>
+        <button type="button" class="btn btn--neutral" data-p="bluetooth">Connect via Bluetooth</button>
+        <button type="button" class="btn btn--neutral" data-p="serial">Connect via USB cable</button>
         <button type="button" class="btn btn--neutral" data-p="rawbt">Print via RawBT app (Android)</button>
         <button type="button" class="btn btn--neutral" data-p="preview">${icon('eye')}Preview test</button>
       </div>
@@ -525,6 +528,12 @@ export function printerDialog() {
       case 'native': {
         const device = printer.listNativePrinters().find((d) => d.id === b.dataset.id);
         return device && run(async () => printer.connectNative(device), `Connected to ${device.name}.`);
+      }
+      case 'native-connect': {
+        const list = printer.listNativePrinters();
+        if (list.length === 1) return run(async () => printer.connectNative(list[0]), `Connected to ${list[0].name}.`);
+        picking = true;
+        return render(printer.getPrinterState());
       }
       case 'refresh': return render(printer.getPrinterState());
       case 'test': return run(printer.printTestPage, 'Test sent to the printer.');

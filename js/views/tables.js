@@ -22,18 +22,9 @@ export function mount(el, ctx) {
         <a class="btn btn--neutral" href="#/quick-sale">${icon('bag')}Quick Sale</a>
         ${owner ? `<button type="button" class="btn btn--neutral" data-action="manage-tables">${icon('edit')}Manage Tables</button>` : ''}`,
     })}
-    <ul class="chips" data-region="chips" aria-label="Floor summary"></ul>
     <section class="pool-grid" data-region="grid" aria-label="Billiard tables"></section>`;
 
-  const chips = el.querySelector('[data-region=chips]');
   const grid = el.querySelector('[data-region=grid]');
-
-  function renderChips() {
-    const count = (s) => state.tables.filter((t) => t.status === s).length;
-    chips.innerHTML = `
-      <li class="chip"><span class="dot dot--live" aria-hidden="true"></span>In Use <strong class="num">${count('in_use')}</strong></li>
-      <li class="chip"><span class="dot dot--idle" aria-hidden="true"></span>Available <strong class="num">${count('available')}</strong></li>`;
-  }
 
   function renderGrid() {
     if (!state.loaded.tables) { grid.innerHTML = loadingBlock('Loading tables…'); return; }
@@ -48,7 +39,7 @@ export function mount(el, ctx) {
   }
 
   const offs = [
-    on('tables', () => { renderChips(); renderGrid(); }),
+    on('tables', renderGrid),
     on('tick', () => updateTableTimers(grid)),
   ];
 
@@ -106,7 +97,6 @@ export function mount(el, ctx) {
     }
   });
 
-  renderChips();
   renderGrid();
   return () => offs.forEach((off) => off());
 }
