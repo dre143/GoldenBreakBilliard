@@ -159,6 +159,14 @@ export const auth = {
   async isSetupDone() { return true; },
   async createOwner() { return newId(); },
   async createAccount() { return `u-${newId()}`; },
+  /** Start from zero: no sales, expenses or restocks, every table free. Staff, tables and products stay. */
+  clearDemoSales() {
+    data.transactions = {};
+    data.expenses = {};
+    data.restocks = {};
+    for (const t of Object.values(data.tables || {})) Object.assign(t, { status: 'available', session: null, light: false, lastTxId: null });
+    commit(new Set(['tables', 'restocks', 'transactions', 'expenses']));
+  },
   resetDemo() {
     localStorage.removeItem(KEY);
     sessionStorage.removeItem(SESSION_KEY);

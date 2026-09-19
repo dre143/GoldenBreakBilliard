@@ -17,6 +17,10 @@ has the same API as Firestore. Data lives in `localStorage` and syncs live betwe
 through `BroadcastChannel`, so two tabs act like two terminals. Pick an Owner or Cashier
 account on the sign-in screen. "Reset demo data" puts the seed data back.
 
+To use demo mode while a real Firebase config is filled in, open **http://localhost:5173/?demo**. Local testing then never
+writes to the live database. **Clear sales (start empty)** on the demo sign-in screen removes all demo sales, expenses and
+open tables but keeps staff, tables and products.
+
 ### Firebase mode
 1. Create a Firebase project. Enable **Authentication → Email/Password** and **Cloud Firestore**.
 2. Paste your web app config into `js/firebase-config.js`.

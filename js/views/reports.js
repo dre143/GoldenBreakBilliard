@@ -138,16 +138,10 @@ export function mount(el, ctx) {
     }));
     target.innerHTML = `
       <div class="stats">
-        ${stat('Gross sales', peso(t.total), t.count ? `${t.count} transactions · avg ${peso(t.total / t.count)}` : 'No transactions', 'stat--dark')}
-        ${stat('Table revenue', peso(t.tableFee), `${hours(t.durationMs)} played · ${t.rounds} rounds`)}
-        ${stat('Product sales', peso(t.productTotal), `${t.items} items sold`)}
-        ${stat('Daily average', peso(t.total / days.length), `over ${days.length} business day${days.length === 1 ? '' : 's'}`)}
-      </div>
-      <div class="stats">
-        ${stat('Expenses', peso(t.expenses), `${t.expenseCount} item${t.expenseCount === 1 ? '' : 's'} paid from the drawer`, t.expenses ? 'stat--danger' : '')}
-        ${stat('Net sales', peso(t.net), 'Gross sales − expenses', 'stat--dark')}
-        ${stat('Cash collected', peso(t.cash), `GCash ${peso(t.gcash)}`)}
-        ${stat('Cash on hand', peso(t.cashToCount), 'Cash collected − expenses')}
+        ${stat('Total sales', peso(t.total), `Tables ${peso(t.tableFee)} · Products ${peso(t.productTotal)}`)}
+        ${stat('Expenses', peso(t.expenses), t.expenseCount ? `${t.expenseCount} item${t.expenseCount === 1 ? '' : 's'} paid from the drawer` : 'None', t.expenses ? 'stat--danger' : '')}
+        ${stat('Net sales', peso(t.net), 'Total sales − expenses', 'stat--dark')}
+        ${stat('Transactions', t.count, t.count ? `${hours(t.durationMs)} played · ${t.items} items sold` : 'No sales yet')}
       </div>
       ${days.length > 1 ? `
       <section class="card" aria-labelledby="rep-chart-title">

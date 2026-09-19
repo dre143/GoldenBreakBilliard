@@ -1,6 +1,6 @@
 import { db, auth } from '../db.js';
 import * as svc from '../services.js';
-import { esc, initials, icon } from '../ui.js';
+import { esc, initials, icon, toast } from '../ui.js';
 import { backgroundBalls } from './auth-balls.js';
 
 // The theatrical "front door": dark/gold atmosphere, deliberately unlike the ivory app behind it.
@@ -166,6 +166,7 @@ function renderDemo(root) {
       <p class="gb-card__sub">Demo mode: data lives in this browser and syncs live between tabs. Add your Firebase config in <code>js/firebase-config.js</code> to go live.</p>
     </div>
     <ul class="gb-list" data-region="accounts" aria-label="Demo accounts"></ul>
+    <button type="button" class="gb-secondary" data-action="clear">${icon('x')}Clear sales (start empty)</button>
     <button type="button" class="gb-secondary" data-action="reset">${icon('restock')}Reset demo data</button>`);
   const list = root.querySelector('[data-region=accounts]');
   const off = db.listen('users', (users) => {
@@ -188,6 +189,11 @@ function renderDemo(root) {
     if (b) { off(); auth.signInAs(b.dataset.uid); }
   });
   root.querySelector('[data-action=reset]').addEventListener('click', () => auth.resetDemo());
+  root.querySelector('[data-action=clear]').addEventListener('click', () => {
+    if (!confirm('Clear all demo sales, expenses and open tables? Staff, tables and products stay.')) return;
+    auth.clearDemoSales();
+    toast('Demo sales cleared. Everything starts at zero.');
+  });
 }
 
 export function renderPending(root, authUser) {
