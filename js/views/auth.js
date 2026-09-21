@@ -2,6 +2,7 @@ import { db, auth } from '../db.js';
 import * as svc from '../services.js';
 import { esc, initials, icon, toast } from '../ui.js';
 import { backgroundBalls } from './auth-balls.js';
+import { roleLabel, usersQuery } from '../roles.js';
 
 // The theatrical "front door": dark/gold atmosphere, deliberately unlike the ivory app behind it.
 // The card content differs per state (sign-in form, first-run setup, demo picker, pending), but
@@ -169,6 +170,8 @@ function renderDemo(root) {
     <button type="button" class="gb-secondary" data-action="clear">${icon('x')}Clear sales (start empty)</button>
     <button type="button" class="gb-secondary" data-action="reset">${icon('restock')}Reset demo data</button>`);
   const list = root.querySelector('[data-region=accounts]');
+  // Demo picker only: a superadmin account is left out unless the page is opened with ?superadmin.
+  const asSuper = new URLSearchParams(location.search).has('superadmin');
   const off = db.listen('users', (users) => {
     if (!list.isConnected) { off(); return; }
     users.sort((a, b) => (a.role === 'owner' ? -1 : b.role === 'owner' ? 1 : a.name.localeCompare(b.name)));
@@ -178,12 +181,12 @@ function renderDemo(root) {
           <span class="gb-avatar" aria-hidden="true">${esc(initials(u.name))}</span>
           <span class="gb-account__text">
             <span class="gb-account__name">${esc(u.name)}</span>
-            <span class="gb-account__role">${u.role === 'owner' ? 'Owner · full access' : 'Cashier'}</span>
+            <span class="gb-account__role">${u.role === 'cashier' ? 'Cashier' : `${roleLabel(u.role)} · full access`}</span>
           </span>
           <span class="gb-account__go" aria-hidden="true">Sign in</span>
         </button>
       </li>`).join('');
-  });
+  }, usersQuery(asSuper ? { role: 'superadmin' } : null));
   list.addEventListener('click', (e) => {
     const b = e.target.closest('[data-uid]');
     if (b) { off(); auth.signInAs(b.dataset.uid); }

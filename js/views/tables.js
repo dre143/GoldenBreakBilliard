@@ -8,9 +8,10 @@ import {
   esc, icon, todayLabel, fmtBooking, openDialog,
   pageHeader, searchField, loadingBlock, emptyBlock, preserveFocus, busy, toast,
 } from '../ui.js';
+import { isOwnerLevel } from '../roles.js';
 
 export function mount(el, ctx) {
-  const owner = ctx.user.role === 'owner';
+  const owner = isOwnerLevel(ctx.user);
   let query = '';
 
   el.innerHTML = `

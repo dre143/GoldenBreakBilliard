@@ -15,6 +15,7 @@ import * as reportsView from './views/reports.js';
 import * as printer from './printer.js';
 import { startTimeAlerts } from './time-alerts.js';
 import { startHourAlerts } from './hour-alerts.js';
+import { isOwnerLevel, roleLabel, usersQuery } from './roles.js';
 import { printerDialog, cashDrawerDialog } from './dialogs.js';
 
 const root = document.getElementById('root');
@@ -116,7 +117,8 @@ function startData() {
   dataCleanups = [
     db.listen('tables', (rows) => set('tables', rows.sort((a, b) => (a.number ?? 0) - (b.number ?? 0) || byName(a, b))), {}, onDataError),
     db.listen('products', (rows) => set('products', rows.sort(byName)), {}, onDataError),
-    db.listen('users', (rows) => set('users', rows.sort(byName)), {}, onDataError),
+    // Superadmin accounts are filtered out at the database for everyone but a superadmin (see roles.js / firestore.rules).
+    db.listen('users', (rows) => set('users', rows.sort(byName)), usersQuery(state.user), onDataError),
     db.listen('restocks', (rows) => set('restocks', rows), { where: [['createdAt', '>=', addDays(Date.now(), -7)]] }, onDataError),
     db.listenDoc('settings', 'shifts', (doc) => set('settings', { ...state.settings, twoShifts: !!doc?.twoShifts }), onDataError),
     db.listenDoc('settings', 'cashDrawer', (doc) => set('settings', { ...state.settings, drawerPinSet: !!doc?.pinHash }), onDataError),
@@ -172,7 +174,7 @@ const brandCompact = () => `
 
 function renderShell() {
   const u = state.user;
-  const owner = u.role === 'owner';
+  const owner = isOwnerLevel(u);
   const link = (key) => {
     const r = ROUTES[key];
     return `<a class="nav__link" href="#/${key}" data-route="${key}">${icon(r.icon)}<span>${r.label}</span></a>`;
@@ -206,7 +208,7 @@ function renderShell() {
           <span class="avatar" aria-hidden="true">${esc(initials(u.name))}</span>
           <span class="user-chip__text">
             <span class="user-chip__name">${esc(u.name)}</span>
-            <span class="user-chip__role">${owner ? 'Owner' : 'Cashier'}</span>
+            <span class="user-chip__role">${roleLabel(u.role)}</span>
           </span>
           <button type="button" class="icon-btn icon-btn--light" data-action="sign-out" aria-label="Sign out">${icon('logout')}</button>
         </div>
@@ -259,7 +261,7 @@ function route() {
   if (!main || !state.user) return;
   let [name, ...params] = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   const r = ROUTES[name];
-  if (!r || (r.owner && state.user.role !== 'owner')) {
+  if (!r || (r.owner && !isOwnerLevel(state.user))) {
     name = 'tables';
     params = [];
     history.replaceState(null, '', '#/tables');

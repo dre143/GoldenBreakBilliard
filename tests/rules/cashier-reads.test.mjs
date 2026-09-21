@@ -24,7 +24,9 @@ test('active cashier can run the Reports / Transactions / Tables range queries a
   const fs = env.authenticatedContext('joy').firestore();
   const range = query(collection(fs, 'transactions'), where('createdAt', '>=', ts(0)), where('createdAt', '<', ts(Date.now() + 1e9)));
   await assertSucceeds(getDocs(range));
-  for (const c of ['tables', 'products', 'users']) await assertSucceeds(getDocs(collection(fs, c)));
+  for (const c of ['tables', 'products']) await assertSucceeds(getDocs(collection(fs, c)));
+  // The users list the app subscribes to is filtered so superadmin accounts never reach a cashier (see roles.js).
+  await assertSucceeds(getDocs(query(collection(fs, 'users'), where('role', '!=', 'superadmin'))));
   await assertSucceeds(getDocs(query(collection(fs, 'restocks'), where('createdAt', '>=', ts(0)))));
 });
 

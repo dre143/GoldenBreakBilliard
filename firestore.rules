@@ -1,6 +1,9 @@
 rules_version = '2';
 
-// Roles live in users/{uid}.role ("owner" | "cashier"); users/{uid}.active gates access.
+// Roles live in users/{uid}.role ("superadmin" | "owner" | "cashier"); users/{uid}.active gates access.
+// A superadmin has every owner permission (isOwner() below is true for both) and is invisible to everyone
+// else: only a superadmin can read, create, edit or deactivate a superadmin account. Superadmin accounts are
+// first created in the Firebase console (Authentication user + users/{uid} document with role "superadmin").
 //
 // Time integrity: session start/end times and sale times must equal request.time (the server clock),
 // and every sale's table fee is recomputed here from those stamps. A device with a wrong or changed
@@ -18,7 +21,9 @@ service cloud.firestore {
         && exists(userPath(request.auth.uid))
         && get(userPath(request.auth.uid)).data.active == true;
     }
-    function isOwner() { return isStaff() && get(userPath(request.auth.uid)).data.role == 'owner'; }
+    // Owner-level access. True for a superadmin too, so a superadmin can do everything an owner can.
+    function isOwner() { return isStaff() && get(userPath(request.auth.uid)).data.role in ['owner', 'superadmin']; }
+    function isSuperadmin() { return isStaff() && get(userPath(request.auth.uid)).data.role == 'superadmin'; }
     function onlyChanges(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
 
     // ---- Official table rate (mirrors PRICING in js/billing.js) ----
@@ -49,14 +54,20 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if signedIn() && (request.auth.uid == uid || isStaff());
-      allow create: if isOwner()
+      // Superadmin profiles are readable only by superadmins (and by the superadmin themself). Lists must
+      // therefore filter with where('role', '!=', 'superadmin'), which the app does for everyone else.
+      allow read: if signedIn()
+        && (request.auth.uid == uid || isSuperadmin() || (isStaff() && resource.data.role != 'superadmin'));
+      allow create: if isSuperadmin()
+        || (isOwner() && request.resource.data.role != 'superadmin')
         || (request.auth.uid == uid
             && request.resource.data.role == 'owner'
             && !exists(/databases/$(database)/documents/meta/setup)
             && existsAfter(/databases/$(database)/documents/meta/setup));
-      // Owners manage accounts; everyone may update their own presence (server-stamped) only.
-      allow update: if isOwner()
+      // Owners manage cashier/owner accounts but can neither touch a superadmin nor make one; a superadmin
+      // manages everyone. Everyone may update their own presence (server-stamped) only.
+      allow update: if isSuperadmin()
+        || (isOwner() && resource.data.role != 'superadmin' && request.resource.data.role != 'superadmin')
         || (request.auth.uid == uid && isStaff() && onlyChanges(['online', 'lastSeen'])
             && request.resource.data.lastSeen == request.time);
       allow delete: if false;

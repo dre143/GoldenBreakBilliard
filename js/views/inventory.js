@@ -2,9 +2,10 @@ import { state, on } from '../state.js';
 import { isLowStock } from '../billing.js';
 import { productDialog, addStockDialog } from '../dialogs.js';
 import { esc, icon, peso, thumb, pageHeader, searchField, loadingBlock, emptyBlock, preserveFocus } from '../ui.js';
+import { isOwnerLevel } from '../roles.js';
 
 export function mount(el, ctx) {
-  const owner = ctx.user.role === 'owner';
+  const owner = isOwnerLevel(ctx.user);
   let query = '';
   let category = 'all';
   let categoryKey = '';

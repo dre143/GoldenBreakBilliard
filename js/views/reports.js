@@ -15,6 +15,7 @@ import {
   esc, icon, peso, fmtTime, fmtDateTime, fmtHuman, fmtBooking, METHOD_LABEL, pageHeader, loadingBlock, emptyBlock,
   toast, busy, openDialog,
 } from '../ui.js';
+import { isOwnerLevel } from '../roles.js';
 
 const HALL = 'Golden Break Billiard Hall';
 const MAX_RANGE_DAYS = 92;
@@ -26,7 +27,7 @@ const TABS = [
 ];
 
 export function mount(el, ctx) {
-  const owner = ctx.user.role === 'owner';
+  const owner = isOwnerLevel(ctx.user);
   el.innerHTML = `
     ${pageHeader({
       title: 'Reports',
@@ -217,7 +218,7 @@ function wireCommon(panel, { csv, txs, expenses }) {
 const newLine = () => ({ id: Math.random().toString(36).slice(2), description: '', amount: '' });
 
 function dailyTab(panel, ctx) {
-  const owner = ctx.user.role === 'owner';
+  const owner = isOwnerLevel(ctx.user);
   const today = rep.dayKey(Date.now());
   const twoShifts = () => !!state.settings.twoShifts;
   let key = today;

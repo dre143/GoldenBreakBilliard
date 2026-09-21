@@ -8,6 +8,7 @@ import {
 } from './billing.js';
 import { serverNow } from './clock.js';
 import * as printer from './printer.js';
+import { isOwnerLevel, isSuperadmin } from './roles.js';
 
 const num = (v) => Number(String(v).trim());
 
@@ -253,6 +254,7 @@ export function staffDialog(member, currentUser) {
         <select id="u-role" name="role" ${self ? 'disabled' : ''}>
           <option value="cashier" ${member?.role === 'cashier' || !member ? 'selected' : ''}>Cashier</option>
           <option value="owner" ${member?.role === 'owner' ? 'selected' : ''}>Owner</option>
+          ${isSuperadmin(currentUser) ? `<option value="superadmin" ${member?.role === 'superadmin' ? 'selected' : ''}>Superadmin (hidden from owners)</option>` : ''}
         </select>
         ${self ? '<p class="field__hint">You can’t change your own role.</p>' : ''}
       </div>
@@ -546,7 +548,7 @@ export function printerDialog() {
 }
 /* ---------- cash drawer (Marimar Inn) ---------- */
 
-const isOwnerUser = () => state.user?.role === 'owner';
+const isOwnerUser = () => isOwnerLevel(state.user);
 
 /** Open the drawer: the owner directly, a cashier with the PIN the owner set. */
 export function openDrawerDialog() {

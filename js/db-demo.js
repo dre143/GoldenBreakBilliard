@@ -195,6 +195,7 @@ function seed() {
 
   const users = {
     'u-owner': { name: 'Marco Reyes', email: 'owner@goldenbreak.demo', role: 'owner', active: true, online: false, lastSeen: now - 2 * H, createdAt: now - 400 * D },
+    'u-super': { name: 'System Admin', email: 'super@goldenbreak.demo', role: 'superadmin', active: true, online: false, lastSeen: 0, createdAt: now - 300 * D },
     'u-joy': { name: 'Joy Santos', email: 'joy@goldenbreak.demo', role: 'cashier', active: true, online: true, demoPresence: true, lastSeen: now, createdAt: now - 200 * D },
     'u-bea': { name: 'Bea Lim', email: 'bea@goldenbreak.demo', role: 'cashier', active: true, online: true, demoPresence: true, lastSeen: now, createdAt: now - 90 * D },
     'u-paolo': { name: 'Paolo Cruz', email: 'paolo@goldenbreak.demo', role: 'cashier', active: true, online: false, lastSeen: now - 19 * H, createdAt: now - 150 * D },

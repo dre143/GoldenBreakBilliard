@@ -44,6 +44,33 @@ open tables but keeps staff, tables and products.
 | Owner Dashboard | — | ✓ |
 | Reports: Custom range & Monthly | — | ✓ |
 | Staff & accounts, Manage Tables (names) | — | ✓ |
+| Everything an owner can do, hidden from owners and cashiers (see below) | — | Superadmin only |
+
+## Superadmin (hidden account with every owner function)
+
+A **superadmin** can do everything an owner can (all screens, products, tables, reports, staff accounts, expenses) and is
+**invisible to everyone else**. Owners and cashiers never see the account in Staff & Accounts, the Dashboard's staff list
+or the role options, and this is enforced by `firestore.rules`, not just hidden on screen:
+
+- only a superadmin can read a superadmin's profile (the app subscribes to the users list with
+  `where('role', '!=', 'superadmin')`, and an unfiltered list is refused for everyone else);
+- owners can't create, edit, deactivate or promote anyone to superadmin, and a cashier can't make themself one;
+- only a superadmin sees the **Superadmin** option when adding or editing staff, and can manage other superadmins.
+
+**Create the first superadmin (one time, in the Firebase console; it can't be done from the app):**
+
+1. Firebase console → **Authentication → Users → Add user**: enter the superadmin's email and a password, then copy the new
+   user's **User UID**.
+2. **Firestore Database → `users` collection → Add document**. Use the copied UID as the **Document ID**, and add these fields:
+   `name` (string), `email` (string), `role` = `superadmin` (string), `active` = `true` (boolean), `online` = `false`
+   (boolean), `lastSeen` = `0` (number), `createdAt` (timestamp, now).
+3. Sign in with that email and password on the normal sign-in screen.
+
+Anything a superadmin *does* (a sale, an expense, a restock) is recorded under the account's display name, so give it a
+neutral name if it shouldn't stand out in Transactions and Reports.
+
+In demo mode a "System Admin" superadmin exists but is left out of the sign-in picker; open
+`http://localhost:5173/?demo&superadmin` to sign in as it.
 
 The UI hides owner-only screens, and `firestore.rules` enforces the same limits on the server.
 For example, cashiers can only *decrease* product stock, and transactions are append-only.

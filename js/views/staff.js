@@ -1,6 +1,7 @@
 import { mode } from '../db.js';
 import { state, on } from '../state.js';
 import { staffDialog } from '../dialogs.js';
+import { isSuperadmin, roleLabel, visibleUsers } from '../roles.js';
 import { esc, icon, initials, relTime, isOnline, fmtDate, pageHeader, loadingBlock, emptyBlock, preserveFocus } from '../ui.js';
 
 export function mount(el, ctx) {
@@ -19,6 +20,10 @@ export function mount(el, ctx) {
         <h2 class="card-title">Owner</h2>
         <p class="muted">Everything a cashier can do, plus product &amp; stock management, table rates, the dashboard and staff accounts.</p>
       </article>
+      ${isSuperadmin(ctx.user) ? `<article class="card role-note">
+        <h2 class="card-title">Superadmin</h2>
+        <p class="muted">Everything an owner can do. Only superadmins can see, edit or deactivate a superadmin account; owners and cashiers never see it.</p>
+      </article>` : ''}
     </section>
     <section class="card card--flush" aria-label="Staff accounts">
       <div class="table-wrap" data-region="table"></div>
@@ -29,7 +34,8 @@ export function mount(el, ctx) {
 
   function render() {
     if (!state.loaded.users) { wrap.innerHTML = loadingBlock(); return; }
-    if (!state.users.length) { wrap.innerHTML = emptyBlock('No staff yet.'); return; }
+    const users = visibleUsers(state.users, ctx.user);
+    if (!users.length) { wrap.innerHTML = emptyBlock('No staff yet.'); return; }
     preserveFocus(wrap, () => {
       wrap.innerHTML = `
         <table class="data-table">
@@ -44,7 +50,7 @@ export function mount(el, ctx) {
             </tr>
           </thead>
           <tbody>
-            ${state.users.map((u) => {
+            ${users.map((u) => {
               const online = isOnline(u);
               return `
               <tr>
@@ -57,7 +63,7 @@ export function mount(el, ctx) {
                     </div>
                   </div>
                 </td>
-                <td><span class="badge ${u.role === 'owner' ? 'badge--in-use' : 'badge--neutral'}">${u.role === 'owner' ? 'Owner' : 'Cashier'}</span></td>
+                <td><span class="badge ${u.role === 'cashier' ? 'badge--neutral' : 'badge--in-use'}">${roleLabel(u.role)}</span></td>
                 <td><span class="presence ${online ? 'is-online' : ''}"><span class="presence__dot" aria-hidden="true"></span>${online ? 'Online' : `Offline · ${relTime(u.lastSeen)}`}</span></td>
                 <td>${u.active === false ? '<span class="badge badge--danger">Deactivated</span>' : '<span class="badge badge--available">Active</span>'}</td>
                 <td class="cell-nowrap">${u.createdAt ? fmtDate(u.createdAt) : '—'}</td>
@@ -76,7 +82,7 @@ export function mount(el, ctx) {
     if (!btn) return;
     if (btn.dataset.action === 'add') staffDialog(null, ctx.user);
     if (btn.dataset.action === 'edit') {
-      const member = state.users.find((u) => u.id === btn.dataset.id);
+      const member = visibleUsers(state.users, ctx.user).find((u) => u.id === btn.dataset.id);
       if (member) staffDialog(member, ctx.user);
     }
   });

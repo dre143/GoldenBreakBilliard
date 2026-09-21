@@ -3,6 +3,7 @@ import { state, on } from '../state.js';
 import { isLowStock, activeSales } from '../billing.js';
 import { cancelledGames, cancelInfo } from '../reporting.js';
 import { addStockDialog } from '../dialogs.js';
+import { roleLabel, visibleUsers } from '../roles.js';
 import { receiptDialog } from '../dialogs.js';
 import { barChart } from './charts.js';
 import {
@@ -188,7 +189,7 @@ export function mount(el, ctx) {
   }
 
   function renderStaff() {
-    const staff = state.users
+    const staff = visibleUsers(state.users, ctx.user)
       .filter((u) => u.active !== false)
       .sort((a, b) => Number(isOnline(b)) - Number(isOnline(a)) || a.name.localeCompare(b.name));
     $('[data-region=staff]').innerHTML = staff.map((u) => {
@@ -198,7 +199,7 @@ export function mount(el, ctx) {
         <span class="avatar avatar--sm" aria-hidden="true">${esc(initials(u.name))}</span>
         <span class="staff-row__text">
           <span class="staff-row__name">${esc(u.name)}${u.id === ctx.user.uid ? ' <span class="muted">(you)</span>' : ''}</span>
-          <span class="staff-row__role">${u.role === 'owner' ? 'Owner' : 'Cashier'}</span>
+          <span class="staff-row__role">${roleLabel(u.role)}</span>
         </span>
         <span class="presence ${online ? 'is-online' : ''}">
           <span class="presence__dot" aria-hidden="true"></span>${online ? 'Online' : `Offline · ${relTime(u.lastSeen)}`}
