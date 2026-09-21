@@ -1,7 +1,7 @@
 // Time-left alerts for booked (Set Hours) tables: a chime and an alert card at 15 minutes left, and a
 // louder chime and card again at 5 minutes left. Each alert fires once per table per game on this device
 // (remembered for the browser session, so a page reload doesn't repeat it). Open Time tables have no end
-// time, so they never alert. Every table (booked or open) also chimes once when a billing threshold is reached.
+// time, so they never alert. Every table (booked or open) also chimes once when it goes into overtime and at each ₱ step after that.
 // Runs on every screen while someone is signed in.
 import { state, on } from './state.js';
 import { elapsedMs, isTimed, plannedMs, billingStatus } from './billing.js';
@@ -62,20 +62,26 @@ export function startTimeAlerts() {
     }).join('');
   }
 
-  // A billing threshold was just crossed (the card turns red): chime once. "Just" matters, so a tablet opened
-  // mid-overtime doesn't chime for a threshold that passed long ago. Uses the same billingStatus() as the card.
+  // Chime once when a table goes into overtime (the card turns red) and once at each ₱ step after that.
+  // "Just" matters, so a tablet opened mid-overtime doesn't chime for a moment that passed long ago.
+  // Uses the same billingStatus() as the card, so the sound, the colour and the bill share one clock.
   function checkThresholds() {
     for (const t of state.tables) {
       const s = t.session;
       if (!s) continue;
       const elapsed = elapsedMs(t);
       const b = billingStatus(s, elapsed);
-      if (b.state !== 'reached' || elapsed - b.thresholdAtMs > THRESHOLD_CHIME_WINDOW_MS) continue;
-      const id = `${t.id}:${s.startedAt}:threshold:${b.thresholdAtMs}`;
-      if (fired.has(id)) continue;
-      fired.add(id);
-      saveFired(fired);
-      playUrgentChime();
+      if (b.state !== 'reached') continue;
+      const moments = [['overtime', b.overtimeStartMs]];
+      if (b.lastIncreaseAtMs != null && b.lastIncreaseAtMs > b.overtimeStartMs) moments.push(['step', b.lastIncreaseAtMs]);
+      for (const [kind, at] of moments) {
+        if (elapsed - at > THRESHOLD_CHIME_WINDOW_MS) continue;
+        const id = `${t.id}:${s.startedAt}:${kind}:${at}`;
+        if (fired.has(id)) continue;
+        fired.add(id);
+        saveFired(fired);
+        playUrgentChime();
+      }
     }
   }
 

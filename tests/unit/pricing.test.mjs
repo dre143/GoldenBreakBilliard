@@ -316,86 +316,88 @@ test('cancel game: only within the first 5 minutes, running or stopped, and only
   assert.deepEqual(b.activeSales([{ id: 1 }, { id: 2, voided: true }]).map((x) => x.id), [1]);
 });
 
-/* ---------------- billing status on the table card: text, colour, animation, chime and bill share one source ---------------- */
+/* ---------------- overtime colour on the table card: follows the BOOKED time; the grace period only affects the bill ---------------- */
 
 const stateAt = (session, minutes, seconds = 0) => b.billingStatus(session, m(minutes, seconds)).state;
 const open = { startedAt: 0, ended: false, items: [] };
+const booked30 = { ...open, plannedMs: m(30) };
 const booked1h = { ...open, plannedMs: m(60) };
 const booked2h = { ...open, plannedMs: m(120) };
 
-test('status transitions at the owner’s exact times (Open Time and 1h booking)', () => {
-  const expected = [
-    [60, 0, 'normal'],
-    [61, 0, 'approaching'],
-    [65, 59, 'approaching'],
-    [66, 0, 'reached'],
-    [76, 0, 'approaching'],
-    [80, 59, 'approaching'],
-    [81, 0, 'reached'],
-    [91, 0, 'approaching'],
-    [95, 59, 'approaching'],
-    [96, 0, 'reached'],
-  ];
+test('overtime starts at the booked time (Set Hours) or the first hour (Open Time)', () => {
+  assert.equal(b.overtimeStartMs(open), m(60));
+  assert.equal(b.overtimeStartMs(booked1h), m(60));
+  assert.equal(b.overtimeStartMs(booked2h), m(120));
+  assert.equal(b.overtimeStartMs(booked30), m(30));
+});
+
+test('red the moment the booked time is used up, while the grace period keeps the bill at ₱200', () => {
   for (const session of [open, booked1h]) {
-    for (const [mm, ss, want] of expected) {
-      assert.equal(stateAt(session, mm, ss), want, `${mm}:${String(ss).padStart(2, '0')} → ${want}`);
+    assert.equal(stateAt(session, 59, 59), 'approaching');
+    assert.equal(stateAt(session, 60), 'approaching', 'exactly 1:00:00 is not yet overtime');
+    assert.equal(b.billingStatus(session, m(60) + 1).state, 'reached', '1 ms past the hour is overtime');
+    // 1:00:01 - 1:05:59: red, and the grace still applies (bill ₱200, no new charge yet).
+    for (const [mm, ss] of [[60, 1], [62, 30], [64, 30], [65, 59]]) {
+      const s = b.billingStatus(session, m(mm, ss));
+      assert.equal(s.state, 'reached', `${mm}:${ss} is red`);
+      assert.equal(s.tableFee, 200, `${mm}:${ss} is still ₱200 (grace)`);
+      assert.equal(s.inGrace, true);
     }
-  }
-  // The gaps between the listed times follow the same pattern.
-  assert.equal(stateAt(open, 60, 59), 'normal');
-  assert.equal(stateAt(open, 75, 59), 'reached', 'the red state holds until the next warning window opens');
-  assert.equal(stateAt(open, 30), 'normal');
-});
-
-test('the status and the bill change at the same instant, to the millisecond', () => {
-  for (const session of [open, booked1h, booked2h]) {
-    for (let k = 0; k < 8; k++) {
-      const at = m(66) + k * m(15); // each threshold
-      const before = b.billingStatus(session, at - 1);
-      const now = b.billingStatus(session, at);
-      assert.notEqual(before.state, 'reached', `1 ms before ${at / MIN} min is not yet reached`);
-      if (at > b.plannedMs(session)) {
-        assert.equal(now.state, 'reached', `exactly ${at / MIN} min is reached`);
-        assert.ok(now.tableFee > before.tableFee || b.billableMs(session, at) === b.plannedMs(session), 'the fee steps up with it');
-        assert.equal(now.tableFee, before.tableFee + 50, 'reached and ₱ +50 land together');
-      }
-      assert.equal(now.tableFee, b.currentBill({ session: { ...session, ended: true, endedAt: at, startedAt: 0 } }));
-    }
-    // Never "approaching" while the engine already bills the new amount, and never "reached" at the old amount.
-    for (let ms = 0; ms <= m(200); ms += 500) {
-      const s = b.billingStatus(session, ms);
-      const lastStep = s.lastIncreaseAtMs;
-      if (s.state === 'approaching') assert.ok(ms < s.nextIncreaseAtMs && s.tableFee === b.tableFee(s.billedMs), `${ms}: approaching, next step not yet billed`);
-      if (s.state === 'reached') assert.ok(ms >= lastStep && s.tableFee === 200 + (Math.round((lastStep - m(66)) / m(15)) + 1) * 50, `${ms}: reached, the latest step is billed`);
-    }
+    // 1:06:00: the first ₱50, still red.
+    assert.equal(stateAt(session, 66), 'reached');
+    assert.equal(b.billingStatus(session, m(66)).tableFee, 250);
   }
 });
 
-test('status: booked hours are not "reached" just because they were prepaid', () => {
-  assert.equal(stateAt(booked2h, 60), 'normal');
+test('once in overtime the card stays red for the rest of the session (never back to yellow)', () => {
+  for (const session of [open, booked30, booked1h, booked2h]) {
+    const start = b.overtimeStartMs(session);
+    for (let ms = start + 1; ms <= m(400); ms += 500) {
+      assert.equal(b.billingStatus(session, ms).state, 'reached', `${ms / MIN} min is red`);
+    }
+  }
+  // The fee steps (1:21:00, 1:36:00, ...) don't change the colour: it is red just before and just after each.
+  for (const at of [m(66), m(81), m(96), m(111), m(126)]) {
+    assert.equal(b.billingStatus(open, at - 1).state, 'reached');
+    assert.equal(b.billingStatus(open, at).state, 'reached');
+  }
+});
+
+test('grace-period billing is unchanged by the colour rule (same fees at every threshold)', () => {
+  const fees = [[60, 0, 200], [65, 59, 200], [66, 0, 250], [80, 59, 250], [81, 0, 300], [95, 59, 300], [96, 0, 350], [110, 59, 350], [111, 0, 400], [125, 59, 400], [126, 0, 450]];
+  for (const [mm, ss, fee] of fees) {
+    assert.equal(b.billingStatus(open, m(mm, ss)).tableFee, fee);
+    assert.equal(b.tableFee(m(mm, ss)), fee);
+  }
+});
+
+test('a 2h booking: yellow in the last 5 minutes, red after 2:00:00, bill steps up at 2:06:00', () => {
   assert.equal(stateAt(booked2h, 90), 'normal');
-  assert.equal(stateAt(booked2h, 120), 'normal', 'the ₱400 is the booking, not overtime');
-  assert.equal(stateAt(booked2h, 121), 'approaching', 'the fee goes up at 2:06:00');
-  assert.equal(stateAt(booked2h, 125, 59), 'approaching');
+  assert.equal(stateAt(booked2h, 114, 59), 'normal');
+  assert.equal(stateAt(booked2h, 115), 'approaching');
+  assert.equal(stateAt(booked2h, 120), 'approaching');
+  assert.equal(b.billingStatus(booked2h, m(120) + 1).state, 'reached');
+  assert.equal(b.billingStatus(booked2h, m(125, 59)).tableFee, 400, 'grace: still the booked ₱400');
+  assert.equal(stateAt(booked2h, 125, 59), 'reached');
+  assert.equal(b.billingStatus(booked2h, m(126)).tableFee, 450);
   assert.equal(stateAt(booked2h, 126), 'reached');
-  assert.equal(stateAt(booked2h, 136), 'approaching');
-  assert.equal(stateAt(booked2h, 141), 'reached');
-  // A booking that ends between thresholds (1h30): next step is 1:36.
-  const booked90 = { ...open, plannedMs: m(90) };
-  assert.equal(stateAt(booked90, 90), 'normal');
-  assert.equal(stateAt(booked90, 91), 'approaching');
-  assert.equal(stateAt(booked90, 96), 'reached');
 });
 
-test('status: stopped or cancelled clocks show no billing alert', () => {
+test('a booking shorter than the hour goes red at its own end; the flat ₱200 still holds', () => {
+  assert.equal(stateAt(booked30, 25), 'approaching');
+  assert.equal(stateAt(booked30, 29, 59), 'approaching');
+  assert.equal(stateAt(booked30, 31), 'reached');
+  assert.equal(b.billingStatus(booked30, m(31)).tableFee, 200);
+  assert.equal(b.billingStatus(booked30, m(65, 59)).tableFee, 200);
+  assert.equal(b.billingStatus(booked30, m(66)).tableFee, 250);
+});
+
+test('status: normal early on; stopped or cancelled clocks show nothing', () => {
+  assert.equal(stateAt(open, 0), 'normal');
+  assert.equal(stateAt(open, 30), 'normal');
+  assert.equal(stateAt(open, 54, 59), 'normal');
+  assert.equal(stateAt(open, 55), 'approaching');
   assert.equal(b.billingStatus({ ...open, ended: true, endedAt: m(70) }, m(70)).state, 'normal');
   assert.equal(b.billingStatus({ ...open, cancelled: { reason: 'x' } }, m(70)).state, 'normal');
   assert.equal(b.billingStatus(null, m(70)).state, 'normal');
-});
-
-test('status reports the threshold it is about', () => {
-  assert.equal(b.billingStatus(open, m(63)).thresholdAtMs, m(66));
-  assert.equal(b.billingStatus(open, m(70)).thresholdAtMs, m(66));
-  assert.equal(b.billingStatus(open, m(78)).thresholdAtMs, m(81));
-  assert.equal(b.billingStatus(open, m(83)).thresholdAtMs, m(81));
 });
