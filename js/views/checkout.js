@@ -1,8 +1,8 @@
 import { state, on } from '../state.js';
 import * as svc from '../services.js';
 import {
-  elapsedMs, tableFee, sessionFee, itemsTotal, itemsCount, round2, feeBreakdown, nextIncreaseAt, PRICING, PRICING_LABEL,
-  billableMs, isTimed, plannedMs, remainingMs, overtimeMs, canCancelGame, cancelTimeLeft,
+  elapsedMs, tableFee, sessionFee, billSession, itemsTotal, itemsCount, round2, feeBreakdown, PRICING, PRICING_LABEL,
+  isTimed, plannedMs, remainingMs, overtimeMs, canCancelGame, cancelTimeLeft,
 } from '../billing.js';
 import { receiptDialog, bookingDialog, cancelGameDialog } from '../dialogs.js';
 import * as printer from '../printer.js';
@@ -234,8 +234,9 @@ function mountBill(el, ctx, tableId) {
     const s = t.session;
     const ms = elapsedMs(t);
     if (canCancelGame(t) !== cancelShown) renderTimer(t); // the 5-minute cancel window just closed
-    const billed = billableMs(s, ms); // booked hours are the minimum charge
-    const fee = sessionFee(s, ms); // ₱0 once the game was cancelled
+    const bill = billSession(s, ms); // the one authoritative calculation: fee, billed time, grace state
+    const billed = bill.billedMs; // booked hours are the minimum charge
+    const fee = bill.tableFee; // ₱0 once the game was cancelled
     const total = round2(fee + itemsTotal(s.items));
     const setText = (key, v) => { const n = $(`[data-live=${key}]`); if (n) n.textContent = v; };
     setText('elapsed', fmtDuration(ms));
@@ -245,12 +246,12 @@ function mountBill(el, ctx, tableId) {
     setText('fee', peso(fee));
     if (isTimed(s)) {
       const over = overtimeMs(s, ms);
-      setText('booking', over > 0 ? `Overtime +${fmtDuration(over)}, billed at ₱${PRICING.bracketPrice} per started ${PRICING.bracketMinutes} min` : `Time left ${fmtDuration(remainingMs(s, ms))}`);
+      setText('booking', over > 0 ? `Overtime +${fmtDuration(over)}${bill.inGrace ? ' · grace period, no extra charge yet' : ''}` : `Time left ${fmtDuration(remainingMs(s, ms))}`);
       $('[data-live=booking]')?.classList.toggle('is-over', over > 0);
     }
     // Tell staff when the fee next goes up (within a booking it can't go up until the booking runs out).
-    const nextAt = Math.max(nextIncreaseAt(billed), plannedMs(s));
-    setText('next', `Goes up to ${peso(tableFee(nextAt + 1))} after ${fmtDuration(nextAt)} · in ${fmtDuration(Math.max(0, nextAt - ms))}`);
+    const nextAt = Math.max(bill.nextIncreaseAtMs, plannedMs(s));
+    setText('next', `Goes up to ${peso(tableFee(nextAt))} at ${fmtDuration(nextAt)} · in ${fmtDuration(Math.max(0, nextAt - ms))}`);
     setText('total', peso(total));
     const raw = $('#cash-tendered').value;
     const tendered = Number(raw);

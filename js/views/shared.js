@@ -1,5 +1,5 @@
 import { state } from '../state.js';
-import { elapsedMs, currentBill, isTimed } from '../billing.js';
+import { elapsedMs, currentBill } from '../billing.js';
 import { fmtDuration, peso } from '../ui.js';
 import { serverNow } from '../clock.js';
 import { bookingStatus } from './pool-card.js';
@@ -21,7 +21,7 @@ export function updateTableTimers(root) {
   });
   root.querySelectorAll('[data-left]').forEach((el) => {
     const t = byId.get(el.dataset.left);
-    if (!t?.session || !isTimed(t.session)) return;
+    if (!t?.session) return;
     const b = bookingStatus(t, elapsedMs(t, now));
     el.textContent = b.value;
     const label = root.querySelector(`[data-left-label="${CSS.escape(el.dataset.left)}"]`);

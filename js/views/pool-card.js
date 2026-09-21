@@ -11,12 +11,23 @@ const NINE_BALL = '<span class="nine-ball" aria-hidden="true"><span class="nine-
 const POCKETS = ['tl', 'tr', 'ml', 'mr', 'bl', 'br']
   .map((p) => `<span class="pocket pocket--${p}" aria-hidden="true"></span>`).join('');
 
-/** Countdown text for a booked table: time left, or how far over it is. */
+/**
+ * The card's second readout. A booked table counts down "Time left", then shows "Overtime" past the booking.
+ * An Open Time table shows its rate until the first hour is used up, then "Overtime" too (time past 1:00:00).
+ * Overtime is only what the customer has played beyond that point; the bill next to it comes from
+ * calculateBilliardBill, so during the 5-minute grace it reads e.g. "Overtime +00:04:30 / Bill ₱200.00".
+ */
 export function bookingStatus(t, elapsed) {
-  const over = overtimeMs(t.session, elapsed);
+  if (isTimed(t.session)) {
+    const over = overtimeMs(t.session, elapsed);
+    return over > 0
+      ? { label: 'Overtime', value: `+${fmtDuration(over)}`, over: true }
+      : { label: 'Time left', value: fmtDuration(remainingMs(t.session, elapsed)), over: false };
+  }
+  const over = elapsed - PRICING.baseMinutes * 60000;
   return over > 0
     ? { label: 'Overtime', value: `+${fmtDuration(over)}`, over: true }
-    : { label: 'Time left', value: fmtDuration(remainingMs(t.session, elapsed)), over: false };
+    : { label: 'Rate', value: `₱${PRICING.basePrice} / 1st hr`, over: false };
 }
 
 /**
@@ -30,7 +41,7 @@ export function poolCard(t, { picker = false } = {}) {
   const stopped = live && t.session.ended;
   const timed = live && isTimed(t.session);
   const elapsed = live ? elapsedMs(t) : 0;
-  const booking = timed ? bookingStatus(t, elapsed) : null;
+  const booking = live ? bookingStatus(t, elapsed) : null;
   // Hour-mark alert (5 min / 1 min before each whole hour): a state layered on a running card, see hour-alerts.js.
   const hourLevel = live && !stopped ? visibleHourLevel(t) : null;
   const id = esc(t.id);
@@ -52,7 +63,7 @@ export function poolCard(t, { picker = false } = {}) {
               : '<span class="led__digits num" aria-hidden="true">--:--:--</span><span class="sr-only">Timer not running</span>'}
           </div>
           <dl class="pool__meta">
-            ${timed
+            ${live
               ? `<div><dt data-left-label="${id}">${booking.label}</dt><dd class="num" data-left="${id}">${booking.value}</dd></div>`
               : `<div><dt>Rate</dt><dd class="num">₱${PRICING.basePrice} / 1st hr</dd></div>`}
             <div><dt>Bill</dt><dd class="num" ${live ? `data-bill="${id}"` : ''}>${live ? peso(currentBill(t)) : '—'}</dd></div>
