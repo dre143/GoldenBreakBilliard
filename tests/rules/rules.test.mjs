@@ -127,7 +127,7 @@ test('light toggle is open to staff; renaming is owner-only', async () => {
 
 /* ---------------- checkout: fee verified from server stamps ---------------- */
 
-function checkout(fs, { durationMs, startedMs, endedMs, fee, plannedMs = 0, billedMs = Math.max(durationMs, plannedMs), createdAt = serverTimestamp(), txId = 'sale1', cashier = 'joy', extra = {} }) {
+function checkout(fs, { durationMs, startedMs, endedMs, fee, plannedMs = 0, billedMs = durationMs, createdAt = serverTimestamp(), txId = 'sale1', cashier = 'joy', extra = {} }) {
   const batch = writeBatch(fs);
   batch.set(doc(fs, 'transactions', txId), {
     tableId: 't1', tableName: 'Table 01', pricing: { ...PRICING },
@@ -251,16 +251,27 @@ test('GCash and split payments need the last 5 digits of the GCash reference num
 
 /* ---------------- booked hours (Set Hours) ---------------- */
 
-test('booked 2h, stopped after 45 min: ₱400 (booking is the minimum); ₱200 rejected', async () => {
+test('booked 2h, stopped after 45 min: only the time played is billed (₱200); charging the booked ₱400 is rejected', async () => {
   const startedMs = Date.now() - 50 * MIN;
   const endedMs = startedMs + 45 * MIN;
   await seed({ 'tables/t1': endedTable(startedMs, endedMs, 120 * MIN) });
   const joy = as('joy');
-  // Try to bill actual time only (ignore the booking).
-  await assertFails(checkout(joy, { durationMs: 45 * MIN, startedMs, endedMs, fee: 200, plannedMs: 120 * MIN, billedMs: 45 * MIN }));
+  // Try to bill the booking (unused booked time) instead of the time actually played.
+  await assertFails(checkout(joy, { durationMs: 45 * MIN, startedMs, endedMs, fee: 400, plannedMs: 120 * MIN, billedMs: 120 * MIN }));
+  await assertFails(checkout(joy, { durationMs: 45 * MIN, startedMs, endedMs, fee: 400, plannedMs: 120 * MIN }));
   // Try to claim a smaller booking than the session had.
   await assertFails(checkout(joy, { durationMs: 45 * MIN, startedMs, endedMs, fee: 200, plannedMs: 0 }));
-  await assertSucceeds(checkout(joy, { durationMs: 45 * MIN, startedMs, endedMs, fee: 400, plannedMs: 120 * MIN }));
+  await assertSucceeds(checkout(joy, { durationMs: 45 * MIN, startedMs, endedMs, fee: 200, plannedMs: 120 * MIN }));
+});
+
+test('booked 1h15, ended after 59 seconds: ₱200 (the booked ₱250 is rejected)', async () => {
+  const startedMs = Date.now() - 5 * MIN;
+  const endedMs = startedMs + 59 * 1000;
+  await seed({ 'tables/t1': endedTable(startedMs, endedMs, 75 * MIN) });
+  const joy = as('joy');
+  await assertFails(checkout(joy, { durationMs: 59 * 1000, startedMs, endedMs, fee: 250, plannedMs: 75 * MIN }));
+  await assertFails(checkout(joy, { durationMs: 59 * 1000, startedMs, endedMs, fee: 250, plannedMs: 75 * MIN, billedMs: 75 * MIN }));
+  await assertSucceeds(checkout(joy, { durationMs: 59 * 1000, startedMs, endedMs, fee: 200, plannedMs: 75 * MIN }));
 });
 
 test('booked 2h, played 2h 6min: overtime billed → ₱450; ₱400 rejected', async () => {

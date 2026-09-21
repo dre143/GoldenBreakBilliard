@@ -155,13 +155,15 @@ test('the table card: "Overtime +00:04:30 / Bill ₱200.00", then "+00:06:00 / �
 
 /* ---------------- Open Time vs Set Hours: the same central logic ---------------- */
 
-test('Open Time and Set Hours agree at every moment (booking only adds a minimum)', () => {
+test('Open Time and Set Hours agree at every moment: the booking never changes the amount', () => {
   for (let ms = 0; ms <= m(240); ms += 7 * SEC) {
     const open = b.billSession({ plannedMs: 0 }, ms);
-    const booked = b.billSession({ plannedMs: m(30) }, ms); // a 30-minute booking is under the hour
-    assert.equal(open.tableFee, b.tableFee(ms));
-    assert.equal(booked.tableFee, b.tableFee(Math.max(ms, m(30))));
-    if (ms >= m(30)) assert.equal(open.tableFee, booked.tableFee);
+    for (const planned of [m(30), m(75), m(120), m(180)]) {
+      const booked = b.billSession({ plannedMs: planned }, ms);
+      assert.equal(booked.tableFee, open.tableFee, `${ms / MIN} min played on a ${planned / MIN} min booking`);
+      assert.equal(booked.tableFee, b.tableFee(ms));
+      assert.equal(booked.billedMs, ms, 'billed time is the time played, not the booked time');
+    }
   }
 });
 
@@ -169,20 +171,61 @@ test('Open Time: billed on time actually played', () => {
   const open = { startedAt: 0, ended: false };
   assert.equal(b.isTimed(open), false);
   assert.equal(b.remainingMs(open, m(30)), null, 'open time has no countdown');
-  assert.equal(b.billableMs(open, m(45)), m(45));
+  assert.equal(b.billSession(open, m(45)).billedMs, m(45));
   assert.equal(b.billSession(open, m(45)).tableFee, 200);
   assert.equal(b.billSession(open, m(65, 59)).tableFee, 200);
   assert.equal(b.billSession(open, m(66)).tableFee, 250);
 });
 
-test('Set Hours: booked time is the minimum charge and overtime follows the grace rules', () => {
+/* Booked (Set Hours) time is NOT billable time. Three separate things: booked duration, actual elapsed time and the
+   billable amount, which comes from the actual elapsed time only. Unused booked time is never charged. */
+const feeFor = (bookedMs, playedMs) => b.billSession({ startedAt: 0, ended: false, plannedMs: bookedMs }, playedMs).tableFee;
+
+test('owner’s booked-vs-played cases: the customer pays for what was actually consumed', () => {
+  const cases = [
+    ['1h15 booked / 59 seconds', m(75), m(0, 59), 200],
+    ['1h15 booked / 30 minutes', m(75), m(30), 200],
+    ['1h15 booked / 59 minutes', m(75), m(59), 200],
+    ['1h15 booked / 1h', m(75), m(60), 200],
+    ['1h15 booked / 1h05', m(75), m(65), 200],
+    ['1h15 booked / 1h05m59s', m(75), m(65, 59), 200],
+    ['1h15 booked / 1h06', m(75), m(66), 250],
+    ['1h15 booked / 1h15', m(75), m(75), 250],
+    ['1h30 booked / 1h06', m(90), m(66), 250],
+    ['1h30 booked / 1h30', m(90), m(90), 300],
+    ['2h booked / 1h20', m(120), m(80), 250],
+  ];
+  assert.equal(cases.length, 11);
+  for (const [label, booked, played, expected] of cases) {
+    assert.equal(feeFor(booked, played), expected, `${label} → ₱${expected}`);
+  }
+});
+
+test('booked time never causes an extra charge: fee is the same as an Open Time table played that long', () => {
+  for (const booked of [m(15), m(60), m(75), m(90), m(120), m(180), m(600)]) {
+    for (let played = 0; played <= m(300); played += 13 * SEC) {
+      assert.equal(feeFor(booked, played), b.tableFee(played));
+    }
+  }
+});
+
+test('booked screenshot case: 00:00:59 played on 1h15 booked is ₱200, explained as the first hour only', () => {
+  const s = b.billSession({ startedAt: 0, ended: false, plannedMs: m(75) }, m(0, 59));
+  assert.equal(s.tableFee, 200);
+  assert.equal(s.elapsedMs, m(0, 59));
+  assert.equal(s.billedMs, m(0, 59));
+  assert.equal(b.feeBreakdown(s.billedMs), '₱200 first hour', 'not "₱200 first hour + 1 × ₱50"');
+  assert.equal(b.currentBill({ session: { startedAt: 0, ended: true, endedAt: m(0, 59), plannedMs: m(75), items: [] } }), 200);
+  assert.equal(b.nextIncreaseAt(s.billedMs), m(66), 'the next step is counted on time played: ₱250 at 1:06:00');
+});
+
+test('Set Hours: the booking controls the countdown and overtime, not the amount', () => {
   const booked1h = { startedAt: 0, ended: false, plannedMs: m(60) };
   const booked2h = { startedAt: 0, ended: false, plannedMs: m(120) };
 
   assert.equal(b.isTimed(booked2h), true);
-  // Stopped early: still pays for the 2 hours booked (₱400).
-  assert.equal(b.billableMs(booked2h, m(45)), m(120));
-  assert.equal(b.billSession(booked2h, m(45)).tableFee, 400);
+  // Stopped early: only the time played is billed.
+  assert.equal(b.billSession(booked2h, m(45)).tableFee, 200);
   assert.equal(b.remainingMs(booked2h, m(45)), m(75));
   assert.equal(b.overtimeMs(booked2h, m(45)), 0);
   assert.equal(b.remainingMs(booked2h, m(120)), 0);
@@ -192,13 +235,14 @@ test('Set Hours: booked time is the minimum charge and overtime follows the grac
   assert.equal(b.billSession(booked1h, m(65, 59)).inGrace, true);
   assert.equal(b.billSession(booked1h, m(66)).tableFee, 250);
 
-  // 2h booked: 2:05:59 is still ₱400, 2:06:00 is ₱450.
+  // 2h booked, played to the end: 2:00:00 is ₱400; 2:05:59 still ₱400; 2:06:00 ₱450.
+  assert.equal(b.billSession(booked2h, m(120)).tableFee, 400);
   assert.equal(b.billSession(booked2h, m(125, 59)).tableFee, 400);
   assert.equal(b.billSession(booked2h, m(126)).tableFee, 450);
   assert.equal(b.overtimeMs(booked2h, m(126)), m(6));
   assert.equal(b.billSession(booked2h, m(126)).billedMs, m(126));
 
-  assert.equal(b.currentBill({ session: { startedAt: 0, ended: true, endedAt: m(45), plannedMs: m(120), items: [{ price: 85, qty: 1 }] } }), 485);
+  assert.equal(b.currentBill({ session: { startedAt: 0, ended: true, endedAt: m(45), plannedMs: m(120), items: [{ price: 85, qty: 1 }] } }), 285);
   assert.equal(b.currentBill({ session: { startedAt: 0, ended: true, endedAt: m(76), items: [{ price: 85, qty: 2 }] } }), 420);
 });
 
@@ -223,13 +267,18 @@ test('closing a session: a stopped clock is frozen and billed by the same rule',
   assert.equal(closeSession(ended(66)).durationMs, m(66), 'the stored duration is the true elapsed time');
   assert.equal(closeSession(ended(66, 0), 85).total, 335);
 
-  // Booked: the booked time is the minimum, overtime by the same rule.
+  // Booked: billed on the time actually played; the booking is only stored for reference.
   const b2 = closeSession(ended(125, 59, { plannedMs: m(120) }));
   assert.equal(b2.durationMs, m(125, 59));
   assert.equal(b2.billedMs, m(125, 59));
   assert.equal(b2.tableFee, 400);
   assert.equal(closeSession(ended(126, 0, { plannedMs: m(120) })).tableFee, 450);
-  assert.equal(closeSession(ended(20, 0, { plannedMs: m(120) })).tableFee, 400);
+  assert.equal(closeSession(ended(20, 0, { plannedMs: m(120) })).tableFee, 200, 'ended early: the unused booked time is not charged');
+  const early = closeSession(ended(0, 59, { plannedMs: m(75) }), 0);
+  assert.equal(early.durationMs, m(0, 59), 'actual duration is stored');
+  assert.equal(early.billedMs, m(0, 59));
+  assert.equal(early.tableFee, 200);
+  assert.equal(early.total, 200);
 
   // A cancelled game has no table fee whatever its time.
   const cancelled = closeSession(ended(3, 0, { cancelled: { reason: 'x' } }));

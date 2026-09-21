@@ -17,8 +17,8 @@ const validBooking = (ms) => Number.isInteger(ms) && ms > 0 && ms % BOOKING_STEP
 
 /**
  * Open a table. booking = 0 → open time (runs until stopped, billed on actual play).
- * booking > 0 → the customer books that many milliseconds; those hours are the minimum charge and
- * any extra play is billed on top. Bookings are whole 15-minute steps.
+ * booking > 0 → the customer books that many milliseconds: the time they intend to play. It is not the bill;
+ * the bill is always calculated from the time actually played. Bookings are whole 15-minute steps.
  */
 export function startSession(tableId, user, { booking = 0 } = {}) {
   if (booking && !validBooking(booking)) return Promise.reject(new Error('Choose the time in 15-minute steps.'));
@@ -160,7 +160,7 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, gc
 
     const durationMs = s.endedAt - s.startedAt;
     const cancelled = s.cancelled || null;
-    // Booked hours are the minimum charge, except on a cancelled game, which has no table fee.
+    // Billed on the time actually played (booked time never adds to it); a cancelled game has no table fee.
     const { billedMs, tableFee: fee } = billSession(s, durationMs); // the one authoritative bill calculation
     const lines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
     const productTotal = itemsTotal(items);

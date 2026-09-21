@@ -38,11 +38,9 @@ service cloud.firestore {
     // Booked time: 0 (open time) or whole 15-minute steps.
     function bookingOk(ms) { return ms is int && ms >= 0 && ms % 900000 == 0; }
 
-    // Billed time is whichever is longer, booked or actually played (no ternary in rules).
-    function billedOk(billedMs, durationMs, plannedMs) {
-      return billedMs is int
-        && billedMs >= durationMs && billedMs >= plannedMs
-        && (billedMs == durationMs || billedMs == plannedMs);
+    // Billed time is the time actually played, never the booked time (unused booked time is not charged).
+    function billedOk(billedMs, durationMs) {
+      return billedMs is int && billedMs == durationMs;
     }
 
     // First-run marker: created atomically with the first owner profile.
@@ -124,7 +122,7 @@ service cloud.firestore {
         && after.session.diff(before.session).affectedKeys().hasOnly(['items', 'rounds', 'plannedMs'])
         && after.session.items is list
         && after.session.rounds is int && after.session.rounds >= 0
-        // Booked time can be extended, never reduced (that would cut the minimum charge).
+        // Booked time can be extended, never reduced (it sets when overtime starts).
         && bookingOk(after.session.plannedMs)
         && after.session.plannedMs >= before.session.plannedMs;
     }
@@ -229,7 +227,7 @@ service cloud.firestore {
         // A normal sale is billed at the rate; a game cancelled within 5 minutes has no table fee.
         && ((before.session.get('cancelled', null) == null
               && sale.get('gameCancelled', false) == false
-              && billedOk(sale.billedMs, sale.durationMs, sale.plannedMs)
+              && billedOk(sale.billedMs, sale.durationMs)
               && feeOk(sale.tableFee, sale.billedMs))
             || (before.session.get('cancelled', null) != null
               && sale.gameCancelled == true

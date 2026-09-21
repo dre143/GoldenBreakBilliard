@@ -235,13 +235,13 @@ function mountBill(el, ctx, tableId) {
     const ms = elapsedMs(t);
     if (canCancelGame(t) !== cancelShown) renderTimer(t); // the 5-minute cancel window just closed
     const bill = billSession(s, ms); // the one authoritative calculation: fee, billed time, grace state
-    const billed = bill.billedMs; // booked hours are the minimum charge
+    const billed = bill.billedMs; // = time actually played; the booking never raises the bill
     const fee = bill.tableFee; // ₱0 once the game was cancelled
     const total = round2(fee + itemsTotal(s.items));
     const setText = (key, v) => { const n = $(`[data-live=${key}]`); if (n) n.textContent = v; };
     setText('elapsed', fmtDuration(ms));
     setText('cancel-left', fmtCountdown(cancelTimeLeft(t)));
-    setText('dur', isTimed(s) && billed > ms ? `${fmtDuration(ms)} played, ${fmtBooking(plannedMs(s))} booked` : `${fmtDuration(ms)} played`);
+    setText('dur', isTimed(s) ? `${fmtDuration(ms)} played, ${fmtBooking(plannedMs(s))} booked` : `${fmtDuration(ms)} played`);
     setText('breakdown', s.cancelled ? 'game cancelled, no charge' : feeBreakdown(billed));
     setText('fee', peso(fee));
     if (isTimed(s)) {
@@ -249,8 +249,8 @@ function mountBill(el, ctx, tableId) {
       setText('booking', over > 0 ? `Overtime +${fmtDuration(over)}${bill.inGrace ? ' · grace period, no extra charge yet' : ''}` : `Time left ${fmtDuration(remainingMs(s, ms))}`);
       $('[data-live=booking]')?.classList.toggle('is-over', over > 0);
     }
-    // Tell staff when the fee next goes up (within a booking it can't go up until the booking runs out).
-    const nextAt = Math.max(bill.nextIncreaseAtMs, plannedMs(s));
+    // Tell staff when the fee next goes up, counted on the time actually played.
+    const nextAt = bill.nextIncreaseAtMs;
     setText('next', `Goes up to ${peso(tableFee(nextAt))} at ${fmtDuration(nextAt)} · in ${fmtDuration(Math.max(0, nextAt - ms))}`);
     setText('total', peso(total));
     const raw = $('#cash-tendered').value;

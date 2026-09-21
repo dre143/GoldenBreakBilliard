@@ -154,8 +154,11 @@ A stopped or cancelled clock shows nothing.
 - **Open Time:** the clock runs until the cashier stops it. Billed on the time actually played.
 - **Set Hours:** the customer books a length, e.g. 1h, 2h, 3h, or a custom length in 15-minute steps. The card counts down
   "Time left" and turns amber with "Overtime +mm:ss" when the booking runs out.
-  - **Booked time is the minimum charge.** The billed time is whichever is longer, booked or played. Stopping a 2h booking after
-    45 minutes costs ₱400; playing 2:05:59 on a 2h booking still costs ₱400 (grace), and 2:06:00 costs ₱450.
+  - **Booked time is not the bill.** Three separate things: the *booked* length (what the customer chose), the *actual elapsed*
+    time (end stamp − start stamp) and the *billable amount*, which is calculated from the actual elapsed time only. Stopping a
+    1h15 booking after 59 seconds costs ₱200, at 1:05:59 still ₱200 (grace), at 1:06:00 ₱250, at 1:15:00 ₱250. Unused booked time
+    is never charged. The booking only sets the "Time left" countdown, the alerts and when overtime (red) starts, and it is kept on
+    the sale for reference.
   - **Add time** (at checkout) extends a booking. An Open Time table can also be switched to a booking there. The rules allow
     a booking to grow, never shrink.
 

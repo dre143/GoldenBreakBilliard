@@ -276,7 +276,7 @@ function seed() {
       const tn = 1 + Math.floor(rnd() * 8);
       const durationMs = (30 + Math.floor(rnd() * 150)) * MIN + Math.floor(rnd() * 60) * 1000;
       const booked = rnd() < 0.35 ? (1 + Math.floor(rnd() * 3)) * H : 0; // some customers book hours
-      const billedMs = Math.max(durationMs, booked);
+      const billedMs = durationMs; // billed on time actually played
       const fee = tableFee(billedMs);
       const lines = [];
       const nLines = Math.floor(rnd() * 4);
