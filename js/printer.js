@@ -10,6 +10,7 @@
 // works on cheap no-name clones: plain ASCII, "P" instead of "₱", and the minimum set of commands.
 // Every receipt can also be previewed on screen as the exact lines the printer will get.
 import { round2 } from './billing.js';
+import { HALL_TZ } from './clock.js';
 
 const STORAGE_KEY = 'goldenbreak:thermal-printer';
 const PAPER_KEY = 'goldenbreak:thermal-paper-width';
@@ -106,8 +107,8 @@ const clampLine = (text, width) => {
 
 const refNo = (id) => String(id || '').slice(-6).toUpperCase();
 const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || 'Staff';
-const when = (ts) => new Date(ts).toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-const clock = (ts) => new Date(ts).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
+const when = (ts) => new Date(ts).toLocaleString('en-PH', { timeZone: HALL_TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const clock = (ts) => new Date(ts).toLocaleTimeString('en-PH', { timeZone: HALL_TZ, hour: 'numeric', minute: '2-digit' });
 function played(ms) {
   const m = Math.ceil((ms || 0) / 60000);
   return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`;
@@ -570,7 +571,7 @@ export async function kickDrawerForCash(cashAmount) {
 function testPage() {
   const e = new EscPosBuilder();
   e.initialize().align('center').line(HALL).line('Printer test').newline()
-    .align('left').line(new Date().toLocaleString('en-PH'))
+    .align('left').line(new Date().toLocaleString('en-PH', { timeZone: HALL_TZ }))
     .line(`Paper: ${state.paperWidth === 48 ? '80mm' : '58mm'}`)
     .line(twoColumn('Sample line', money(1234.5), layoutWidth(state.paperWidth)))
     .cut();

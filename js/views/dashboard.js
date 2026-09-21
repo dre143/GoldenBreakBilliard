@@ -4,6 +4,7 @@ import { isLowStock, activeSales } from '../billing.js';
 import { cancelledGames, cancelInfo } from '../reporting.js';
 import { addStockDialog } from '../dialogs.js';
 import { roleLabel, visibleUsers } from '../roles.js';
+import { HALL_TZ } from '../clock.js';
 import { receiptDialog } from '../dialogs.js';
 import { barChart } from './charts.js';
 import {
@@ -123,8 +124,8 @@ export function mount(el, ctx) {
       const end = addDays(start, 1);
       const list = txs.filter((x) => x.createdAt >= start && x.createdAt < end);
       days.push({
-        label: new Date(start).toLocaleDateString('en-PH', { weekday: 'short' }),
-        full: new Date(start).toLocaleDateString('en-PH', { weekday: 'long', month: 'short', day: 'numeric' }),
+        label: new Date(start).toLocaleDateString('en-PH', { timeZone: HALL_TZ, weekday: 'short' }),
+        full: new Date(start).toLocaleDateString('en-PH', { timeZone: HALL_TZ, weekday: 'long', month: 'short', day: 'numeric' }),
         table: list.reduce((s, x) => s + (x.tableFee || 0), 0),
         product: list.reduce((s, x) => s + (x.productTotal || 0), 0),
         today: i === 0,

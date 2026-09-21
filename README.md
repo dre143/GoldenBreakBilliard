@@ -33,7 +33,7 @@ open tables but keeps staff, tables and products.
 
 | | Cashier | Owner |
 |---|---|---|
-| Tables (Open Time / Set Hours / Add time / Stop & Bill), log rounds, table light | ✓ | ✓ |
+| Tables (Open Time / Set Hours / Add time / Stop & Bill) | ✓ | ✓ |
 | Checkout & complete transactions | ✓ | ✓ |
 | Quick Sale (walk-in items, no table) | ✓ | ✓ |
 | Inventory | view only | add products, edit, add stock |
@@ -104,6 +104,12 @@ one row of number cards, then plain tables.
 - **Custom range** (owner): totals, sales by day, sales/expenses/net per day, every expense, and cancelled games.
 - **Monthly** (owner): the month's totals, sales trend, revenue by table and top products.
 
+**Hall time:** business days, shifts and every time shown or printed use the hall's own time (Philippines, UTC+8, no
+daylight saving, `HALL_TZ` in `js/clock.js`), not the device's time zone. A sale is filed under the same day and shift
+whichever device or country you look at it from. A sale belongs to the shift it was *paid* in (its checkout time), so a
+game started at 5:30 PM and paid at 6:10 PM is on the Night shift. The Daily tab follows the clock across 6:00 AM and
+6:00 PM unless you picked a day or shift yourself.
+
 The hall runs **one shift** per business day. When a second shift starts, the owner ticks *Day and Night shifts* on the
 Daily tab. The tab then offers Day (6:00 AM–6:00 PM), Night (6:00 PM–6:00 AM) and Full day.
 `SHIFT_SPLIT_HOUR` in `js/reporting.js` sets the split.
@@ -157,8 +163,9 @@ receipt and freeing the table, so two terminals can't oversell stock or bill a t
 
 ## Screens: what lives where
 
-- **Tables grid.** Each card is a small top-down pool table, built so you can scan the floor and act in one tap. Navy cloth with a green LED means In Use; pale cloth with an unlit display means Available. A free table offers **Open Time** or **Set Hours**. A live table has **Stop & Bill**, and the whole card opens Checkout. Booked tables show time left, or overtime in amber.
-- **Checkout** (one table). This is where you manage a running table: **Add time** / **Set hours**, End Session, **Log Round** (a per-session game count, saved on the receipt), **Add Item**, the **Table light** switch, and payment.
+- **Tables grid.** Each card is a small top-down pool table, built so you can scan the floor and act in one tap. Navy cloth with a green LED means In Use; pale cloth with an unlit display means Available. The cards show no buttons: tap a table to open its actions. A free table offers **Open Time** or **Set Hours**; a running table offers **Stop & Bill**, which opens Checkout (on the Checkout screen, tapping a running table goes straight to its bill). Booked tables show time left, or overtime in amber. A running table also warns before each whole hour (see *Hour-mark alert*).
+- **Checkout** (one table). This is where you manage a running table: **Add time** / **Set hours**, End Session, **Add Item**, cancel a game in its first 5 minutes, and payment.
+- **Top bar (phones and tablets).** Phones and tablets, in either orientation, get a top bar with **refresh**, the **thermal printer** and the **cash drawer**; the sidebar becomes a slide-out menu. On a desktop with a mouse the sidebar keeps labeled printer and cash drawer buttons.
 - The navy "device display" look is used only for live table equipment (the table cards and the checkout timer). The rest of the app stays ivory and felt green, so a dark card always means a running table.
 
 ## Cancel game (first 5 minutes, before paying)

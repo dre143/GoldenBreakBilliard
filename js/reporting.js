@@ -1,5 +1,6 @@
 // Pure report aggregation over transaction records. No DOM, no database.
 import { round2 } from './billing.js';
+import { HALL_TZ, HALL_OFFSET_MS } from './clock.js';
 
 /**
  * Billiard halls trade past midnight, so reports group by business day rather than calendar day:
@@ -9,29 +10,34 @@ export const BUSINESS_DAY_START_HOUR = 6;
 
 const pad = (n) => String(n).padStart(2, '0');
 
+// All day arithmetic below is done on the hall's clock (UTC+8) with plain UTC math, never with the device's
+// local time zone: the same instant must give the same business day and shift on every device.
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+const keyOf = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
+
 /** Start timestamp of the business day containing ts. */
 export function businessDayStart(ts = Date.now()) {
-  const d = new Date(ts);
-  d.setHours(BUSINESS_DAY_START_HOUR, 0, 0, 0);
-  if (d.getTime() > ts) d.setDate(d.getDate() - 1);
-  return d.getTime();
+  const startOffset = BUSINESS_DAY_START_HOUR * HOUR;
+  const hallMs = ts + HALL_OFFSET_MS - startOffset; // hall time, shifted so the business day starts at "midnight"
+  return Math.floor(hallMs / DAY) * DAY + startOffset - HALL_OFFSET_MS;
 }
 
 /** 'YYYY-MM-DD' key for the business day containing ts. */
 export function dayKey(ts) {
-  const d = new Date(businessDayStart(ts));
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const d = new Date(businessDayStart(ts) + HALL_OFFSET_MS); // 6:00 AM hall time: same calendar date as the key
+  return keyOf(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
 }
 
 export function keyToStart(key) {
   const [y, m, d] = key.split('-').map(Number);
-  return new Date(y, m - 1, d, BUSINESS_DAY_START_HOUR, 0, 0, 0).getTime();
+  return Date.UTC(y, m - 1, d, BUSINESS_DAY_START_HOUR) - HALL_OFFSET_MS;
 }
 
 export function shiftKey(key, delta) {
   const [y, m, d] = key.split('-').map(Number);
-  const date = new Date(y, m - 1, d + delta, 12);
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  const date = new Date(Date.UTC(y, m - 1, d + delta));
+  return keyOf(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
 }
 
 /** Inclusive list of day keys from → to. */
@@ -42,7 +48,7 @@ export function dayKeys(fromKey, toKey) {
 }
 
 export const keyLabel = (key, opts = { weekday: 'short', month: 'short', day: 'numeric' }) =>
-  new Date(keyToStart(key)).toLocaleDateString('en-PH', opts);
+  new Date(keyToStart(key)).toLocaleDateString('en-PH', { timeZone: HALL_TZ, ...opts });
 
 /* ---------- cashier shifts ---------- */
 
@@ -65,7 +71,7 @@ export const SHIFT_SHORT = { full: 'Full day', day: 'Day', night: 'Night' };
 
 function splitAt(key) {
   const [y, m, d] = key.split('-').map(Number);
-  return new Date(y, m - 1, d, SHIFT_SPLIT_HOUR, 0, 0, 0).getTime();
+  return Date.UTC(y, m - 1, d, SHIFT_SPLIT_HOUR) - HALL_OFFSET_MS;
 }
 
 /** [start, end) timestamps of a shift on business day `key`. */

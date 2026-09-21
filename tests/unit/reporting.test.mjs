@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as r from '../../js/reporting.js';
 
-const at = (y, mo, d, h, mi = 0) => new Date(y, mo - 1, d, h, mi).getTime();
+// Hall time (Philippines, UTC+8), so these tests pass on a computer set to any time zone.
+const at = (y, mo, d, h, mi = 0) => Date.UTC(y, mo - 1, d, h - 8, mi);
 
 test('business day starts at 6:00 AM', () => {
   assert.equal(r.dayKey(at(2026, 9, 18, 1, 30)), '2026-09-17');

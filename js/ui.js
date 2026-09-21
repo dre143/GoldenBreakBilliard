@@ -1,5 +1,5 @@
 import { ICONS } from './icons.js';
-import { serverNow } from './clock.js';
+import { serverNow, HALL_TZ, HALL_OFFSET_MS } from './clock.js';
 
 export const icon = (name, cls = '') =>
   `<svg class="ico ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name] || ''}</svg>`;
@@ -38,21 +38,20 @@ export function fmtBooking(ms) {
   if (!h) return `${m}m`;
   return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
 }
-export const fmtTime = (ts) => new Date(ts).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
-export const fmtDate = (ts) => new Date(ts).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
+export const fmtTime = (ts) => new Date(ts).toLocaleTimeString('en-PH', { timeZone: HALL_TZ, hour: 'numeric', minute: '2-digit' });
+export const fmtDate = (ts) => new Date(ts).toLocaleDateString('en-PH', { timeZone: HALL_TZ, month: 'short', day: 'numeric' });
 export const fmtDateTime = (ts) => `${fmtDate(ts)}, ${fmtTime(ts)}`;
 export const todayLabel = () =>
-  new Date().toLocaleDateString('en-PH', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  new Date().toLocaleDateString('en-PH', { timeZone: HALL_TZ, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
+// Calendar days on the hall's clock (midnight in the Philippines), not the device's time zone. The hall has no
+// daylight saving, so a day is always exactly 24 hours.
+const DAY_MS = 24 * 60 * 60 * 1000;
 export function startOfDay(ts = Date.now()) {
-  const d = new Date(ts);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+  return Math.floor((ts + HALL_OFFSET_MS) / DAY_MS) * DAY_MS - HALL_OFFSET_MS;
 }
 export function addDays(ts, n) {
-  const d = new Date(ts);
-  d.setDate(d.getDate() + n);
-  return d.getTime();
+  return ts + n * DAY_MS;
 }
 
 export function relTime(ts) {

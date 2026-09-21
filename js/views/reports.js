@@ -219,7 +219,7 @@ const newLine = () => ({ id: Math.random().toString(36).slice(2), description: '
 
 function dailyTab(panel, ctx) {
   const owner = isOwnerLevel(ctx.user);
-  const today = rep.dayKey(Date.now());
+  let today = rep.dayKey(Date.now());
   const twoShifts = () => !!state.settings.twoShifts;
   let key = today;
   let shift = twoShifts() ? rep.shiftOf(Date.now()) : 'full';
@@ -566,6 +566,17 @@ function dailyTab(panel, ctx) {
   });
   const offTables = on('tables', () => txs && renderBody());
   const clock = setInterval(() => {
+    // A tab left open across 6:00 AM (new business day) or 6:00 PM (shift handover) follows the clock, unless the
+    // cashier picked a day or shift themselves.
+    const nowKey = rep.dayKey(Date.now());
+    if (nowKey !== today) {
+      today = nowKey;
+      dateInput.max = today;
+      if (!picked) { setShift(today, twoShifts() ? rep.shiftOf(Date.now()) : 'full'); return; }
+    } else if (!picked && twoShifts() && key === today && rep.shiftOf(Date.now()) !== shift) {
+      setShift(key, rep.shiftOf(Date.now()));
+      return;
+    }
     if ($('[data-region=expense-form]').hidden === isCurrent()) renderExpenseForm();
   }, 30000);
 
