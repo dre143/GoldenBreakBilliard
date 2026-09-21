@@ -85,7 +85,7 @@ export function bookingDialog({ title, submitLabel, baseMs = 0, elapsedNow = 0, 
         <div><dt>Minimum charge</dt><dd class="num" data-fee></dd></div>
         <div><dt>Ends around</dt><dd class="num" data-ends></dd></div>
       </dl>
-      <p class="muted small">Booked time is the minimum charge. If they play longer, the extra time is billed at ₱${PRICING.bracketPrice} per started ${PRICING.bracketMinutes} minutes.</p>`,
+      <p class="muted small">Booked time is the minimum charge. If they play longer, the extra time is billed by the hall rate: the hour plus a 5-minute grace, then ₱${PRICING.bracketPrice} every ${PRICING.bracketMinutes} minutes.</p>`,
     onOpen(dlg) {
       const form = dlg.querySelector('form');
       const custom = dlg.querySelector('.booking-custom');
