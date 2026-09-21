@@ -590,6 +590,67 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .pool--overtime .pool__meta dd[data-left], .pool--overtime .pool__meta dt[data-left-label] { color: var(--led-stopped); font-weight: 700; }
 .pool--overtime .pool__table { box-shadow: inset 0 0 0 3px var(--amber); }
 
+/* ---------- hour-mark proximity alert (a state layered on a running card; see js/hour-alerts.js) ----------
+   warn = last 5 minutes before a whole hour (amber, slow pulse); crit = last minute (red, fast pulse).
+   The card's structure is unchanged: the rail, pockets, status row, timer and RATE/BILL row just pick up a tint. */
+.pool--hour-warn { --alert: #F5B94A; --alert-rgb: 245, 185, 74; --alert-rail: #6E5220; --alert-dd: #FFE2A8; --alert-dt: #E4C078; }
+.pool--hour-crit { --alert: #FF5A5F; --alert-rgb: 255, 90, 95; --alert-rail: #6B2226; --alert-dd: #FFC9CB; --alert-dt: #EBA3A6; }
+
+.pool--hour-warn .pool__table, .pool--hour-warn:hover .pool__table,
+.pool--hour-crit .pool__table, .pool--hour-crit:hover .pool__table { background: var(--alert-rail); }
+.pool--hour-warn .pool__table { animation: hour-rail-warn 2.4s ease-in-out infinite; }
+.pool--hour-crit .pool__table { animation: hour-rail-crit 1s ease-in-out infinite; }
+@keyframes hour-rail-warn {
+  0%, 100% { box-shadow: inset 0 0 0 3px var(--alert), 0 0 6px 0 rgba(var(--alert-rgb), .22); }
+  50% { box-shadow: inset 0 0 0 3px var(--alert), 0 0 20px 4px rgba(var(--alert-rgb), .55); }
+}
+@keyframes hour-rail-crit {
+  0%, 100% { box-shadow: inset 0 0 0 3px var(--alert), 0 0 10px 1px rgba(var(--alert-rgb), .35); }
+  50% { box-shadow: inset 0 0 0 3px var(--alert), 0 0 32px 9px rgba(var(--alert-rgb), .75); }
+}
+
+/* Status row: label and ball stay as they are; only the ball's ring picks up the tint. */
+.pool--hour-warn .nine-ball, .pool--hour-crit .nine-ball { box-shadow: 0 0 0 2px var(--alert), 0 0 10px rgba(var(--alert-rgb), .6); }
+
+/* Timer: same LED glow style, recolored. Critical also fades in and out. */
+.pool--hour-warn .led__digits, .pool--hour-crit .led__digits { color: var(--alert); text-shadow: 0 0 10px rgba(var(--alert-rgb), .5); }
+.pool--hour-crit .led__digits { animation: hour-timer-pulse 1s ease-in-out infinite; }
+@keyframes hour-timer-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+
+/* RATE / BILL: content untouched, a subtle tint so the whole card reads as one unit. */
+.pool--hour-warn .pool__meta dd, .pool--hour-crit .pool__meta dd { color: var(--alert-dd); }
+.pool--hour-warn .pool__meta dt, .pool--hour-crit .pool__meta dt { color: var(--alert-dt); }
+
+/* Bell badge (top-right) and dismiss control (top-left), sitting on the rail corners. Hidden unless alerting. */
+.pool__bell, .pool__dismiss { display: none; position: absolute; z-index: 4; place-items: center; padding: 0; }
+.pool--hour-warn .pool__bell, .pool--hour-crit .pool__bell,
+.pool--hour-warn .pool__dismiss, .pool--hour-crit .pool__dismiss { display: grid; }
+.pool__bell {
+  top: -9px; right: -7px; width: 30px; height: 30px; border-radius: 50%;
+  background: var(--alert); color: #2A1D08;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .4);
+  transform-origin: 50% 10%;
+  animation: hour-bell 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+.pool--hour-crit .pool__bell { color: #fff; animation-duration: .6s; }
+.pool__bell .ico { width: 17px; height: 17px; }
+@keyframes hour-bell {
+  0%, 60%, 100% { transform: rotate(0); }
+  10% { transform: rotate(16deg); } 20% { transform: rotate(-14deg); }
+  30% { transform: rotate(10deg); } 40% { transform: rotate(-8deg); } 50% { transform: rotate(4deg); }
+}
+.pool__dismiss {
+  top: -9px; left: -7px; width: 26px; height: 26px; border-radius: 50%;
+  background: #17181C; color: #fff; border: 2px solid var(--alert);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .4);
+  cursor: pointer;
+}
+.pool__dismiss::after { content: ""; position: absolute; inset: -9px; } /* 44px touch target around the 26px button */
+.pool__dismiss .ico { width: 13px; height: 13px; stroke-width: 2.6; }
+.pool__dismiss:hover { background: #2B2D33; }
+.pool__dismiss:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+
 .booking-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .booking-presets legend { padding: 0 0 6px; font-size: 13px; font-weight: 700; }
 .booking-preset { position: relative; }
@@ -1310,4 +1371,10 @@ html.compact-nav .scrim[hidden] { display: none; }
   .main { padding-top: 22px; padding-bottom: 32px; }
   .pool__table { padding: 12px; }
   .pool__cloth { padding: 10px 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pool--hour-warn .pool__table { animation: none; box-shadow: inset 0 0 0 3px var(--alert), 0 0 14px 2px rgba(var(--alert-rgb), .5); }
+  .pool--hour-crit .pool__table { animation: none; box-shadow: inset 0 0 0 3px var(--alert), 0 0 18px 4px rgba(var(--alert-rgb), .6); }
+  .pool--hour-crit .led__digits, .pool__bell { animation: none; }
 }

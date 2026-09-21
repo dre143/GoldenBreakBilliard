@@ -51,3 +51,12 @@ export function playUrgentChime() {
     beep(c, 650, t + i * 0.32 + 0.16, 0.14, 0.24);
   }
 }
+
+/** One short, soft two-note chime (not repeated): an hour mark is 5 minutes away. */
+export function playHourChime() {
+  const c = audio();
+  if (!c) return;
+  const t = c.currentTime;
+  beep(c, 784, t, 0.16, 0.2);
+  beep(c, 988, t + 0.18, 0.22, 0.2);
+}

@@ -1,7 +1,8 @@
 import {
   elapsedMs, currentBill, PRICING, isTimed, remainingMs, overtimeMs,
 } from '../billing.js';
-import { esc, peso, fmtDuration, fmtBooking } from '../ui.js';
+import { esc, icon, peso, fmtDuration, fmtBooking } from '../ui.js';
+import { visibleHourLevel } from '../hour-alerts.js';
 
 // Live tables show a spinning 9-ball in place of the status lamp; the highlight layer stays still
 // while the inner ball (with its off-center "9") rotates, so it reads as a ball turning.
@@ -30,6 +31,8 @@ export function poolCard(t, { picker = false } = {}) {
   const timed = live && isTimed(t.session);
   const elapsed = live ? elapsedMs(t) : 0;
   const booking = timed ? bookingStatus(t, elapsed) : null;
+  // Hour-mark alert (5 min / 1 min before each whole hour): a state layered on a running card, see hour-alerts.js.
+  const hourLevel = live && !stopped ? visibleHourLevel(t) : null;
   const id = esc(t.id);
   // Stopped tables are still In Use (unpaid); the navy cloth says so visually, the sr-only prefix says it aloud.
   const status = !live ? 'Available'
@@ -37,7 +40,7 @@ export function poolCard(t, { picker = false } = {}) {
       : `<span class="sr-only">In Use, </span>${timed ? `Booked ${esc(fmtBooking(t.session.plannedMs))}` : 'Open Time'}`;
 
   return `
-    <article class="pool ${live ? 'pool--live' : 'pool--idle'}${stopped ? ' pool--stopped' : ''}${booking?.over && !stopped ? ' pool--overtime' : ''}" aria-labelledby="pool-${id}" data-pool="${id}">
+    <article class="pool ${live ? 'pool--live' : 'pool--idle'}${stopped ? ' pool--stopped' : ''}${booking?.over && !stopped ? ' pool--overtime' : ''}${hourLevel ? ` pool--hour-${hourLevel}` : ''}" aria-labelledby="pool-${id}" data-pool="${id}">
       <h2 class="pool__plate" id="pool-${id}">${esc(t.name)}</h2>
       <div class="pool__table">
         ${POCKETS}
@@ -56,6 +59,9 @@ export function poolCard(t, { picker = false } = {}) {
           </dl>
         </div>
       </div>
+      ${live && !stopped ? `<span class="pool__bell" aria-hidden="true">${icon('bell')}</span>
+      <button type="button" class="pool__dismiss" data-hour-dismiss="${id}" data-fk="dismiss-${id}" aria-label="Dismiss hour-mark alert for ${esc(t.name)}">${icon('x')}</button>
+      <span class="sr-only" role="status" data-hour-sr="${id}" data-level="${hourLevel || ''}">${hourLevel === 'crit' ? 'Hour mark in under 1 minute.' : hourLevel === 'warn' ? 'Hour mark in under 5 minutes.' : ''}</span>` : ''}
       ${picker
         ? `<a class="pool__hit" href="#/checkout/${encodeURIComponent(t.id)}" data-fk="bill-${id}" aria-label="Bill ${esc(t.name)}"></a>`
         : `<button type="button" class="pool__hit" data-action="open-table" data-id="${id}" data-fk="pool-${id}" aria-label="${esc(t.name)}, ${live ? 'in use' : 'available'}. Show actions"></button>`}

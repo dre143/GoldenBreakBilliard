@@ -171,6 +171,23 @@ playing at a table: no timer, no table fee, just the items and a payment.
   table name/number (Dashboard's Recent Transactions and the receipt do the same). A Quick Sale has no
   table fee, so there's nothing to cancel.
 
+## Hour-mark alert (table cards)
+
+A running table warns the cashier as it nears each whole hour of play (1:00, 2:00, ...), so they can tell the customer
+before the next rate step. It is a state layered on the card and changes nothing about billing:
+
+- **Last 5 minutes:** amber wood rail with a slow pulse, amber timer, a bell badge (top-right), a × dismiss button
+  (top-left), and one short chime.
+- **Last minute:** the same in red, with a faster pulse and a fading timer. No extra sound.
+- **Recovery:** it clears the moment the hour passes and re-arms for the next hour on its own. Stopping the table clears
+  it too. The × hides that card's alert for that hour mark only (kept for the browser session, so a reload doesn't
+  bring it back or repeat the chime).
+- **Booked tables:** when the booking ends within 15 minutes, the existing booking chime already covers it, so the
+  hour-mark chime stays quiet.
+- **Reduced motion:** with `prefers-reduced-motion`, the rail and timer just change color, with no pulsing or rocking.
+
+Timing rules are `hourAlert()` in `js/billing.js` (unit-tested); the on-screen state is in `js/hour-alerts.js`.
+
 ## Payments
 
 Checkout takes **Cash** (optional cash tendered → change), **GCash**, or **Split**. For Split the cashier enters the cash

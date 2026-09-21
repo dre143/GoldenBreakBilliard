@@ -123,3 +123,20 @@ export const CANCEL_REASONS = [
 
 /** Sales that count toward totals (a legacy fully-voided sale would be excluded; new voids never are). */
 export const activeSales = (txs) => txs.filter((t) => !t.voided);
+
+/* ---------- hour-mark proximity alert ----------
+ * A running table gets a heads-up as it nears each whole hour of play (1:00, 2:00, ...): "warn" inside the
+ * last 5 minutes, "crit" inside the last minute. Crossing the hour clears it and re-arms it for the next one.
+ * `boundary` numbers the hour mark being approached (1 = the first hour), so each hour is its own alert.
+ */
+export const HOUR_MS = 60 * 60 * 1000;
+export const HOUR_WARN_MS = 5 * 60 * 1000;
+export const HOUR_CRIT_MS = 60 * 1000;
+
+export function hourAlert(elapsed) {
+  if (!(elapsed > 0)) return { level: null, boundary: 1, msToMark: HOUR_MS };
+  const boundary = Math.floor(elapsed / HOUR_MS) + 1;
+  const msToMark = boundary * HOUR_MS - elapsed;
+  const level = msToMark <= HOUR_CRIT_MS ? 'crit' : msToMark <= HOUR_WARN_MS ? 'warn' : null;
+  return { level, boundary, msToMark };
+}

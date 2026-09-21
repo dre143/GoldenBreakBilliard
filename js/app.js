@@ -14,6 +14,7 @@ import * as staffView from './views/staff.js';
 import * as reportsView from './views/reports.js';
 import * as printer from './printer.js';
 import { startTimeAlerts } from './time-alerts.js';
+import { startHourAlerts } from './hour-alerts.js';
 import { printerDialog, cashDrawerDialog } from './dialogs.js';
 
 const root = document.getElementById('root');
@@ -122,6 +123,7 @@ function startData() {
   ];
   printer.tryReconnect(); // quietly reconnect the last thermal printer, if the browser kept permission
   dataCleanups.push(startTimeAlerts()); // 15- and 5-minutes-left chimes for booked tables
+  dataCleanups.push(startHourAlerts()); // 5-minute / 1-minute warning before each whole hour on a running table
   const beat = () => state.user && svc.setPresence(state.user.uid, true).catch(() => {});
   beat();
   syncClock();
