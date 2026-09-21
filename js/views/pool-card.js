@@ -44,6 +44,9 @@ export const BILLING_ALERT_TEXT = {
 export function billingAlertInner(state) {
   const text = BILLING_ALERT_TEXT[state];
   if (!text) return '';
+  // Once the threshold is reached the red card, the highlighted bill and the "Overtime" readout already say it,
+  // so no banner is drawn (it made the card taller). The words stay for screen readers.
+  if (state === 'reached') return `<span class="sr-only">${text.join(' ')}</span>`;
   return `<span class="pool__alert-dot" aria-hidden="true"></span><span class="pool__alert-text">${text.map((l) => `<span class="pool__alert-line">${l}</span>`).join(' ')}</span>`;
 }
 

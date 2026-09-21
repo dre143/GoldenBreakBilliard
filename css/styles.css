@@ -655,7 +655,7 @@ html.compact-nav .sidebar .printer-btn { display: none; }
    The words are the message; colour and motion only back them up. Two states, both driven by billingStatus()
    in js/billing.js (the same calculation as the bill):
      approaching  yellow  "APPROACHING / BILLING THRESHOLD"       the fee goes up within 5 minutes
-     threshold    red     "BILLING THRESHOLD / REACHED / OVERTIME" the fee has gone up (until the next warning)
+     threshold    red     no banner: the red card, bill pill and Overtime readout say it (screen-reader text only)
    The text sits just above the timer, wraps on a narrow card and is never clipped or shrunk below 12px. */
 .pool__alert {
   --alert-bg: rgba(242, 194, 48, .14); --alert-edge: #F2C230; --alert-ink: #FFE08A;
@@ -667,6 +667,12 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   text-align: center; overflow-wrap: anywhere; text-wrap: balance;
 }
 .pool__alert[hidden] { display: none; }
+/* Reached: no visible banner (the red card, bill pill and Overtime readout carry it). Taken out of the flow so it
+   adds no height or gap, but still read aloud by screen readers. */
+.pool__alert.pool__alert--reached {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; animation: none;
+}
 .pool__alert--reached { --alert-bg: var(--danger); --alert-edge: #FF8A80; --alert-ink: #fff; }
 .pool__alert-dot { flex: none; width: .8em; height: .8em; border-radius: 50%; background: var(--alert-edge); box-shadow: 0 0 0 3px rgba(255, 255, 255, .18); }
 .pool__alert-text { min-width: 0; }
@@ -686,12 +692,12 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   align-self: center; padding: 1px 10px; border-radius: 6px;
   background: var(--danger); color: #fff; font-weight: 800; box-shadow: 0 0 0 2px #FF8A80;
 }
-.pool--threshold .pool__alert { animation: pool-alert-blink 1s ease-in-out infinite; }
+
 @keyframes pool-approach { 50% { box-shadow: inset 0 0 0 3px #F2C230, 0 0 14px 2px rgba(242, 194, 48, .55); } }
 @keyframes pool-threshold { 50% { box-shadow: inset 0 0 0 4px #FF6B5F, 0 0 20px 5px rgba(229, 72, 63, .75); } }
-@keyframes pool-alert-blink { 50% { background: #E5483F; } }
+
 @media (prefers-reduced-motion: reduce) {
-  .pool--approaching .pool__table, .pool--threshold .pool__table, .pool--threshold .pool__alert { animation: none; }
+  .pool--approaching .pool__table, .pool--threshold .pool__table { animation: none; }
 }
 
 .booking-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }

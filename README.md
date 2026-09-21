@@ -133,16 +133,16 @@ It is **not** free time: the clock keeps counting the real elapsed time (the tab
 transaction; a new session always pays its own first hour.
 
 ### Billing status on the table card
-
+Before a fee step the card says so in words; once the step is reached it turns red and the bill is highlighted (no banner, so the card keeps its size):
 The card says in words where the bill stands, so nobody has to read a colour, a blink or a sound:
 
 | Time (Open Time, or overtime on a booking) | Card text | Look |
 |---|---|---|
 | up to 1:00:59 | none | normal |
 | 1:01:00 – 1:05:59 | **APPROACHING BILLING THRESHOLD** | yellow border, soft pulse |
-| 1:06:00 – 1:15:59 | **BILLING THRESHOLD REACHED / OVERTIME** | red, pulsing, bill highlighted, one chime |
+| 1:06:00 – 1:15:59 | none (the card turns red, the bill is highlighted, one chime) | red, pulsing |
 | 1:16:00 – 1:20:59 | APPROACHING BILLING THRESHOLD | yellow |
-| 1:21:00 – 1:30:59 | BILLING THRESHOLD REACHED / OVERTIME | red |
+| 1:21:00 – 1:30:59 | none (red) | red |
 
 …and so on every 15 minutes. It uses `billingStatus()` in `js/billing.js`, which is computed from the same
 `calculateBilliardBill()` result and the same elapsed time as the bill, so the text, colour, animation, chime and ₱ amount
