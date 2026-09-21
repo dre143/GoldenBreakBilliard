@@ -7,7 +7,7 @@
 import { db, auth } from './db.js';
 import {
   elapsedMs, round2, itemsTotal, CANCEL_REASONS, CANCEL_WINDOW_MS, PRICING,
-  billableMs, sessionFee, plannedMs, BOOKING_STEP_MS,
+  billSession, plannedMs, BOOKING_STEP_MS,
 } from './billing.js';
 import { SERVER_TIME, serverNow } from './clock.js';
 
@@ -161,8 +161,7 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, gc
     const durationMs = s.endedAt - s.startedAt;
     const cancelled = s.cancelled || null;
     // Booked hours are the minimum charge, except on a cancelled game, which has no table fee.
-    const billedMs = cancelled ? durationMs : billableMs(s, durationMs);
-    const fee = sessionFee(s, durationMs);
+    const { billedMs, tableFee: fee } = billSession(s, durationMs); // the one authoritative bill calculation
     const lines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
     const productTotal = itemsTotal(items);
     const total = round2(fee + productTotal);

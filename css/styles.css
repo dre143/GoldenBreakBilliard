@@ -651,6 +651,33 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .pool__dismiss:hover { background: #2B2D33; }
 .pool__dismiss:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 
+/* ---------- billing status on the card ----------
+   Both states come from billingStatus() in js/billing.js (the same calculation as the bill):
+     approaching  yellow rail + border, soft pulse   the fee goes up within 5 minutes
+     threshold    red rail + border, red bill pill   the fee has gone up (until the next warning)
+   No banner is drawn (it made the card taller and wrapped badly on narrow cards). The state is still written as
+   text in .pool__alert for screen readers, taken out of the flow so it adds no height or gap. */
+.pool__alert {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+
+.pool--approaching .pool__table { box-shadow: inset 0 0 0 3px #F2C230; animation: pool-approach 2.4s ease-in-out infinite; }
+.pool--approaching .pool__cloth { border-color: #F2C230; }
+.pool--threshold .pool__table { background: #8E241D; box-shadow: inset 0 0 0 4px #FF6B5F; animation: pool-threshold 1s ease-in-out infinite; }
+.pool--threshold .pool__cloth { border-color: #FF6B5F; }
+.pool--threshold .pool__meta dd[data-bill] {
+  align-self: center; padding: 1px 10px; border-radius: 6px;
+  background: var(--danger); color: #fff; font-weight: 800; box-shadow: 0 0 0 2px #FF8A80;
+}
+
+@keyframes pool-approach { 50% { box-shadow: inset 0 0 0 3px #F2C230, 0 0 14px 2px rgba(242, 194, 48, .55); } }
+@keyframes pool-threshold { 50% { box-shadow: inset 0 0 0 4px #FF6B5F, 0 0 20px 5px rgba(229, 72, 63, .75); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pool--approaching .pool__table, .pool--threshold .pool__table { animation: none; }
+}
+
 .booking-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .booking-presets legend { padding: 0 0 6px; font-size: 13px; font-weight: 700; }
 .booking-preset { position: relative; }

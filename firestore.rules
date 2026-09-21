@@ -27,11 +27,12 @@ service cloud.firestore {
     function onlyChanges(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
 
     // ---- Official table rate (mirrors PRICING in js/billing.js) ----
-    // First 60 minutes ₱200; each started 15-minute bracket after that ₱50, always rounded up.
+    // First 60 minutes ₱200, plus a 5-minute grace: still ₱200 through 1:05:59. From 1:06:00 (3960000 ms) the
+    // fee is ₱250, then +₱50 every 15 minutes (1:21:00, 1:36:00, ...): 200 + (1 + floor((ms - 3960000) / 900000)) * 50.
     function feeOk(fee, durationMs) {
       return durationMs is int && durationMs >= 0 && fee is int
-        && ((durationMs <= 3600000 && fee == 200)
-            || (durationMs > 3600000 && fee == 200 + math.ceil((durationMs - 3600000) / 900000.0) * 50));
+        && ((durationMs < 3960000 && fee == 200)
+            || (durationMs >= 3960000 && fee == 200 + (1 + math.floor((durationMs - 3960000) / 900000.0)) * 50));
     }
 
     // Booked time: 0 (open time) or whole 15-minute steps.

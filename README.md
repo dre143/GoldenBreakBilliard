@@ -120,8 +120,35 @@ One rate for every table (`PRICING` in `js/billing.js`):
 
 | Played | Table fee |
 |---|---|
-| up to 1:00:00 | ₱200 |
-| each started 15 minutes after that | + ₱50 (partial brackets always round **up**) |
+| 0:00:00 – 1:05:59 | ₱200 (first hour, plus a **5-minute grace period**) |
+| 1:06:00 – 1:20:59 | ₱250 |
+| 1:21:00 – 1:35:59 | ₱300 |
+| 1:36:00 – 1:50:59 | ₱350 |
+| 1:51:00 – 2:05:59 | ₱400 |
+| 2:06:00 and every 15 minutes after | + ₱50 each (₱450, ₱500, ₱550, …) |
+
+The grace period exists so a customer who says "end na ko" at 1:00 isn't charged another ₱50 because the cashier was busy.
+It is **not** free time: the clock keeps counting the real elapsed time (the table card shows e.g. `Overtime +00:04:30` next to
+`Bill ₱200.00`, then `+00:06:00` next to `₱250.00`), and it is not transferable. One customer is one session is one
+transaction; a new session always pays its own first hour.
+
+### Billing status on the table card
+
+The card shows where the bill stands by its look (no text banner, so every card keeps the same size):
+
+| Time (Open Time, or overtime on a booking) | Card look |
+|---|---|
+| up to 1:00:59 | normal |
+| 1:01:00 - 1:05:59 | yellow border, soft pulse (fee step coming) |
+| 1:06:00 - 1:15:59 | red border, red pulse, bill in a red pill, one chime |
+| 1:16:00 - 1:20:59 | yellow |
+| 1:21:00 - 1:30:59 | red |
+
+...and so on every 15 minutes. It uses `billingStatus()` in `js/billing.js`, computed from the same
+`calculateBilliardBill()` result and the same elapsed time as the bill, so the colour, animation, chime and amount always
+change at the same instant. Screen readers get the words ("Approaching billing threshold" / "Billing threshold reached /
+overtime"). A 2h booking is not "reached" at 2:00 (the ₱400 was prepaid); it turns yellow at 2:01:00 and red at 2:06:00.
+A stopped or cancelled clock shows no billing alert.
 
 ### Open Time vs Set Hours
 
@@ -129,14 +156,17 @@ One rate for every table (`PRICING` in `js/billing.js`):
 - **Set Hours:** the customer books a length, e.g. 1h, 2h, 3h, or a custom length in 15-minute steps. The card counts down
   "Time left" and turns amber with "Overtime +mm:ss" when the booking runs out.
   - **Booked time is the minimum charge.** The billed time is whichever is longer, booked or played. Stopping a 2h booking after
-    45 minutes costs ₱400; playing 2:01 on a 2h booking costs ₱450.
+    45 minutes costs ₱400; playing 2:05:59 on a 2h booking still costs ₱400 (grace), and 2:06:00 costs ₱450.
   - **Add time** (at checkout) extends a booking. An Open Time table can also be switched to a booking there. The rules allow
     a booking to grow, never shrink.
 
-Formula: `≤ 60 min → ₱200`, otherwise `₱200 + ceil((minutes − 60) / 15) × ₱50`, computed on exact milliseconds.
-So 1:00:00 is ₱200, 1:00:01 is ₱250, 1:15:00 is ₱250, 1:15:01 is ₱300, and 2:01:00 is ₱450.
+Formula, on exact milliseconds: `< 1:06:00 → ₱200`, otherwise `₱200 + (1 + floor((elapsed − 1:06:00) / 15 min)) × ₱50`.
+It lives in **one** function, `calculateBilliardBill()` in `js/billing.js`. Open Time, Set Hours, the table card, checkout,
+the booking preview and the sale that is saved all call it (through `billSession()`); reports, history, the dashboard and
+receipts only read the fee stored on each sale. Old sales keep their old amounts: each sale stores a pricing snapshot, and one
+without the grace field is read with the old round-up rule.
 Checkout shows the breakdown and when the fee next goes up. `firestore.rules` holds a copy of the same numbers (`feeOk`),
-so change both together.
+so change both together, and **deploy the rules together with this change** (`npm run deploy:rules`), otherwise checkouts are rejected.
 
 ## Time integrity (why a changed clock can't change a bill)
 
