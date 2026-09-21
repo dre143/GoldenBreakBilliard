@@ -146,31 +146,28 @@ export function billSession(session, elapsed) {
 }
 
 /**
- * Billing status of a running table, for the table card: 'normal', 'approaching' (the fee goes up within
- * BILLING_WARNING_MS) or 'reached' (a billing threshold was crossed during overtime and is the latest one).
- * It is derived from the very same calculateBilliardBill() result as the bill, from the same elapsed value,
- * so the status text, colour, animation, chime and amount can only ever change together:
- *   approaching  next threshold − 5 min  ≤  elapsed  <  next threshold        (1:01:00–1:05:59, 1:16:00–1:20:59, ...)
- *   reached      elapsed ≥ the latest threshold, until the next 'approaching' window opens (1:06:00–1:15:59, ...)
- * "Overtime" means past the booked time (Set Hours) or past the first hour (Open Time), so a 2h booking
- * doesn't read "reached" just because ₱400 was already paid up front. A stopped or cancelled clock is 'normal'.
- * Returns { state, thresholdAtMs, ...billSession }: thresholdAtMs is the threshold the state is about.
+ * Overtime status of a running table, for the table card: 'normal', 'approaching' or 'reached' (overtime).
+ * The colour follows the time that was BOOKED, not the fee steps, and it is independent of the grace period:
+ *   reached      red, from the moment the booked time is used up (Set Hours) or the first hour is (Open Time),
+ *                and it stays red until checkout. The grace period changes only the bill, never the colour:
+ *                a 1h booking is red from 1:00:00, while the bill stays ₱200 until 1:06:00.
+ *   approaching  yellow, in the last BILLING_WARNING_MS (5 min) before that moment.
+ * It is computed from the same elapsed value as the bill (billSession), so the colour, animation, chime and amount
+ * can never disagree about the time. A stopped or cancelled clock is 'normal'.
+ * Returns { state, overtimeStartMs, ...billSession } (overtimeStartMs: when the table goes into overtime;
+ * lastIncreaseAtMs from the bill is the latest ₱ step, used for the chime).
  */
 export const BILLING_WARNING_MS = 5 * MINUTE;
+export const overtimeStartMs = (session) => (isTimed(session) ? plannedMs(session) : PRICING.baseMinutes * MINUTE);
 export function billingStatus(session, elapsed) {
   const bill = billSession(session, elapsed);
+  const startMs = overtimeStartMs(session);
   let state = 'normal';
-  let thresholdAtMs = null;
   if (session && !session.ended && !session.cancelled) {
-    if (elapsed >= bill.nextIncreaseAtMs - BILLING_WARNING_MS && elapsed < bill.nextIncreaseAtMs) {
-      state = 'approaching';
-      thresholdAtMs = bill.nextIncreaseAtMs;
-    } else if (bill.lastIncreaseAtMs != null && bill.lastIncreaseAtMs > plannedMs(session) && elapsed >= bill.lastIncreaseAtMs) {
-      state = 'reached';
-      thresholdAtMs = bill.lastIncreaseAtMs;
-    }
+    if (elapsed > startMs) state = 'reached';
+    else if (elapsed >= startMs - BILLING_WARNING_MS) state = 'approaching';
   }
-  return { state, thresholdAtMs, ...bill };
+  return { state, overtimeStartMs: startMs, ...bill };
 }
 
 /** Table fee for a session: the rate on billable time, or ₱0 once the game was cancelled (see below). */

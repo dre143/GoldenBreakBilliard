@@ -37,8 +37,8 @@ export function bookingStatus(t, elapsed) {
  * that produces the bill.
  */
 export const BILLING_ALERT_TEXT = {
-  approaching: ['APPROACHING', 'BILLING THRESHOLD'],
-  reached: ['BILLING THRESHOLD', 'REACHED / OVERTIME'],
+  approaching: ['APPROACHING', 'OVERTIME'],
+  reached: ['OVERTIME'],
 };
 
 export function billingAlertInner(state) {

@@ -132,23 +132,22 @@ It is **not** free time: the clock keeps counting the real elapsed time (the tab
 `Bill ₱200.00`, then `+00:06:00` next to `₱250.00`), and it is not transferable. One customer is one session is one
 transaction; a new session always pays its own first hour.
 
-### Billing status on the table card
+### Overtime colour on the table card
 
-The card shows where the bill stands by its look (no text banner, so every card keeps the same size):
+The card shows overtime by its look (no text banner, so every card keeps the same size). The colour follows the time that was
+**booked**; the 5-minute grace period only affects the bill, never the colour:
 
-| Time (Open Time, or overtime on a booking) | Card look |
-|---|---|
-| up to 1:00:59 | normal |
-| 1:01:00 - 1:05:59 | yellow border, soft pulse (fee step coming) |
-| 1:06:00 - 1:15:59 | red border, red pulse, bill in a red pill, one chime |
-| 1:16:00 - 1:20:59 | yellow |
-| 1:21:00 - 1:30:59 | red |
+| Table state | Card look | Bill |
+|---|---|---|
+| more than 5 min before the booked time ends (Open Time: before 0:55:00) | normal | ₱200 |
+| last 5 min before it ends (a 1h booking: 0:55:00 - 1:00:00) | yellow border, soft pulse | ₱200 |
+| overtime, from 1:00:01 on a 1h booking | **red** border and rail, red pulse, bill in a red pill, one chime | ₱200 until 1:05:59 (grace), ₱250 at 1:06:00, ₱300 at 1:21:00, ... |
 
-...and so on every 15 minutes. It uses `billingStatus()` in `js/billing.js`, computed from the same
-`calculateBilliardBill()` result and the same elapsed time as the bill, so the colour, animation, chime and amount always
-change at the same instant. Screen readers get the words ("Approaching billing threshold" / "Billing threshold reached /
-overtime"). A 2h booking is not "reached" at 2:00 (the ₱400 was prepaid); it turns yellow at 2:01:00 and red at 2:06:00.
-A stopped or cancelled clock shows no billing alert.
+Once red it stays red until checkout; the fee steps (1:06, 1:21, 1:36, ...) don't change the colour, but each plays one chime.
+A 2h booking stays normal until 1:55:00 (yellow), goes red after 2:00:00, and its bill steps up at 2:06:00.
+Open Time counts overtime from the end of the first hour. `billingStatus()` in `js/billing.js` uses the same elapsed time as
+the bill, so colour, animation, chime and amount can't disagree. Screen readers hear "Approaching overtime" / "Overtime".
+A stopped or cancelled clock shows nothing.
 
 ### Open Time vs Set Hours
 
