@@ -32,9 +32,9 @@ export function bookingStatus(t, elapsed) {
 }
 
 /**
- * The billing status written out on the card, so staff never have to read a colour, a blink or a sound.
- * The state comes from billingStatus() (js/billing.js), the same calculation that produces the bill.
- * Each phrase is one run of text that wraps naturally on a narrow card (see .pool__alert in the CSS).
+ * The billing status as text for screen readers (no visible banner: the card's yellow/red look, the highlighted bill
+ * and the Overtime readout carry it). The state comes from billingStatus() (js/billing.js), the same calculation
+ * that produces the bill.
  */
 export const BILLING_ALERT_TEXT = {
   approaching: ['APPROACHING', 'BILLING THRESHOLD'],
@@ -43,11 +43,7 @@ export const BILLING_ALERT_TEXT = {
 
 export function billingAlertInner(state) {
   const text = BILLING_ALERT_TEXT[state];
-  if (!text) return '';
-  // Once the threshold is reached the red card, the highlighted bill and the "Overtime" readout already say it,
-  // so no banner is drawn (it made the card taller). The words stay for screen readers.
-  if (state === 'reached') return `<span class="sr-only">${text.join(' ')}</span>`;
-  return `<span class="pool__alert-dot" aria-hidden="true"></span><span class="pool__alert-text">${text.map((l) => `<span class="pool__alert-line">${l}</span>`).join(' ')}</span>`;
+  return text ? text.join(' ') : '';
 }
 
 /** Card modifier for a billing state ('' when normal). */

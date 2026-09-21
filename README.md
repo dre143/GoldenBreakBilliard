@@ -133,21 +133,22 @@ It is **not** free time: the clock keeps counting the real elapsed time (the tab
 transaction; a new session always pays its own first hour.
 
 ### Billing status on the table card
-Before a fee step the card says so in words; once the step is reached it turns red and the bill is highlighted (no banner, so the card keeps its size):
-The card says in words where the bill stands, so nobody has to read a colour, a blink or a sound:
 
-| Time (Open Time, or overtime on a booking) | Card text | Look |
-|---|---|---|
-| up to 1:00:59 | none | normal |
-| 1:01:00 – 1:05:59 | **APPROACHING BILLING THRESHOLD** | yellow border, soft pulse |
-| 1:06:00 – 1:15:59 | none (the card turns red, the bill is highlighted, one chime) | red, pulsing |
-| 1:16:00 – 1:20:59 | APPROACHING BILLING THRESHOLD | yellow |
-| 1:21:00 – 1:30:59 | none (red) | red |
+The card shows where the bill stands by its look (no text banner, so every card keeps the same size):
 
-…and so on every 15 minutes. It uses `billingStatus()` in `js/billing.js`, which is computed from the same
-`calculateBilliardBill()` result and the same elapsed time as the bill, so the text, colour, animation, chime and ₱ amount
-always change at the same instant. A 2h booking is not "reached" at 2:00 (the ₱400 was prepaid); it turns
-"approaching" at 2:01:00 and "reached" at 2:06:00. A stopped or cancelled clock shows no billing alert.
+| Time (Open Time, or overtime on a booking) | Card look |
+|---|---|
+| up to 1:00:59 | normal |
+| 1:01:00 - 1:05:59 | yellow border, soft pulse (fee step coming) |
+| 1:06:00 - 1:15:59 | red border, red pulse, bill in a red pill, one chime |
+| 1:16:00 - 1:20:59 | yellow |
+| 1:21:00 - 1:30:59 | red |
+
+...and so on every 15 minutes. It uses `billingStatus()` in `js/billing.js`, computed from the same
+`calculateBilliardBill()` result and the same elapsed time as the bill, so the colour, animation, chime and amount always
+change at the same instant. Screen readers get the words ("Approaching billing threshold" / "Billing threshold reached /
+overtime"). A 2h booking is not "reached" at 2:00 (the ₱400 was prepaid); it turns yellow at 2:01:00 and red at 2:06:00.
+A stopped or cancelled clock shows no billing alert.
 
 ### Open Time vs Set Hours
 

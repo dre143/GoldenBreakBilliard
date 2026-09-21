@@ -652,36 +652,14 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .pool__dismiss:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 
 /* ---------- billing status on the card ----------
-   The words are the message; colour and motion only back them up. Two states, both driven by billingStatus()
-   in js/billing.js (the same calculation as the bill):
-     approaching  yellow  "APPROACHING / BILLING THRESHOLD"       the fee goes up within 5 minutes
-     threshold    red     no banner: the red card, bill pill and Overtime readout say it (screen-reader text only)
-   The text sits just above the timer, wraps on a narrow card and is never clipped or shrunk below 12px. */
+   Both states come from billingStatus() in js/billing.js (the same calculation as the bill):
+     approaching  yellow rail + border, soft pulse   the fee goes up within 5 minutes
+     threshold    red rail + border, red bill pill   the fee has gone up (until the next warning)
+   No banner is drawn (it made the card taller and wrapped badly on narrow cards). The state is still written as
+   text in .pool__alert for screen readers, taken out of the flow so it adds no height or gap. */
 .pool__alert {
-  --alert-bg: rgba(242, 194, 48, .14); --alert-edge: #F2C230; --alert-ink: #FFE08A;
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  min-width: 0; padding: 7px 10px;
-  border: 2px solid var(--alert-edge); border-radius: 8px;
-  background: var(--alert-bg); color: var(--alert-ink);
-  font-size: clamp(12px, 5.2cqi, 16px); font-weight: 800; line-height: 1.2; letter-spacing: .05em; text-transform: uppercase;
-  text-align: center; overflow-wrap: anywhere; text-wrap: balance;
-}
-.pool__alert[hidden] { display: none; }
-/* Reached: no visible banner (the red card, bill pill and Overtime readout carry it). Taken out of the flow so it
-   adds no height or gap, but still read aloud by screen readers. */
-.pool__alert.pool__alert--reached {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden;
-  clip-path: inset(50%); white-space: nowrap; animation: none;
-}
-.pool__alert--reached { --alert-bg: var(--danger); --alert-edge: #FF8A80; --alert-ink: #fff; }
-.pool__alert-dot { flex: none; width: .8em; height: .8em; border-radius: 50%; background: var(--alert-edge); box-shadow: 0 0 0 3px rgba(255, 255, 255, .18); }
-.pool__alert-text { min-width: 0; }
-/* One phrase per line ("APPROACHING" / "BILLING THRESHOLD"); a phrase that doesn't fit wraps by itself
-   ("BILLING" / "THRESHOLD"). On a narrow card the dot is dropped so the words get the full width. */
-.pool__alert-line { display: block; }
-@container pool (max-width: 249px) {
-  .pool__alert { padding: 6px 6px; }
-  .pool__alert-dot { display: none; }
+  clip-path: inset(50%); white-space: nowrap;
 }
 
 .pool--approaching .pool__table { box-shadow: inset 0 0 0 3px #F2C230; animation: pool-approach 2.4s ease-in-out infinite; }
