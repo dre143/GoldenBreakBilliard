@@ -1,9 +1,10 @@
 // Time-left alerts for booked (Set Hours) tables: a chime and an alert card at 15 minutes left, and a
 // louder chime and card again at 5 minutes left. Each alert fires once per table per game on this device
 // (remembered for the browser session, so a page reload doesn't repeat it). Open Time tables have no end
-// time, so they never alert. Runs on every screen while someone is signed in.
+// time, so they never alert. Every table (booked or open) also chimes once when a billing threshold is reached.
+// Runs on every screen while someone is signed in.
 import { state, on } from './state.js';
-import { elapsedMs, isTimed, plannedMs } from './billing.js';
+import { elapsedMs, isTimed, plannedMs, billingStatus } from './billing.js';
 import { playWarningChime, playUrgentChime, primeAlarmAudio } from './alarm.js';
 import { esc, fmtCountdown } from './ui.js';
 
@@ -15,6 +16,7 @@ export const TIME_ALERTS = [
   { key: '15', ms: 15 * MIN, label: '15 minutes left', level: 'warn', sound: playWarningChime },
 ];
 
+const THRESHOLD_CHIME_WINDOW_MS = 15 * 1000;
 const FIRED_KEY = 'goldenbreak:time-alerts-fired';
 
 function loadFired() {
@@ -60,7 +62,25 @@ export function startTimeAlerts() {
     }).join('');
   }
 
+  // A billing threshold was just crossed (the card turns red): chime once. "Just" matters, so a tablet opened
+  // mid-overtime doesn't chime for a threshold that passed long ago. Uses the same billingStatus() as the card.
+  function checkThresholds() {
+    for (const t of state.tables) {
+      const s = t.session;
+      if (!s) continue;
+      const elapsed = elapsedMs(t);
+      const b = billingStatus(s, elapsed);
+      if (b.state !== 'reached' || elapsed - b.thresholdAtMs > THRESHOLD_CHIME_WINDOW_MS) continue;
+      const id = `${t.id}:${s.startedAt}:threshold:${b.thresholdAtMs}`;
+      if (fired.has(id)) continue;
+      fired.add(id);
+      saveFired(fired);
+      playUrgentChime();
+    }
+  }
+
   function check() {
+    checkThresholds();
     let changed = false;
     for (const t of state.tables) {
       const s = t.session;

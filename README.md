@@ -132,6 +132,23 @@ It is **not** free time: the clock keeps counting the real elapsed time (the tab
 `Bill ₱200.00`, then `+00:06:00` next to `₱250.00`), and it is not transferable. One customer is one session is one
 transaction; a new session always pays its own first hour.
 
+### Billing status on the table card
+
+The card says in words where the bill stands, so nobody has to read a colour, a blink or a sound:
+
+| Time (Open Time, or overtime on a booking) | Card text | Look |
+|---|---|---|
+| up to 1:00:59 | none | normal |
+| 1:01:00 – 1:05:59 | **APPROACHING BILLING THRESHOLD** | yellow border, soft pulse |
+| 1:06:00 – 1:15:59 | **BILLING THRESHOLD REACHED / OVERTIME** | red, pulsing, bill highlighted, one chime |
+| 1:16:00 – 1:20:59 | APPROACHING BILLING THRESHOLD | yellow |
+| 1:21:00 – 1:30:59 | BILLING THRESHOLD REACHED / OVERTIME | red |
+
+…and so on every 15 minutes. It uses `billingStatus()` in `js/billing.js`, which is computed from the same
+`calculateBilliardBill()` result and the same elapsed time as the bill, so the text, colour, animation, chime and ₱ amount
+always change at the same instant. A 2h booking is not "reached" at 2:00 (the ₱400 was prepaid); it turns
+"approaching" at 2:01:00 and "reached" at 2:06:00. A stopped or cancelled clock shows no billing alert.
+
 ### Open Time vs Set Hours
 
 - **Open Time:** the clock runs until the cashier stops it. Billed on the time actually played.

@@ -651,6 +651,49 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .pool__dismiss:hover { background: #2B2D33; }
 .pool__dismiss:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 
+/* ---------- billing status on the card ----------
+   The words are the message; colour and motion only back them up. Two states, both driven by billingStatus()
+   in js/billing.js (the same calculation as the bill):
+     approaching  yellow  "APPROACHING / BILLING THRESHOLD"       the fee goes up within 5 minutes
+     threshold    red     "BILLING THRESHOLD / REACHED / OVERTIME" the fee has gone up (until the next warning)
+   The text sits just above the timer, wraps on a narrow card and is never clipped or shrunk below 12px. */
+.pool__alert {
+  --alert-bg: rgba(242, 194, 48, .14); --alert-edge: #F2C230; --alert-ink: #FFE08A;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-width: 0; padding: 7px 10px;
+  border: 2px solid var(--alert-edge); border-radius: 8px;
+  background: var(--alert-bg); color: var(--alert-ink);
+  font-size: clamp(12px, 5.2cqi, 16px); font-weight: 800; line-height: 1.2; letter-spacing: .05em; text-transform: uppercase;
+  text-align: center; overflow-wrap: anywhere; text-wrap: balance;
+}
+.pool__alert[hidden] { display: none; }
+.pool__alert--reached { --alert-bg: var(--danger); --alert-edge: #FF8A80; --alert-ink: #fff; }
+.pool__alert-dot { flex: none; width: .8em; height: .8em; border-radius: 50%; background: var(--alert-edge); box-shadow: 0 0 0 3px rgba(255, 255, 255, .18); }
+.pool__alert-text { min-width: 0; }
+/* One phrase per line ("APPROACHING" / "BILLING THRESHOLD"); a phrase that doesn't fit wraps by itself
+   ("BILLING" / "THRESHOLD"). On a narrow card the dot is dropped so the words get the full width. */
+.pool__alert-line { display: block; }
+@container pool (max-width: 249px) {
+  .pool__alert { padding: 6px 6px; }
+  .pool__alert-dot { display: none; }
+}
+
+.pool--approaching .pool__table { box-shadow: inset 0 0 0 3px #F2C230; animation: pool-approach 2.4s ease-in-out infinite; }
+.pool--approaching .pool__cloth { border-color: #F2C230; }
+.pool--threshold .pool__table { background: #8E241D; box-shadow: inset 0 0 0 4px #FF6B5F; animation: pool-threshold 1s ease-in-out infinite; }
+.pool--threshold .pool__cloth { border-color: #FF6B5F; }
+.pool--threshold .pool__meta dd[data-bill] {
+  align-self: center; padding: 1px 10px; border-radius: 6px;
+  background: var(--danger); color: #fff; font-weight: 800; box-shadow: 0 0 0 2px #FF8A80;
+}
+.pool--threshold .pool__alert { animation: pool-alert-blink 1s ease-in-out infinite; }
+@keyframes pool-approach { 50% { box-shadow: inset 0 0 0 3px #F2C230, 0 0 14px 2px rgba(242, 194, 48, .55); } }
+@keyframes pool-threshold { 50% { box-shadow: inset 0 0 0 4px #FF6B5F, 0 0 20px 5px rgba(229, 72, 63, .75); } }
+@keyframes pool-alert-blink { 50% { background: #E5483F; } }
+@media (prefers-reduced-motion: reduce) {
+  .pool--approaching .pool__table, .pool--threshold .pool__table, .pool--threshold .pool__alert { animation: none; }
+}
+
 .booking-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
 .booking-presets legend { padding: 0 0 6px; font-size: 13px; font-weight: 700; }
 .booking-preset { position: relative; }

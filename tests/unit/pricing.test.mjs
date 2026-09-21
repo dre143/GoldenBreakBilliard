@@ -315,3 +315,87 @@ test('cancel game: only within the first 5 minutes, running or stopped, and only
 
   assert.deepEqual(b.activeSales([{ id: 1 }, { id: 2, voided: true }]).map((x) => x.id), [1]);
 });
+
+/* ---------------- billing status on the table card: text, colour, animation, chime and bill share one source ---------------- */
+
+const stateAt = (session, minutes, seconds = 0) => b.billingStatus(session, m(minutes, seconds)).state;
+const open = { startedAt: 0, ended: false, items: [] };
+const booked1h = { ...open, plannedMs: m(60) };
+const booked2h = { ...open, plannedMs: m(120) };
+
+test('status transitions at the owner’s exact times (Open Time and 1h booking)', () => {
+  const expected = [
+    [60, 0, 'normal'],
+    [61, 0, 'approaching'],
+    [65, 59, 'approaching'],
+    [66, 0, 'reached'],
+    [76, 0, 'approaching'],
+    [80, 59, 'approaching'],
+    [81, 0, 'reached'],
+    [91, 0, 'approaching'],
+    [95, 59, 'approaching'],
+    [96, 0, 'reached'],
+  ];
+  for (const session of [open, booked1h]) {
+    for (const [mm, ss, want] of expected) {
+      assert.equal(stateAt(session, mm, ss), want, `${mm}:${String(ss).padStart(2, '0')} → ${want}`);
+    }
+  }
+  // The gaps between the listed times follow the same pattern.
+  assert.equal(stateAt(open, 60, 59), 'normal');
+  assert.equal(stateAt(open, 75, 59), 'reached', 'the red state holds until the next warning window opens');
+  assert.equal(stateAt(open, 30), 'normal');
+});
+
+test('the status and the bill change at the same instant, to the millisecond', () => {
+  for (const session of [open, booked1h, booked2h]) {
+    for (let k = 0; k < 8; k++) {
+      const at = m(66) + k * m(15); // each threshold
+      const before = b.billingStatus(session, at - 1);
+      const now = b.billingStatus(session, at);
+      assert.notEqual(before.state, 'reached', `1 ms before ${at / MIN} min is not yet reached`);
+      if (at > b.plannedMs(session)) {
+        assert.equal(now.state, 'reached', `exactly ${at / MIN} min is reached`);
+        assert.ok(now.tableFee > before.tableFee || b.billableMs(session, at) === b.plannedMs(session), 'the fee steps up with it');
+        assert.equal(now.tableFee, before.tableFee + 50, 'reached and ₱ +50 land together');
+      }
+      assert.equal(now.tableFee, b.currentBill({ session: { ...session, ended: true, endedAt: at, startedAt: 0 } }));
+    }
+    // Never "approaching" while the engine already bills the new amount, and never "reached" at the old amount.
+    for (let ms = 0; ms <= m(200); ms += 500) {
+      const s = b.billingStatus(session, ms);
+      const lastStep = s.lastIncreaseAtMs;
+      if (s.state === 'approaching') assert.ok(ms < s.nextIncreaseAtMs && s.tableFee === b.tableFee(s.billedMs), `${ms}: approaching, next step not yet billed`);
+      if (s.state === 'reached') assert.ok(ms >= lastStep && s.tableFee === 200 + (Math.round((lastStep - m(66)) / m(15)) + 1) * 50, `${ms}: reached, the latest step is billed`);
+    }
+  }
+});
+
+test('status: booked hours are not "reached" just because they were prepaid', () => {
+  assert.equal(stateAt(booked2h, 60), 'normal');
+  assert.equal(stateAt(booked2h, 90), 'normal');
+  assert.equal(stateAt(booked2h, 120), 'normal', 'the ₱400 is the booking, not overtime');
+  assert.equal(stateAt(booked2h, 121), 'approaching', 'the fee goes up at 2:06:00');
+  assert.equal(stateAt(booked2h, 125, 59), 'approaching');
+  assert.equal(stateAt(booked2h, 126), 'reached');
+  assert.equal(stateAt(booked2h, 136), 'approaching');
+  assert.equal(stateAt(booked2h, 141), 'reached');
+  // A booking that ends between thresholds (1h30): next step is 1:36.
+  const booked90 = { ...open, plannedMs: m(90) };
+  assert.equal(stateAt(booked90, 90), 'normal');
+  assert.equal(stateAt(booked90, 91), 'approaching');
+  assert.equal(stateAt(booked90, 96), 'reached');
+});
+
+test('status: stopped or cancelled clocks show no billing alert', () => {
+  assert.equal(b.billingStatus({ ...open, ended: true, endedAt: m(70) }, m(70)).state, 'normal');
+  assert.equal(b.billingStatus({ ...open, cancelled: { reason: 'x' } }, m(70)).state, 'normal');
+  assert.equal(b.billingStatus(null, m(70)).state, 'normal');
+});
+
+test('status reports the threshold it is about', () => {
+  assert.equal(b.billingStatus(open, m(63)).thresholdAtMs, m(66));
+  assert.equal(b.billingStatus(open, m(70)).thresholdAtMs, m(66));
+  assert.equal(b.billingStatus(open, m(78)).thresholdAtMs, m(81));
+  assert.equal(b.billingStatus(open, m(83)).thresholdAtMs, m(81));
+});

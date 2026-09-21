@@ -41,7 +41,7 @@ export const PRICING_LABEL = `₱${PRICING.basePrice} first hour · ₱${PRICING
  * Returns { fee, extraBrackets, inGrace, graceEndsAtMs, nextIncreaseAtMs }:
  *   fee              ₱200 until 1:05:59, ₱250 from 1:06:00, ₱300 from 1:21:00, ...
  *   inGrace          true from 1:00:00 up to (not including) 1:06:00: the hour is over but no charge yet
- *   nextIncreaseAtMs the elapsed time at which the fee next goes up
+ *   nextIncreaseAtMs the elapsed time at which the fee next goes up\n *   lastIncreaseAtMs the elapsed time at which it last went up (null while still on the first-hour fee)
  */
 export function calculateBilliardBill(elapsedMs, pricing = PRICING) {
   const ms = Math.max(0, Math.floor(Number(elapsedMs) || 0));
@@ -58,6 +58,7 @@ export function calculateBilliardBill(elapsedMs, pricing = PRICING) {
       inGrace: false,
       graceEndsAtMs: baseMs,
       nextIncreaseAtMs: baseMs + brackets * bracketMs,
+      lastIncreaseAtMs: null,
     };
   }
 
@@ -70,6 +71,7 @@ export function calculateBilliardBill(elapsedMs, pricing = PRICING) {
     inGrace: ms >= baseMs && ms < firstExtraAtMs,
     graceEndsAtMs: firstExtraAtMs,
     nextIncreaseAtMs: firstExtraAtMs + brackets * bracketMs,
+    lastIncreaseAtMs: brackets ? firstExtraAtMs + (brackets - 1) * bracketMs : null,
   };
 }
 
@@ -141,6 +143,34 @@ export function billSession(session, elapsed) {
   const billedMs = cancelled ? elapsed : billableMs(session, elapsed);
   const bill = calculateBilliardBill(billedMs);
   return { elapsedMs: elapsed, billedMs, cancelled, ...bill, fee: cancelled ? 0 : bill.fee, tableFee: cancelled ? 0 : bill.fee };
+}
+
+/**
+ * Billing status of a running table, for the table card: 'normal', 'approaching' (the fee goes up within
+ * BILLING_WARNING_MS) or 'reached' (a billing threshold was crossed during overtime and is the latest one).
+ * It is derived from the very same calculateBilliardBill() result as the bill, from the same elapsed value,
+ * so the status text, colour, animation, chime and amount can only ever change together:
+ *   approaching  next threshold − 5 min  ≤  elapsed  <  next threshold        (1:01:00–1:05:59, 1:16:00–1:20:59, ...)
+ *   reached      elapsed ≥ the latest threshold, until the next 'approaching' window opens (1:06:00–1:15:59, ...)
+ * "Overtime" means past the booked time (Set Hours) or past the first hour (Open Time), so a 2h booking
+ * doesn't read "reached" just because ₱400 was already paid up front. A stopped or cancelled clock is 'normal'.
+ * Returns { state, thresholdAtMs, ...billSession }: thresholdAtMs is the threshold the state is about.
+ */
+export const BILLING_WARNING_MS = 5 * MINUTE;
+export function billingStatus(session, elapsed) {
+  const bill = billSession(session, elapsed);
+  let state = 'normal';
+  let thresholdAtMs = null;
+  if (session && !session.ended && !session.cancelled) {
+    if (elapsed >= bill.nextIncreaseAtMs - BILLING_WARNING_MS && elapsed < bill.nextIncreaseAtMs) {
+      state = 'approaching';
+      thresholdAtMs = bill.nextIncreaseAtMs;
+    } else if (bill.lastIncreaseAtMs != null && bill.lastIncreaseAtMs > plannedMs(session) && elapsed >= bill.lastIncreaseAtMs) {
+      state = 'reached';
+      thresholdAtMs = bill.lastIncreaseAtMs;
+    }
+  }
+  return { state, thresholdAtMs, ...bill };
 }
 
 /** Table fee for a session: the rate on billable time, or ₱0 once the game was cancelled (see below). */

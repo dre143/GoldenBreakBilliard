@@ -1,8 +1,9 @@
 import {
-  elapsedMs, currentBill, PRICING, isTimed, remainingMs, overtimeMs,
+  elapsedMs, currentBill, PRICING, isTimed, remainingMs, overtimeMs, billingStatus,
 } from '../billing.js';
 import { esc, icon, peso, fmtDuration, fmtBooking } from '../ui.js';
 import { visibleHourLevel } from '../hour-alerts.js';
+import { serverNow } from '../clock.js';
 
 // Live tables show a spinning 9-ball in place of the status lamp; the highlight layer stays still
 // while the inner ball (with its off-center "9") rotates, so it reads as a ball turning.
@@ -31,6 +32,25 @@ export function bookingStatus(t, elapsed) {
 }
 
 /**
+ * The billing status written out on the card, so staff never have to read a colour, a blink or a sound.
+ * The state comes from billingStatus() (js/billing.js), the same calculation that produces the bill.
+ * Each phrase is one run of text that wraps naturally on a narrow card (see .pool__alert in the CSS).
+ */
+export const BILLING_ALERT_TEXT = {
+  approaching: ['APPROACHING', 'BILLING THRESHOLD'],
+  reached: ['BILLING THRESHOLD', 'REACHED / OVERTIME'],
+};
+
+export function billingAlertInner(state) {
+  const text = BILLING_ALERT_TEXT[state];
+  if (!text) return '';
+  return `<span class="pool__alert-dot" aria-hidden="true"></span><span class="pool__alert-text">${text.map((l) => `<span class="pool__alert-line">${l}</span>`).join(' ')}</span>`;
+}
+
+/** Card modifier for a billing state ('' when normal). */
+export const billingClass = (state) => (state === 'approaching' ? 'pool--approaching' : state === 'reached' ? 'pool--threshold' : '');
+
+/**
  * Top-down pool table card for the floor grid. One glance: dark navy cloth with a lit LED = In Use,
  * pale cloth with an unlit display = Available. The card carries no visible buttons: the whole card is
  * the tap target (stretched-hit pattern). On the Tables screen it opens that table's actions
@@ -40,10 +60,12 @@ export function poolCard(t, { picker = false } = {}) {
   const live = t.status === 'in_use' && Boolean(t.session);
   const stopped = live && t.session.ended;
   const timed = live && isTimed(t.session);
-  const elapsed = live ? elapsedMs(t) : 0;
+  const now = serverNow(); // one instant for the timer, the bill and the billing status, so they can't disagree
+  const elapsed = live ? elapsedMs(t, now) : 0;
   const booking = live ? bookingStatus(t, elapsed) : null;
   // Hour-mark alert (5 min / 1 min before each whole hour): a state layered on a running card, see hour-alerts.js.
   const hourLevel = live && !stopped ? visibleHourLevel(t) : null;
+  const billing = live ? billingStatus(t.session, elapsed) : null;
   const id = esc(t.id);
   // Stopped tables are still In Use (unpaid); the navy cloth says so visually, the sr-only prefix says it aloud.
   const status = !live ? 'Available'
@@ -51,12 +73,13 @@ export function poolCard(t, { picker = false } = {}) {
       : `<span class="sr-only">In Use, </span>${timed ? `Booked ${esc(fmtBooking(t.session.plannedMs))}` : 'Open Time'}`;
 
   return `
-    <article class="pool ${live ? 'pool--live' : 'pool--idle'}${stopped ? ' pool--stopped' : ''}${booking?.over && !stopped ? ' pool--overtime' : ''}${hourLevel ? ` pool--hour-${hourLevel}` : ''}" aria-labelledby="pool-${id}" data-pool="${id}">
+    <article class="pool ${live ? 'pool--live' : 'pool--idle'}${stopped ? ' pool--stopped' : ''}${booking?.over && !stopped ? ' pool--overtime' : ''}${hourLevel ? ` pool--hour-${hourLevel}` : ''}${billing && billingClass(billing.state) ? ` ${billingClass(billing.state)}` : ''}" aria-labelledby="pool-${id}" data-pool="${id}">
       <h2 class="pool__plate" id="pool-${id}">${esc(t.name)}</h2>
       <div class="pool__table">
         ${POCKETS}
         <div class="pool__cloth">
           <p class="pool__status">${live ? NINE_BALL : '<span class="pool__lamp" aria-hidden="true"></span>'}${status}</p>
+          ${live ? `<div class="pool__alert pool__alert--${billing.state}" data-alert="${id}" data-alert-state="${billing.state}" role="status" aria-live="polite"${billing.state === 'normal' ? ' hidden' : ''}>${billingAlertInner(billing.state)}</div>` : ''}
           <div class="led">
             ${live
               ? `<span class="led__digits num" data-elapsed="${id}">${fmtDuration(elapsed)}</span>`
@@ -66,7 +89,7 @@ export function poolCard(t, { picker = false } = {}) {
             ${live
               ? `<div><dt data-left-label="${id}">${booking.label}</dt><dd class="num" data-left="${id}">${booking.value}</dd></div>`
               : `<div><dt>Rate</dt><dd class="num">₱${PRICING.basePrice} / 1st hr</dd></div>`}
-            <div><dt>Bill</dt><dd class="num" ${live ? `data-bill="${id}"` : ''}>${live ? peso(currentBill(t)) : '—'}</dd></div>
+            <div><dt>Bill</dt><dd class="num" ${live ? `data-bill="${id}"` : ''}>${live ? peso(currentBill(t, now)) : '—'}</dd></div>
           </dl>
         </div>
       </div>
