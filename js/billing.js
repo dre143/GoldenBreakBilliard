@@ -37,7 +37,7 @@ export const PRICING_LABEL = `₱${PRICING.basePrice} first hour · ₱${PRICING
  * the table card, Open Time, Set Hours, checkout, the booking preview, the server-side sale check
  * (mirrored in firestore.rules) and the tests. Nothing else may compute a fee.
  *
- * elapsedMs: the time to bill (for a booked table, the longer of played and booked, see billableMs).
+ * elapsedMs: the time the customer actually consumed (real elapsed time, never the booked time).
  * Returns { fee, extraBrackets, inGrace, graceEndsAtMs, nextIncreaseAtMs }:
  *   fee              ₱200 until 1:05:59, ₱250 from 1:06:00, ₱300 from 1:21:00, ...
  *   inGrace          true from 1:00:00 up to (not including) 1:06:00: the hour is over but no charge yet
@@ -98,15 +98,14 @@ export function feeBreakdown(ms, pricing = PRICING) {
 
 /**
  * A table is opened one of two ways:
- *   'open'  — open time: runs until the cashier stops it, billed on actual time.
- *   'timed' — the customer buys a set number of hours (session.plannedMs). Those hours are the
- *             minimum charge; if they keep playing, the extra time is billed by the same rule.
- * So the billed time is always whichever is longer, booked or actual.
+ *   'open'  — open time: runs until the cashier stops it.
+ *   'timed' — the customer books a length (session.plannedMs): the time they intend to play. It drives the
+ *             "time left" countdown, the alerts and when overtime starts. It is NOT what they pay for.
+ * Three separate things: BOOKED duration (plannedMs), ACTUAL elapsed time (start to end stamps) and the
+ * BILLABLE amount, which is calculated from the actual elapsed time only. Unused booked time is never charged.
  */
 export const plannedMs = (session) => Math.max(0, Number(session?.plannedMs) || 0);
 export const isTimed = (session) => plannedMs(session) > 0;
-
-export const billableMs = (session, elapsed) => Math.max(elapsed, plannedMs(session));
 
 /** Time left on a booked session (null for open time), and time played past it. */
 export const remainingMs = (session, elapsed) => (isTimed(session) ? Math.max(0, plannedMs(session) - elapsed) : null);
@@ -134,13 +133,13 @@ export const itemsCount = (items) => (items || []).reduce((n, i) => n + i.qty, 0
 
 /**
  * One session's bill, from its elapsed time. `elapsedMs` is the real time played and is never altered;
- * `billedMs` is what gets billed: the longer of played and booked (booked hours are the minimum charge),
- * or just the played time for a cancelled game, which has no table fee at all.
+ * The bill is calculated from the actual elapsed time alone (`billedMs` === `elapsedMs`); the booked length is
+ * only kept for reference and never raises the amount. A cancelled game has no table fee at all.
  * Open Time and Set Hours both go through here, so they can never disagree.
  */
 export function billSession(session, elapsed) {
   const cancelled = Boolean(session?.cancelled);
-  const billedMs = cancelled ? elapsed : billableMs(session, elapsed);
+  const billedMs = elapsed;
   const bill = calculateBilliardBill(billedMs);
   return { elapsedMs: elapsed, billedMs, cancelled, ...bill, fee: cancelled ? 0 : bill.fee, tableFee: cancelled ? 0 : bill.fee };
 }

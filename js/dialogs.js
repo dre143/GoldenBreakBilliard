@@ -83,10 +83,10 @@ export function bookingDialog({ title, submitLabel, baseMs = 0, elapsedNow = 0, 
       </div>
       <dl class="kv">
         <div><dt>${extending ? 'New booking' : 'Booked'}</dt><dd class="num" data-len></dd></div>
-        <div><dt>Minimum charge</dt><dd class="num" data-fee></dd></div>
+        <div><dt>Fee if fully used</dt><dd class="num" data-fee></dd></div>
         <div><dt>Ends around</dt><dd class="num" data-ends></dd></div>
       </dl>
-      <p class="muted small">Booked time is the minimum charge. If they play longer, the extra time is billed by the hall rate: the hour plus a 5-minute grace, then ₱${PRICING.bracketPrice} every ${PRICING.bracketMinutes} minutes.</p>`,
+      <p class="muted small">The customer is billed only for the time actually played, so ending early costs less. The hall rate: the first hour plus a 5-minute grace, then ₱${PRICING.bracketPrice} every ${PRICING.bracketMinutes} minutes.</p>`,
     onOpen(dlg) {
       const form = dlg.querySelector('form');
       const custom = dlg.querySelector('.booking-custom');
@@ -101,7 +101,7 @@ export function bookingDialog({ title, submitLabel, baseMs = 0, elapsedNow = 0, 
         const add = pick();
         const total = baseMs + add;
         dlg.querySelector('[data-len]').textContent = add ? fmtBooking(total) : '—';
-        dlg.querySelector('[data-fee]').textContent = add ? peso(tableFee(Math.max(total, elapsedNow))) : '—';
+        dlg.querySelector('[data-fee]').textContent = add ? peso(tableFee(total)) : '—';
         dlg.querySelector('[data-ends]').textContent = add ? fmtTime(serverNow() - elapsedNow + total) : '—';
       };
       form.addEventListener('change', update);
