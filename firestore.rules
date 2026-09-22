@@ -85,8 +85,10 @@ service cloud.firestore {
     //   start  → available → in_use, startedAt = server time
     //   end    → clock stops once, endedAt = server time (no pause, no resume)
     //   edit   → items / rounds only; start and end times can never be edited
-    //   cancel → within the first 5 minutes only: the table fee becomes ₱0 (see cancelsGame)
-    //   close  → in_use (ended) → available, only together with a matching new sale
+    //   cancel   → within the first 5 minutes only: the table fee becomes ₱0 (see cancelsGame)
+    //   transfer → a live session moves to a different table, start time and all, in the same batch as
+    //              that table freeing (see receivesTransfer/freesForTransfer)
+    //   close    → in_use (ended) → available, only together with a matching new sale
     // There is no "reopen", and a completed sale can never be changed, so a table freed at checkout stays freed.
 
     function startsSession() {
@@ -154,6 +156,69 @@ service cloud.firestore {
         );
     }
 
+    // Transfer table: a live (unended) session moves to a different table, keeping its original start
+    // time, items, rounds and booking length untouched — the bill continues without interruption. Both
+    // table writes happen in the same batch. `session.transfers` grows by exactly one entry, recording
+    // where it came from, when, and who moved it. An ended session (clock stopped, awaiting payment)
+    // can't be transferred, only checked out — there is still no "reopen" of a session once it's ended.
+    //
+    // Each side is verified independently, cross-checking the other document's before/after state — the
+    // same two-sided pattern closesWithSale()/saleMatchesSession() use for checkout, so neither write is
+    // valid alone: a live session can't be discarded by writing only the source-clearing half, and a
+    // table can't receive an invented session without a real, matching source.
+    //
+    // transfers[].at is a client-timestamp (js/services.js), not request.time: Firestore doesn't allow a
+    // serverTimestamp() sentinel inside an array element, and `transfers` is one. It's a display-only
+    // note (when the move happened, for the receipt), never billing — the bill still runs purely off
+    // session.startedAt/endedAt, real server timestamps, untouched by any of this. So it only needs a
+    // sanity bound around the write's real server time, not an exact match.
+    //
+    // Kept deliberately lean: no .keys().hasOnly() structural checks (map-key iteration is expensive
+    // enough here to hit Firestore's 1000-expression-per-request ceiling once combined with the
+    // get()/getAfter() cross-reads both functions need), and freesForTransfer() doesn't re-derive
+    // startedAt — receivesTransfer() already ties it to the exact same source document.
+    function receivesTransfer(tableId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let list = after.session.transfers;
+      let last = list[list.size() - 1];
+      let from = get(tablePath(last.fromTableId)).data;
+      let fromAfter = getAfter(tablePath(last.fromTableId)).data;
+      let s = from.session;
+      let nowMs = request.time.toMillis();
+      return onlyChanges(['status', 'session', 'updatedAt'])
+        && before.status == 'available' && before.session == null
+        && after.status == 'in_use'
+        && last.fromTableId != tableId
+        && from.status == 'in_use' && s != null && s.ended == false
+        && fromAfter.status == 'available' && fromAfter.session == null
+        && fromAfter.lastTransferToId == tableId
+        && after.session.startedAt.toMillis() == s.startedAt.toMillis()
+        && after.session.ended == false && after.session.endedAt == null
+        && after.session.plannedMs == s.plannedMs
+        && after.session.items == s.items
+        && after.session.rounds == s.rounds
+        && after.session.openedBy == s.openedBy && after.session.openedByName == s.openedByName
+        // Exactly one new entry appended (list + list concatenation isn't a supported rules operation).
+        && list.size() == s.get('transfers', []).size() + 1
+        && last.fromTableName == from.name
+        && last.at is timestamp && last.at.toMillis() >= nowMs - 300000 && last.at.toMillis() <= nowMs + 300000
+        && last.byId == request.auth.uid;
+    }
+
+    function freesForTransfer(tableId) {
+      let before = resource.data;
+      let after = request.resource.data;
+      let dest = getAfter(tablePath(after.lastTransferToId)).data;
+      let n = dest.session.transfers.size();
+      return onlyChanges(['status', 'session', 'lastTransferToId', 'updatedAt'])
+        && before.status == 'in_use' && before.session != null && before.session.ended == false
+        && after.status == 'available' && after.session == null
+        && after.lastTransferToId != tableId
+        && dest.status == 'in_use' && dest.session != null
+        && n > 0 && dest.session.transfers[n - 1].fromTableId == tableId;
+    }
+
     function closesWithSale(tableId) {
       let before = resource.data;
       let after = request.resource.data;
@@ -181,7 +246,14 @@ service cloud.firestore {
             || endsSession()
             || cancelsGame()
             || editsSession()
-            || closesWithSale(tableId));
+            || closesWithSale(tableId)
+            // Cheap guards before the expensive cross-document reads inside these two: a rules function's
+            // own `let` bindings run as soon as it's called, not lazily by first use, so calling either one
+            // on the write it can't possibly match (e.g. receivesTransfer() against the SOURCE table's own
+            // clearing write) still pays for its get()/getAfter() calls before failing. Checking the shape
+            // of this write first means only the branch that could plausibly apply ever calls in.
+            || (resource.data.status == 'available' && request.resource.data.status == 'in_use' && receivesTransfer(tableId))
+            || (resource.data.status == 'in_use' && request.resource.data.status == 'available' && freesForTransfer(tableId)));
     }
 
     match /products/{productId} {

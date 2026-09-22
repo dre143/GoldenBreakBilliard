@@ -85,6 +85,42 @@ export function cancelGame(tableId, { reason, note = '' } = {}, user) {
   });
 }
 
+/**
+ * Move a live (not yet ended) session to a different table: the original start time, items, rounds and
+ * booking length carry over untouched, so the bill keeps counting from when it first started — nothing
+ * about the customer's tab resets. The source table frees immediately; the destination must be
+ * Available. Each hop is recorded on the session (js/firestore.rules checks it's a genuine paired move,
+ * not a session being discarded), so the eventual receipt can show where the game started.
+ *
+ * `at` uses the server-synced clock (serverNow()), not the usual SERVER_TIME placeholder: Firestore
+ * doesn't allow a serverTimestamp() sentinel inside an array element, and `transfers` is one. This is
+ * fine here because `at` is a display-only audit note — it never feeds the bill, which is driven purely
+ * by session.startedAt/endedAt, still real server timestamps, untouched by the move.
+ */
+export function transferTable(fromTableId, toTableId, user) {
+  if (fromTableId === toTableId) return Promise.reject(new Error('Choose a different table to transfer to.'));
+  return db.transaction(async (tx) => {
+    const from = await tx.get('tables', fromTableId);
+    if (!from?.session) throw new Error('This table has no open session.');
+    if (from.session.ended) throw new Error('This session has already been stopped; check it out instead of transferring it.');
+    const to = await tx.get('tables', toTableId);
+    if (!to) throw new Error('Table not found.');
+    if (to.status !== 'available') throw new Error(`${to.name} already has an open session.`);
+    const transfer = {
+      fromTableId, fromTableName: from.name, at: serverNow(), byId: user.uid, byName: user.name,
+    };
+    tx.update('tables', fromTableId, {
+      status: 'available', session: null, lastTransferToId: toTableId, updatedAt: SERVER_TIME,
+    });
+    tx.update('tables', toTableId, {
+      status: 'in_use',
+      session: { ...from.session, transfers: [...(from.session.transfers || []), transfer] },
+      updatedAt: SERVER_TIME,
+    });
+    return { fromName: from.name, toName: to.name };
+  });
+}
+
 /** Add/remove units of a product on a table's open bill (stock is checked, deducted at checkout). */
 export function changeItem(tableId, productId, delta) {
   return db.transaction(async (tx) => {
@@ -204,6 +240,7 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, gc
         gameCancelled: true, cancelReason: cancelled.reason, cancelNote: cancelled.note || '',
         cancelledById: cancelled.byId, cancelledByName: cancelled.byName,
       } : {}),
+      ...(s.transfers?.length ? { transfers: s.transfers } : {}),
     };
     tx.set('transactions', id, record);
     tx.update('tables', tableId, { status: 'available', session: null, lastTxId: id, updatedAt: SERVER_TIME });

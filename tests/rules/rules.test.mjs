@@ -385,6 +385,137 @@ test('a completed sale can never be changed or deleted (no void after payment)',
 test('cashiers can never raise stock', async () => {
   await assertFails(updateDoc(doc(as('joy'), 'products/beer'), { stock: 12, updatedAt: serverTimestamp() }));
 });
+
+/* ---------------- transfer table ----------------
+ * A live (unended) session moves to a different table, keeping its start time, items and rounds — the
+ * bill continues without interruption. Both table writes happen in the same batch: the source frees
+ * (recording which table received it), the destination gets the session verbatim plus one more entry on
+ * `transfers`. Neither half is valid alone, mirroring how checkout's closesWithSale/saleMatchesSession
+ * cross-check each other. */
+
+const table2 = { name: 'Table 02', number: 2, status: 'available', session: null, light: false };
+
+// `at` is a client timestamp, not serverTimestamp() (Firestore doesn't allow that sentinel inside an
+// array element, and `transfers` is one — see the matching comment in firestore.rules/services.js), so
+// tests use a concrete Timestamp close to "now" by default, same as the app itself would send.
+function transferEntry(startedMs, { fromId = 't1', fromName = 'Table 01', byId = 'joy', byName = 'Joy', at = ts(Date.now()) } = {}) {
+  return { fromTableId: fromId, fromTableName: fromName, at, byId, byName };
+}
+
+function transferBatch(fs, {
+  fromId = 't1', toId = 't2', fromName = 'Table 01', startedMs, plannedMs = 0, items = [], rounds = 0,
+  priorTransfers = [], entry, sourcePatch = {}, destPatch = {},
+} = {}) {
+  const batch = writeBatch(fs);
+  batch.update(doc(fs, 'tables', fromId), {
+    status: 'available', session: null, lastTransferToId: toId, updatedAt: serverTimestamp(), ...sourcePatch,
+  });
+  batch.update(doc(fs, 'tables', toId), {
+    status: 'in_use',
+    session: {
+      startedAt: ts(startedMs), ended: false, endedAt: null, plannedMs, items, rounds,
+      openedBy: 'joy', openedByName: 'Joy',
+      transfers: [...priorTransfers, entry ?? transferEntry(startedMs, { fromId, fromName })],
+    },
+    updatedAt: serverTimestamp(),
+    ...destPatch,
+  });
+  return batch.commit();
+}
+
+test('transfer: a live session moves to an available table, start time and items unchanged', async () => {
+  const startedMs = Date.now() - 20 * MIN;
+  const items = [{ productId: 'beer', name: 'Beer', price: 85, qty: 2 }];
+  // The destination must carry over exactly what the source actually had on its bill.
+  await seed({ 'tables/t1': { ...runningTable(startedMs), session: { ...runningTable(startedMs).session, items } }, 'tables/t2': table2 });
+  await assertSucceeds(transferBatch(as('joy'), { startedMs, items }));
+});
+
+test('transfer: the destination must actually be available', async () => {
+  const startedMs = Date.now() - 20 * MIN;
+  await seed({ 'tables/t1': runningTable(startedMs), 'tables/t2': { ...table2, status: 'in_use', session: runningTable(startedMs).session } });
+  await assertFails(transferBatch(as('joy'), { startedMs }));
+});
+
+test('transfer: an ended session (clock stopped, awaiting payment) can’t be transferred', async () => {
+  const startedMs = Date.now() - 20 * MIN;
+  await seed({ 'tables/t1': endedTable(startedMs, Date.now() - 5 * MIN), 'tables/t2': table2 });
+  await assertFails(transferBatch(as('joy'), { startedMs }));
+});
+
+test('transfer: the start time can’t change in the move (no shortening or backdating the bill)', async () => {
+  const startedMs = Date.now() - 20 * MIN;
+  await seed({ 'tables/t1': runningTable(startedMs), 'tables/t2': table2 });
+  await assertFails(transferBatch(as('joy'), { startedMs: startedMs + 10 * MIN }));
+});
+
+test('transfer: items and rounds must match exactly — no adding free items or rounds along the way', async () => {
+  const startedMs = Date.now() - 20 * MIN;
+  await seed({ 'tables/t1': { ...runningTable(startedMs), session: { ...runningTable(startedMs).session, rounds: 1 } }, 'tables/t2': table2 });
+  await assertFails(transferBatch(as('joy'), { startedMs, items: [{ productId: 'beer', name: 'Beer', price: 85, qty: 5 }] }), 'extra items smuggled in');
+  await assertFails(transferBatch(as('joy'), { startedMs, rounds: 4 }), 'extra rounds smuggled in');
+  await assertSucceeds(transferBatch(as('joy'), { startedMs, rounds: 1 }));
+});
+
+test('transfer: a live session can’t just be discarded — freeing the source needs a real, matching destination', async () => {
+  const startedMs = Date.now() - 20 * MIN;
+  await seed({ 'tables/t1': runningTable(startedMs), 'tables/t2': table2 });
+  // Only the source half of the batch: no table actually receives the session.
+  await assertFails(updateDoc(doc(as('joy'), 'tables/t1'), {
+    status: 'available', session: null, lastTransferToId: 't2', updatedAt: serverTimestamp(),
+  }));
+});
+
+test('transfer: a table can’t receive an invented session without a real source paying it out', async () => {
+  const startedMs = Date.now() - 20 * MIN;
+  await seed({ 'tables/t1': runningTable(startedMs), 'tables/t2': table2 });
+  // Only the destination half: t1 is never actually freed for it.
+  await assertFails(updateDoc(doc(as('joy'), 'tables/t2'), {
+    status: 'in_use',
+    session: {
+      startedAt: ts(startedMs), ended: false, endedAt: null, plannedMs: 0, items: [], rounds: 0,
+      openedBy: 'joy', openedByName: 'Joy', transfers: [transferEntry(startedMs)],
+    },
+    updatedAt: serverTimestamp(),
+  }));
+});
+
+test('transfer: the log entry must name the cashier actually doing it, server-stamped, not backdated', async () => {
+  const startedMs = Date.now() - 20 * MIN;
+  await seed({ 'tables/t1': runningTable(startedMs), 'tables/t2': table2 });
+  await assertFails(transferBatch(as('joy'), { startedMs, entry: transferEntry(startedMs, { byId: 'bea', byName: 'Bea' }) }), 'attributed to someone else');
+  await assertFails(transferBatch(as('joy'), { startedMs, entry: { ...transferEntry(startedMs), at: ts(Date.now() - 20 * MIN) } }), 'backdated well beyond a synced clock’s tolerance');
+});
+
+test('transfer: can’t transfer a table to itself', async () => {
+  const startedMs = Date.now() - 20 * MIN;
+  await seed({ 'tables/t1': runningTable(startedMs) });
+  await assertFails(transferBatch(as('joy'), { fromId: 't1', toId: 't1', startedMs }));
+});
+
+test('transfer: a booking’s length carries over, and a second hop keeps the full history and the original start time', async () => {
+  const startedMs = Date.now() - 80 * MIN;
+  await seed({ 'tables/t1': runningTable(startedMs, 60 * MIN), 'tables/t2': table2, 'tables/t3': { ...table2, name: 'Table 03', number: 3 } });
+  await assertSucceeds(transferBatch(as('joy'), { startedMs, plannedMs: 60 * MIN }));
+  // Second hop: t2 -> t3, carrying the first transfer entry forward and appending a second.
+  const first = transferEntry(startedMs);
+  await assertFails(transferBatch(as('bea'), {
+    fromId: 't2', toId: 't3', startedMs, plannedMs: 60 * MIN, priorTransfers: [first],
+    entry: transferEntry(startedMs, { fromId: 't2', fromName: 'Table 02', byId: 'joy', byName: 'Joy' }),
+  }), 'attributed to someone else again');
+  await assertSucceeds(transferBatch(as('bea'), {
+    fromId: 't2', toId: 't3', startedMs, plannedMs: 60 * MIN, priorTransfers: [first],
+    entry: transferEntry(startedMs, { fromId: 't2', fromName: 'Table 02', byId: 'bea', byName: 'Bea' }),
+  }));
+});
+
+test('transfer: the freed source table is immediately available for a brand-new session', async () => {
+  const startedMs = Date.now() - 20 * MIN;
+  await seed({ 'tables/t1': runningTable(startedMs), 'tables/t2': table2 });
+  await assertSucceeds(transferBatch(as('joy'), { startedMs }));
+  await assertSucceeds(updateDoc(doc(as('joy'), 'tables/t1'), { status: 'in_use', session: newSession(0), updatedAt: serverTimestamp() }));
+});
+
 /* ---------------- expenses ---------------- */
 
 const expense = (uid, name, extra = {}) => ({

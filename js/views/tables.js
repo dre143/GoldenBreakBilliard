@@ -1,7 +1,10 @@
 import { state, on } from '../state.js';
 import * as svc from '../services.js';
-import { manageTablesDialog, bookingDialog } from '../dialogs.js';
+import {
+  manageTablesDialog, bookingDialog, transferTableDialog, startTicketDialog,
+} from '../dialogs.js';
 import { isTimed } from '../billing.js';
+import { serverNow } from '../clock.js';
 import { updateTableTimers } from './shared.js';
 import { poolCard } from './pool-card.js';
 import {
@@ -60,6 +63,7 @@ export function mount(el, ctx) {
         ? `<p class="muted">${table.session.ended ? 'Clock stopped, waiting for payment.' : isTimed(table.session) ? `Booked ${esc(fmtBooking(table.session.plannedMs))}, in use.` : 'Open time, in use.'}</p>
            <div class="table-actions">
              <a class="btn btn--amber btn--lg" href="#/checkout/${encodeURIComponent(table.id)}" data-close-dialog>${icon('stop')}Stop &amp; Bill</a>
+             ${!table.session.ended ? `<button type="button" class="btn btn--neutral btn--lg" data-action="transfer">${icon('transfer')}Transfer Table</button>` : ''}
            </div>`
         : `<p class="muted">Available. Start a session on this table.</p>
            <div class="table-actions">
@@ -72,7 +76,19 @@ export function mount(el, ctx) {
       const btn = e.target.closest('button[data-action]');
       if (!btn) return;
       if (btn.dataset.action === 'open-time') {
-        busy(btn, async () => { await svc.startSession(table.id, ctx.user); close(); toast(`${name}: open time started`); });
+        busy(btn, async () => {
+          const startedAtMs = serverNow();
+          await svc.startSession(table.id, ctx.user);
+          close();
+          toast(`${name}: open time started`);
+          startTicketDialog({
+            tableName: name, plannedMs: 0, startedAtMs, cashierName: ctx.user.name,
+          });
+        });
+      }
+      if (btn.dataset.action === 'transfer') {
+        close();
+        transferTableDialog(table, ctx.user);
       }
       if (btn.dataset.action === 'set-hours') {
         close();
@@ -80,8 +96,12 @@ export function mount(el, ctx) {
           title: `Set hours · ${esc(name)}`,
           submitLabel: 'Start',
           onPick: async (ms) => {
+            const startedAtMs = serverNow();
             await svc.startSession(table.id, ctx.user, { booking: ms });
             toast(`${name}: ${fmtBooking(ms)} started`);
+            startTicketDialog({
+              tableName: name, plannedMs: ms, startedAtMs, cashierName: ctx.user.name,
+            });
           },
         });
       }

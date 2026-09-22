@@ -1,7 +1,7 @@
 import { state, on } from './state.js';
 import * as svc from './services.js';
 import {
-  esc, icon, peso, fmtDuration, fmtCountdown, fmtDateTime, fmtTime, fmtBooking, METHOD_LABEL, openDialog, toast, preserveFocus,
+  esc, icon, peso, fmtDuration, fmtCountdown, fmtDateTime, fmtTime, fmtBooking, METHOD_LABEL, openDialog, toast, preserveFocus, busy,
 } from './ui.js';
 import {
   canCancelGame, cancelTimeLeft, CANCEL_REASONS, elapsedMs, feeBreakdown, PRICING_LABEL, PRICING, tableFee, BOOKING_PRESETS,
@@ -145,6 +145,47 @@ export function manageTablesDialog() {
     const edit = e.target.closest('[data-edit]');
     const table = edit && state.tables.find((t) => t.id === edit.dataset.edit);
     if (table) tableDialog(table);
+  });
+  render();
+}
+
+/**
+ * Move a table's running session — timer, items, rounds, booking length — to a different table. The
+ * bill keeps counting from when it first started; only an available table can receive it. Opened from
+ * the table-actions panel for a live (not yet ended) session.
+ */
+export function transferTableDialog(fromTable, currentUser) {
+  let off = () => {};
+  const { dlg, close } = openDialog({
+    title: `Transfer ${esc(fromTable.name)}`,
+    cancelLabel: 'Cancel',
+    body: `
+      <p class="muted small">Moves the running timer, items and rounds to another table. The bill keeps counting from when it first started — nothing resets.</p>
+      <ul class="manage-list" data-region="tables" aria-label="Available tables"></ul>`,
+    onClose: () => off(),
+  });
+  const list = dlg.querySelector('[data-region=tables]');
+  const render = () => preserveFocus(list, () => {
+    const available = state.tables.filter((t) => t.id !== fromTable.id && t.status === 'available');
+    list.innerHTML = available.length ? available.map((t) => `
+      <li class="manage-row">
+        <span class="manage-row__text">
+          <span class="manage-row__name">${esc(t.name)}</span>
+          <span class="manage-row__sub">Available</span>
+        </span>
+        <button type="button" class="btn btn--primary btn--sm" data-to="${esc(t.id)}" data-fk="to-${esc(t.id)}">Move here</button>
+      </li>`).join('') : '<li class="muted">No available tables right now.</li>';
+  });
+  off = on('tables', render);
+  dlg.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-to]');
+    if (!btn) return;
+    const to = state.tables.find((t) => t.id === btn.dataset.to);
+    busy(btn, async () => {
+      await svc.transferTable(fromTable.id, btn.dataset.to, currentUser);
+      toast(`${fromTable.name} moved to ${to?.name ?? 'the new table'}`);
+      close();
+    });
   });
   render();
 }
@@ -309,6 +350,7 @@ export function receiptDialog(tx, { fresh = false } = {}) {
         <div class="receipt__head">
           <p class="receipt__table">${tx.tableId ? esc(tx.tableName) : 'Walk-in sale'}</p>
           <p class="muted">${fmtDateTime(tx.createdAt)} · ${esc(tx.cashierName)}</p>
+          ${tx.transfers?.length ? `<p class="muted small">Started at ${esc(tx.transfers[0].fromTableName)}, moved to ${esc(tx.tableName)}${tx.transfers.length > 1 ? ` (${tx.transfers.length} moves)` : ''} at ${fmtTime(tx.transfers[tx.transfers.length - 1].at)}.</p>` : ''}
         </div>
         <dl class="sum-lines">
           ${tx.tableId ? `
@@ -360,6 +402,49 @@ export function receiptDialog(tx, { fresh = false } = {}) {
     if (b.dataset.rp === 'print') {
       b.disabled = true;
       try { await printer.printSaleReceipt(tx); toast('Receipt sent to the printer.'); } catch (err) { toast(printer.printerErrorMessage(err), 'error'); } finally { b.disabled = false; }
+    }
+  });
+}
+
+/**
+ * Start ticket for a table just opened: a courtesy slip (table, start time, mode, the rate) for the
+ * customer to keep and hand back to the cashier when they're done. Not a bill — the actual charge is
+ * only ever computed at checkout from the stored start/end stamps, printed there as the usual receipt.
+ */
+export function startTicketDialog(ticket) {
+  const { dlg } = openDialog({
+    title: 'Start ticket',
+    cancelLabel: 'Close',
+    body: `
+      <div class="receipt">
+        <div class="receipt__head">
+          <p class="receipt__table">${esc(ticket.tableName)}</p>
+          <p class="muted">Started ${fmtTime(ticket.startedAtMs)} · ${esc(ticket.cashierName)}</p>
+        </div>
+        <dl class="sum-lines">
+          <div class="sum-row"><dt>${ticket.plannedMs ? 'Booked' : 'Mode'}</dt><dd>${ticket.plannedMs ? fmtBooking(ticket.plannedMs) : 'Open time'}</dd></div>
+        </dl>
+        <p class="muted small">Give this to the customer; the cashier bills the table when they're done, from the actual time played.</p>
+      </div>
+      <div class="receipt-print" data-region="ticket-print"></div>`,
+  });
+
+  const region = dlg.querySelector('[data-region=ticket-print]');
+  const off = printer.subscribePrinter((s) => {
+    if (!region.isConnected) { off(); return; }
+    region.innerHTML = `
+      ${s.kind ? `<button type="button" class="btn btn--primary btn--sm" data-rp="print">${icon('print')}Print ticket</button>` : ''}
+      <button type="button" class="btn btn--neutral btn--sm" data-rp="preview">${icon('eye')}Preview print</button>
+      ${s.kind ? '' : '<button type="button" class="link-btn" data-rp="setup">Connect a thermal printer</button>'}`;
+  });
+  region.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-rp]');
+    if (!b) return;
+    if (b.dataset.rp === 'setup') printerDialog();
+    if (b.dataset.rp === 'preview') thermalPreviewDialog({ title: 'Start ticket preview', lines: printer.previewStartTicket(ticket), onPrint: () => printer.printStartTicket(ticket) });
+    if (b.dataset.rp === 'print') {
+      b.disabled = true;
+      try { await printer.printStartTicket(ticket); toast('Ticket sent to the printer.'); } catch (err) { toast(printer.printerErrorMessage(err), 'error'); } finally { b.disabled = false; }
     }
   });
 }

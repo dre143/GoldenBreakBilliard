@@ -9,7 +9,7 @@
 // Receipts are built as raw ESC/POS bytes by EscPosBuilder below (not a library), so the same code
 // works on cheap no-name clones: plain ASCII, "P" instead of "₱", and the minimum set of commands.
 // Every receipt can also be previewed on screen as the exact lines the printer will get.
-import { round2 } from './billing.js';
+import { round2, PRICING } from './billing.js';
 import { HALL_TZ } from './clock.js';
 
 const STORAGE_KEY = 'goldenbreak:thermal-printer';
@@ -455,6 +455,37 @@ function saleReceipt(tx) {
 
 export const previewSaleReceipt = (tx) => saleReceipt(tx).preview;
 export const printSaleReceipt = (tx) => send(saleReceipt(tx).encode());
+
+/**
+ * Start ticket for a table just opened: a courtesy slip for the customer to keep and hand back to the
+ * cashier at checkout. No charges are known yet, so this is deliberately not a receipt — the actual
+ * bill is only ever computed at checkout, from the stored start/end stamps.
+ */
+function startTicket({ tableName, plannedMs, startedAtMs, cashierName }) {
+  const width = layoutWidth(state.paperWidth);
+  const e = new EscPosBuilder();
+  e.initialize().align('center')
+    .line(HALL)
+    .line('Start ticket - not a receipt')
+    .line('Please keep and show at checkout')
+    .newline()
+    .align('left')
+    .line(twoColumn('Table', tableName, width))
+    .line(`In: ${when(startedAtMs)}`)
+    .line(twoColumn(plannedMs ? 'Booked' : 'Mode', plannedMs ? played(plannedMs) : 'Open time', width))
+    .newline()
+    .line(`${money(PRICING.basePrice)} first hour (5-min grace)`)
+    .line(`then ${money(PRICING.bracketPrice)} every ${PRICING.bracketMinutes} min`)
+    .newline().align('center')
+    .line(`Opened by: ${firstName(cashierName)}`)
+    .newline()
+    .line('Enjoy your game!')
+    .finish();
+  return e;
+}
+
+export const previewStartTicket = (ticket) => startTicket(ticket).preview;
+export const printStartTicket = (ticket) => send(startTicket(ticket).encode());
 
 /**
  * The Daily Sales Report on thermal paper. The on-screen sheet has 12 columns, far too wide for

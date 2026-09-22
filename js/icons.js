@@ -32,4 +32,5 @@ export const ICONS = {
   bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l1.6 2H4.4L6 16Z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
   refresh: '<path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/>',
   bag: '<path d="M7 8V6.5a5 5 0 0 1 10 0V8"/><path d="M4.5 8h15l-1.1 12.1a2 2 0 0 1-2 1.9H7.6a2 2 0 0 1-2-1.9L4.5 8Z"/><path d="M8.5 11.5v2M15.5 11.5v2"/>',
+  transfer: '<path d="M4 8h13M13 4l4 4-4 4"/><path d="M20 16H7M11 12l-4 4 4 4"/>',
 };

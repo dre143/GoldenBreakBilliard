@@ -2,13 +2,16 @@
 // play, "crit" in the last minute. The level is derived from elapsed time on every tick, so it clears the
 // instant the hour passes (or the session is stopped) and re-arms for the next hour on its own.
 //
-// Per hour mark (table + session start + hour number) there is one chime, at the start of the warning, and
-// one optional manual dismissal that hides that card's glow/badge until the next hour mark. Both are
+// Per hour mark (session start + hour number — not the table id, so a Transfer Table move carries this
+// state with it rather than restarting it) there is one chime, at the start of the warning, and one
+// optional manual dismissal that hides that card's glow/badge until the next hour mark. Both are
 // remembered for the browser session so a page reload doesn't repeat the chime or bring a dismissed alert back.
 // Dismissing only hides the visuals: it never touches the timer, billing or any other table.
 import { state, on } from './state.js';
-import { elapsedMs, hourAlert, isTimed, plannedMs } from './billing.js';
-import { playHourChime, primeAlarmAudio } from './alarm.js';
+import {
+  elapsedMs, hourAlert, isTimed, plannedMs, HOUR_MS,
+} from './billing.js';
+import { playHourChime, playHourBell, primeAlarmAudio } from './alarm.js';
 import { serverNow } from './clock.js';
 
 const STORE_KEY = 'goldenbreak:hour-alerts';
@@ -17,16 +20,39 @@ const MIN = 60 * 1000;
 function load() {
   try {
     const saved = JSON.parse(sessionStorage.getItem(STORE_KEY)) || {};
-    return { dismissed: new Set(saved.dismissed || []), chimed: new Set(saved.chimed || []) };
-  } catch { return { dismissed: new Set(), chimed: new Set() }; }
+    return {
+      dismissed: new Set(saved.dismissed || []), chimed: new Set(saved.chimed || []), rung: new Set(saved.rung || []),
+    };
+  } catch { return { dismissed: new Set(), chimed: new Set(), rung: new Set() }; }
 }
 const memory = load();
 function save() {
   try {
     sessionStorage.setItem(STORE_KEY, JSON.stringify({
-      dismissed: [...memory.dismissed].slice(-200), chimed: [...memory.chimed].slice(-200),
+      dismissed: [...memory.dismissed].slice(-200), chimed: [...memory.chimed].slice(-200), rung: [...memory.rung].slice(-200),
     }));
   } catch { /* storage unavailable: alerts still work, they just may repeat after a reload */ }
+}
+
+// "Just crossed" matters, so a table already hours into play when the app is first opened doesn't ring for
+// an hour mark that passed long ago (same reasoning as the booking-threshold chime in time-alerts.js).
+const HOUR_RING_WINDOW_MS = 15 * 1000;
+
+/** Ring the bell once, exactly when a running table's play crosses a whole hour (1:00:00, 2:00:00, ...). */
+function checkHourCrossings(now) {
+  for (const t of state.tables) {
+    const s = t.session;
+    if (!s || s.ended || s.cancelled || t.status !== 'in_use') continue;
+    const elapsed = elapsedMs(t, now);
+    const completedHours = Math.floor(elapsed / HOUR_MS);
+    if (completedHours < 1) continue;
+    if (elapsed - completedHours * HOUR_MS > HOUR_RING_WINDOW_MS) continue; // this mark passed a while ago
+    const id = `${s.startedAt}:hour:${completedHours}`;
+    if (memory.rung.has(id)) continue;
+    memory.rung.add(id);
+    save();
+    playHourBell();
+  }
 }
 
 /**
@@ -38,7 +64,7 @@ export function hourAlertFor(table, now = serverNow()) {
   if (!s || s.ended || s.cancelled || table.status !== 'in_use') return null;
   const a = hourAlert(elapsedMs(table, now));
   if (!a.level) return null;
-  const key = `${table.id}:${s.startedAt}:${a.boundary}`;
+  const key = `${s.startedAt}:${a.boundary}`;
   return { ...a, key, dismissed: memory.dismissed.has(key) };
 }
 
@@ -96,6 +122,7 @@ export function startHourAlerts() {
       save();
       if (a.level === 'warn' && !a.dismissed && !bookingAlertCovers(t, now)) playHourChime();
     }
+    checkHourCrossings(now);
     applyHourAlerts();
   }
 

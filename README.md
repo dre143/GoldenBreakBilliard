@@ -78,8 +78,9 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
 ## Data model (Firestore)
 
 - `tables/{id}` — `name, number, light, status (available|in_use), session, lastTxId`
-  - `session = { startedAt, ended, endedAt, plannedMs, rounds, items[], openedBy, openedByName }`
+  - `session = { startedAt, ended, endedAt, plannedMs, rounds, items[], openedBy, openedByName, transfers[] }`
   - `plannedMs` is `0` for **Open Time**, or the booked length for **Set Hours** (15-minute steps; it can be extended, never cut)
+  - `transfers` (optional) is the table-move history for **Transfer Table** — see below; the timer, items and bill never reset when a session moves
   - `startedAt` and `endedAt` are **server timestamps**. Elapsed time = `endedAt − startedAt` once ended, otherwise
     server-synced now − `startedAt`.
   - Sessions can't be paused. **End Session** (or Complete Transaction) stops the clock once, and that is final.
@@ -195,7 +196,7 @@ receipt and freeing the table, so two terminals can't oversell stock or bill a t
 
 ## Screens: what lives where
 
-- **Tables grid.** Each card is a small top-down pool table, built so you can scan the floor and act in one tap. Navy cloth with a green LED means In Use; pale cloth with an unlit display means Available. The cards show no buttons: tap a table to open its actions. A free table offers **Open Time** or **Set Hours**; a running table offers **Stop & Bill**, which opens Checkout (on the Checkout screen, tapping a running table goes straight to its bill). Booked tables show time left, or overtime in amber. A running table also warns before each whole hour (see *Hour-mark alert*).
+- **Tables grid.** Each card is a small top-down pool table, built so you can scan the floor and act in one tap. Navy cloth with a green LED means In Use; pale cloth with an unlit display means Available. The cards show no buttons: tap a table to open its actions. A free table offers **Open Time** or **Set Hours**; a running table offers **Stop & Bill**, which opens Checkout (on the Checkout screen, tapping a running table goes straight to its bill), and **Transfer Table** to move the game to another table (see below). Booked tables show time left, or overtime in amber. A running table also warns before each whole hour (see *Hour-mark alert*).
 - **Checkout** (one table). This is where you manage a running table: **Add time** / **Set hours**, End Session, **Add Item**, cancel a game in its first 5 minutes, and payment.
 - **Top bar (phones and tablets).** Phones and tablets, in either orientation, get a top bar with **refresh**, the **thermal printer** and the **cash drawer**; the sidebar becomes a slide-out menu. On a desktop with a mouse the sidebar keeps labeled printer and cash drawer buttons.
 - The navy "device display" look is used only for live table equipment (the table cards and the checkout timer). The rest of the app stays ivory and felt green, so a dark card always means a running table.
@@ -217,6 +218,43 @@ refunded later: the cashier cancels on the table itself.
 - **Where the owner sees it:** "Cancelled" on the Dashboard's recent transactions plus a **Cancelled games today**
   card, *Game cancelled* on the Transactions list and the Daily sales sheet, and a **Cancelled games** list in
   Reports → Custom range. Older sales whose table fee was voided after payment still show there too.
+## Start ticket (printed when a table is opened)
+
+A second, separate slip from the payment receipt: printed the moment a table is opened, so the owner can hand the
+customer something right away and bill them properly later, without keeping the table's start time in their head.
+
+- **When it shows:** right after **Open Time** or **Set Hours** starts a session, a **Start ticket** dialog opens
+  with the table, the start time, the mode (Open Time, or the booked length), and the hall rate — with the same
+  **Print ticket** / **Preview print** controls as a payment receipt.
+- **Not a bill:** no charge is computed or shown, because none exists yet — the table fee is only ever calculated at
+  checkout from the actual time played. The ticket says as much ("not a receipt... give this to the customer; the
+  cashier bills the table when they're done").
+- **The flow:** customer picks a table → start ticket prints, customer keeps it → they play → they bring the ticket
+  back to the cashier, who opens that table (**Stop & Bill**) and takes payment as usual, printing the normal
+  **payment receipt** (see *Thermal printer*) — two separate slips for the two separate moments.
+- Built the same way as the payment receipt: `js/printer.js` (`printStartTicket`/`previewStartTicket`), dialog in
+  `js/dialogs.js` (`startTicketDialog`), wired into the Tables screen actions.
+
+## Transfer Table (moving a running game to another table)
+
+Moves a running session — timer, items, rounds, everything — to a different table, for when a group needs a bigger
+table or the one they're on is needed for something else. The bill keeps counting from when the game first started;
+nothing about billing resets.
+
+- **Where:** open the running table (its Checkout actions panel) and tap **Transfer Table**. The dialog lists every
+  other table with its status; only an **Available** one offers **Move here**.
+- **What moves:** the whole `session` object — start time, booking length, items, rounds — from the old table to the
+  new one, inside one Firestore transaction. The old table becomes Available; the new one becomes In Use with the
+  same session. Alert state (already-fired hour-mark and time-left alerts) follows the session, not the table, so it
+  isn't re-triggered by the move.
+- **History, not billing:** each move appends `{ fromTableId, fromTableName, at, byId, byName }` to
+  `session.transfers`. This is display-only — the receipt shows "Started at Table 05, moved to Table 06 at 10:42 PM"
+  — and billing is still driven solely by the session's own `startedAt`/`endedAt`.
+- **Enforced on the server:** `firestore.rules` (`receivesTransfer`/`freesForTransfer`) requires both writes in the
+  same batch: the destination's new session must match the source's old one exactly (start time, items, rounds), and
+  the source must end up cleared to Available. Neither table can be written alone — a transfer can't clone a session
+  onto a new table without freeing the old one, or discard one by writing only half the pair.
+
 ## Quick Sale (walk-in items, no table)
 
 **Quick Sale** is for a walk-in customer buying items — drinks, snacks, merchandise — without
@@ -280,11 +318,15 @@ no-name printers print them correctly.
 
 ### Time-left alerts
 
-For **Set Hours** (booked) tables, every signed-in screen plays a chime and shows an alert card when a table has
-**15 minutes left**, and a louder chime and a red card at **5 minutes left** (`js/time-alerts.js`, sounds in
-`js/alarm.js`, made with the Web Audio API like Marimar Inn's). Each alert plays once per table per game; the card
-stays until someone taps OK or opens the table. Open Time tables have no end time, so they don't alert. Browsers only
-allow sound after the screen has been tapped once, so tap anywhere after opening the app.
+For **Set Hours** (booked) tables, every signed-in screen speaks a **5-minutes-left warning**, naming the table
+("Table 04, 5 minutes left"), and shows a red alert card until someone taps OK or opens the table
+(`js/time-alerts.js`, `speakAlert()` in `js/alarm.js` — Web Speech API, falls back to a tone chime on a browser with
+no voices). **Expiry** — the booked time itself running out — rings the real bell recording instead (the same one
+used for the *Hour-mark alert*), since that's also the instant the card turns red for overtime. Each alert fires once
+per game, tracked by the session's own start time rather than the table, so a **Transfer Table** move carries the
+already-fired state with it instead of re-alerting. Open Time tables have no end time, so neither applies to them —
+they still get the plain hourly chime below. Browsers only allow sound after the screen has been tapped once, so tap
+anywhere after opening the app.
 
 ### Tablet app (full screen, direct Bluetooth)
 
