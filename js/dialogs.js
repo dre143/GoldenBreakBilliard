@@ -149,6 +149,128 @@ export function manageTablesDialog() {
   render();
 }
 
+/** Shrinks a chosen photo to a small JPEG data URL so it can sit directly on a Firestore document. */
+function compressImage(file, maxSize = 640, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image.')); };
+    img.src = url;
+  });
+}
+
+export const cueThumb = (c, size = 'thumb--sm') => (c.photo
+  ? `<img class="thumb ${size} cue-thumb" src="${esc(c.photo)}" alt="">`
+  : `<span class="thumb ${size} thumb--slate" aria-hidden="true">${icon('cue')}</span>`);
+
+/** Add or edit one cue stick: photo, name, brand, weight, price. Owner-only, opened from Manage Cue Sticks. */
+export function cueStickDialog(cueStick) {
+  const editing = Boolean(cueStick);
+  let photo = cueStick?.photo || null;
+  const { dlg } = openDialog({
+    title: editing ? 'Edit cue stick' : 'Add cue stick',
+    submitLabel: editing ? 'Save changes' : 'Add cue stick',
+    body: `
+      <div class="field" data-region="photo-field"></div>
+      <div class="field">
+        <label for="cs-name">Name</label>
+        <input id="cs-name" name="name" required maxlength="60" placeholder="e.g. Predator Sport II" value="${esc(cueStick?.name ?? '')}">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="cs-brand">Brand</label>
+          <input id="cs-brand" name="brand" maxlength="40" value="${esc(cueStick?.brand ?? '')}">
+        </div>
+        <div class="field">
+          <label for="cs-weight">Weight</label>
+          <input id="cs-weight" name="weight" maxlength="20" placeholder="e.g. 19oz" value="${esc(cueStick?.weight ?? '')}">
+        </div>
+      </div>
+      <div class="field">
+        <label for="cs-price">Price (₱)</label>
+        <input id="cs-price" name="price" type="number" inputmode="decimal" min="0" step="0.01" required value="${cueStick?.price ?? ''}">
+      </div>
+      ${editing && cueStick.status === 'sold' ? `<p class="field__hint">Sold ${fmtDateTime(cueStick.soldAt)} by ${esc(cueStick.soldByName)}. You can still fix these details for your records.</p>` : ''}`,
+    onOpen(innerDlg) {
+      const field = innerDlg.querySelector('[data-region=photo-field]');
+      const renderPhoto = () => {
+        field.innerHTML = `
+          <label for="cs-photo">Photo</label>
+          <div class="photo-pick">
+            <span class="photo-pick__preview" aria-hidden="true">${photo ? `<img src="${esc(photo)}" alt="">` : icon('camera')}</span>
+            <div class="photo-pick__actions">
+              <input id="cs-photo" type="file" accept="image/*" class="sr-only">
+              <label for="cs-photo" class="btn btn--neutral btn--sm">${icon('camera')}${photo ? 'Change photo' : 'Add photo'}</label>
+              ${photo ? '<button type="button" class="link-btn link-btn--danger" data-action="remove-photo">Remove</button>' : ''}
+            </div>
+          </div>`;
+        field.querySelector('#cs-photo').addEventListener('change', async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          try { photo = await compressImage(file); renderPhoto(); } catch (err) { toast(err.message, 'error'); }
+        });
+        field.querySelector('[data-action=remove-photo]')?.addEventListener('click', () => { photo = null; renderPhoto(); });
+      };
+      renderPhoto();
+    },
+    async onSubmit(fd) {
+      const data = {
+        name: requireName(fd, 'name', 'Name'),
+        brand: String(fd.get('brand') || '').trim(),
+        weight: String(fd.get('weight') || '').trim(),
+        price: requireNumber(fd, 'price', 'Price'),
+        photo,
+      };
+      if (editing) await svc.updateCueStick(cueStick.id, data);
+      else await svc.addCueStick(data);
+      toast(editing ? `${data.name} updated` : `${data.name} added`);
+    },
+  });
+}
+
+/** Owner-only cue stick admin: mirrors Manage Tables — add a cue, or edit one's photo/details. */
+export function manageCueSticksDialog() {
+  let off = () => {};
+  const { dlg } = openDialog({
+    title: 'Manage cue sticks',
+    wide: true,
+    cancelLabel: 'Done',
+    body: `
+      <button type="button" class="btn btn--primary" data-action="add-cue">${icon('plus')}Add cue stick</button>
+      <ul class="manage-list" data-region="cues" aria-label="Cue sticks"></ul>`,
+    onClose: () => off(),
+  });
+  const list = dlg.querySelector('[data-region=cues]');
+  const render = () => preserveFocus(list, () => {
+    list.innerHTML = state.cueSticks.length ? state.cueSticks.map((c) => `
+      <li class="manage-row">
+        ${cueThumb(c)}
+        <span class="manage-row__text">
+          <span class="manage-row__name">${esc(c.name)}</span>
+          <span class="manage-row__sub">${c.brand ? `${esc(c.brand)} · ` : ''}${peso(c.price)} · ${c.status === 'sold' ? 'Sold' : 'Available'}</span>
+        </span>
+        <button type="button" class="btn btn--neutral btn--sm" data-edit="${esc(c.id)}" data-fk="edit-${esc(c.id)}" aria-label="Edit ${esc(c.name)}">${icon('edit')}Edit</button>
+      </li>`).join('') : '<li class="muted">No cue sticks yet.</li>';
+  });
+  off = on('cueSticks', render);
+  dlg.addEventListener('click', (e) => {
+    if (e.target.closest('[data-action=add-cue]')) cueStickDialog();
+    const edit = e.target.closest('[data-edit]');
+    const cue = edit && state.cueSticks.find((c) => c.id === edit.dataset.edit);
+    if (cue) cueStickDialog(cue);
+  });
+  render();
+}
+
 /**
  * Move a table's running session — timer, items, rounds, booking length — to a different table. The
  * bill keeps counting from when it first started; only an available table can receive it. Opened from
@@ -348,7 +470,7 @@ export function receiptDialog(tx, { fresh = false } = {}) {
             <span class="muted small">By ${esc(tx.tableFeeVoidedByName)} at ${fmtDateTime(tx.tableFeeVoidedAt)}. ${peso(tx.refundAmount)} refunded via ${tx.refundMethod === 'gcash' ? 'GCash' : 'Cash'}.</span></span>
         </div>` : ''}
         <div class="receipt__head">
-          <p class="receipt__table">${tx.tableId ? esc(tx.tableName) : 'Walk-in sale'}</p>
+          <p class="receipt__table">${tx.tableId ? esc(tx.tableName) : tx.saleType === 'cue-stick' ? 'Cue Stick Sale' : 'Walk-in sale'}</p>
           <p class="muted">${fmtDateTime(tx.createdAt)} · ${esc(tx.cashierName)}</p>
           ${tx.transfers?.length ? `<p class="muted small">Started at ${esc(tx.transfers[0].fromTableName)}, moved to ${esc(tx.tableName)}${tx.transfers.length > 1 ? ` (${tx.transfers.length} moves)` : ''} at ${fmtTime(tx.transfers[tx.transfers.length - 1].at)}.</p>` : ''}
         </div>

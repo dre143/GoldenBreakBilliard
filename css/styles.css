@@ -834,6 +834,48 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .pick-product__meta { font-size: 13px; color: var(--ink-soft); }
 .pick-product__price { font-size: 17px; }
 
+/* ---------- cue sticks ---------- */
+
+.photo-pick { display: flex; align-items: center; gap: 14px; }
+.photo-pick__preview {
+  width: 72px; height: 72px; flex: none;
+  display: grid; place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--ground); border: 1px solid var(--line);
+  overflow: hidden;
+}
+.photo-pick__preview img { width: 100%; height: 100%; object-fit: cover; }
+.photo-pick__preview .ico { width: 28px; height: 28px; color: var(--ink-soft); }
+.photo-pick__actions { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+
+.cue-thumb { object-fit: cover; }
+
+.cue-showcase {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 16px;
+}
+.cue-card {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md);
+  text-align: left; cursor: pointer;
+  transition: border-color .15s, background-color .15s;
+}
+.cue-card:hover:not(:disabled) { border-color: var(--felt); background: #FBFAF6; }
+.cue-card:disabled { opacity: .5; cursor: not-allowed; }
+.cue-card__photo {
+  width: 100%; aspect-ratio: 1 / 1;
+  display: grid; place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--ground); overflow: hidden;
+}
+.cue-card__photo img { width: 100%; height: 100%; object-fit: cover; }
+.cue-card__photo .ico { width: 32px; height: 32px; color: var(--ink-soft); }
+.cue-card__name { font-weight: 700; font-size: 14px; }
+.cue-card__meta { font-size: 12px; color: var(--ink-soft); }
+.cue-card__price { font-size: 16px; }
+
 /* ---------- data tables ---------- */
 
 .toolbar {

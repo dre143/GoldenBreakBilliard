@@ -386,6 +386,94 @@ test('cashiers can never raise stock', async () => {
   await assertFails(updateDoc(doc(as('joy'), 'products/beer'), { stock: 12, updatedAt: serverTimestamp() }));
 });
 
+/* ---------------- cue sticks (a separate catalog from products) ---------------- */
+
+const cueStick = (overrides = {}) => ({
+  name: 'Predator Sport II', brand: 'Predator', weight: '19oz', price: 8500, photo: null,
+  status: 'available', createdAt: ts(Date.now() - MIN), updatedAt: ts(Date.now() - MIN), ...overrides,
+});
+
+test('owner can add a cue stick; a cashier cannot', async () => {
+  await assertSucceeds(setDoc(doc(as('owner'), 'cueSticks/c1'), cueStick()));
+  await assertFails(setDoc(doc(as('joy'), 'cueSticks/c2'), cueStick()));
+});
+
+test('a cue stick photo over ~900KB is rejected', async () => {
+  await assertFails(setDoc(doc(as('owner'), 'cueSticks/big'), cueStick({ photo: 'x'.repeat(1_000_000) })));
+  await assertSucceeds(setDoc(doc(as('owner'), 'cueSticks/small'), cueStick({ photo: 'x'.repeat(1000) })));
+});
+
+test('a cashier can mark an available cue stick sold with a server timestamp, not a fabricated one', async () => {
+  await seed({ 'cueSticks/c1': cueStick() });
+  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
+    status: 'sold', soldAt: ts(Date.now() - MIN), soldTxId: 'x1', soldByName: 'Joy', updatedAt: serverTimestamp(),
+  }));
+  await assertSucceeds(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
+    status: 'sold', soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Joy', updatedAt: serverTimestamp(),
+  }));
+});
+
+test('a cashier cannot change any other field while marking a cue stick sold', async () => {
+  await seed({ 'cueSticks/c1': cueStick() });
+  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
+    status: 'sold', price: 1, soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Joy', updatedAt: serverTimestamp(),
+  }));
+});
+
+test('a cashier cannot sell the same cue stick twice, or un-sell one', async () => {
+  await seed({ 'cueSticks/c1': cueStick({ status: 'sold', soldAt: ts(Date.now() - MIN), soldTxId: 'x0', soldByName: 'Joy' }) });
+  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
+    status: 'sold', soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Bea', updatedAt: serverTimestamp(),
+  }));
+  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
+    status: 'available', soldAt: null, soldTxId: null, soldByName: null, updatedAt: serverTimestamp(),
+  }));
+});
+
+test('the owner can still fix a cue stick’s details after it is sold; only the owner can delete one', async () => {
+  await seed({ 'cueSticks/c1': cueStick({ status: 'sold', soldAt: ts(Date.now() - MIN), soldTxId: 'x0', soldByName: 'Joy' }) });
+  await assertSucceeds(updateDoc(doc(as('owner'), 'cueSticks/c1'), { price: 8000, updatedAt: serverTimestamp() }));
+  await assertFails(deleteDoc(doc(as('joy'), 'cueSticks/c1')));
+  await assertSucceeds(deleteDoc(doc(as('owner'), 'cueSticks/c1')));
+});
+
+/* ---------------- cue stick sale (its own walk-in sale type, apart from Quick Sale) ---------------- */
+
+function cueStickSale(fs, {
+  cueStickTotal = 8500, fee = 0, productTotal = 0, total = cueStickTotal, cashier = 'joy', createdAt = serverTimestamp(), txId = 'cs1', extra = {},
+}) {
+  return setDoc(doc(fs, 'transactions', txId), {
+    tableId: null, tableName: null, pricing: null,
+    startedAt: null, endedAt: null, durationMs: null,
+    plannedMs: null, billedMs: null, mode: null, rounds: 0,
+    saleType: 'cue-stick',
+    tableFee: fee, productTotal, cueStickTotal,
+    items: [{ cueStickId: 'c1', name: 'Predator Sport II', brand: 'Predator', price: 8500, qty: 1, total: 8500 }],
+    total, method: 'cash', payments: { cash: total, gcash: 0 }, tendered: total, change: 0,
+    cashierId: cashier, cashierName: 'Joy', createdAt, ...extra,
+  });
+}
+
+test('cue stick sale: a walk-in sale with no table fee and no product total is allowed', async () => {
+  await assertSucceeds(cueStickSale(as('joy'), {}));
+});
+
+test('cue stick sale: a fabricated table fee is rejected', async () => {
+  await assertFails(cueStickSale(as('joy'), { fee: 200, total: 8700 }));
+});
+
+test('cue stick sale: total must equal cueStickTotal exactly', async () => {
+  await assertFails(cueStickSale(as('joy'), { total: 8000 }));
+});
+
+test('cue stick sale: a fabricated product total is rejected — it stays apart from Quick Sale', async () => {
+  await assertFails(cueStickSale(as('joy'), { productTotal: 100, total: 8600 }));
+});
+
+test('cue stick sale: cashier can’t record it under someone else’s name', async () => {
+  await assertFails(cueStickSale(as('joy'), { cashier: 'bea' }));
+});
+
 /* ---------------- transfer table ----------------
  * A live (unended) session moves to a different table, keeping its start time, items and rounds — the
  * bill continues without interruption. Both table writes happen in the same batch: the source frees

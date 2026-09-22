@@ -85,6 +85,7 @@ const stat = (label, value) => `
 
 const hourLabel = (h) => new Date(2000, 0, 1, h).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
 const refNo = (id) => String(id).slice(-6).toUpperCase();
+const saleLabel = (x) => (x.tableId ? x.tableName : x.saleType === 'cue-stick' ? 'Cue Stick' : 'Walk-in');
 const longDate = (key) => rep.keyLabel(key, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
 function paymentLabel(tx) {
@@ -365,14 +366,14 @@ function dailyTab(panel, ctx) {
           <tbody>
             ${txs.length ? txs.map((x) => `
             <tr>
-              <th scope="row" class="cell-nowrap">${x.tableId ? esc(x.tableName) : 'Walk-in'}</th>
+              <th scope="row" class="cell-nowrap">${esc(saleLabel(x))}</th>
               <td class="cell-nowrap">${refNo(x.id)}</td>
               <td class="cell-nowrap">${fmtTime(x.tableId ? x.startedAt : x.createdAt)}</td>
               <td class="cell-nowrap">${x.tableId ? fmtTime(x.endedAt) : ''}</td>
               <td class="cell-nowrap">${x.tableId ? (x.plannedMs ? fmtBooking(x.plannedMs) : 'Open') : ''}</td>
               <td class="cell-nowrap">${x.tableId ? fmtHuman(x.durationMs || 0) : ''}</td>
               <td class="t-right num">${x.tableId ? peso(x.tableFee) : ''}</td>
-              <td class="t-right num">${x.productTotal ? peso(x.productTotal) : ''}</td>
+              <td class="t-right num">${x.productTotal || x.cueStickTotal ? peso(x.productTotal || x.cueStickTotal) : ''}</td>
               <td class="t-right num">${peso(x.total)}</td>
               <td class="cell-nowrap">${paymentLabel(x)}</td>
               <td class="cell-nowrap">${esc(x.cashierName)}</td>
@@ -384,7 +385,7 @@ function dailyTab(panel, ctx) {
           <tfoot><tr>
             <th scope="row" colspan="6">Totals</th>
             <td class="t-right num">${peso(t.tableFee)}</td>
-            <td class="t-right num">${peso(t.productTotal)}</td>
+            <td class="t-right num">${peso(t.productTotal + t.cueStickTotal)}</td>
             <td class="t-right num">${peso(t.total)}</td>
             <td colspan="3"></td>
             <td class="no-print"></td>
@@ -440,6 +441,7 @@ function dailyTab(panel, ctx) {
         ${stat('Table sessions', sessions)}
         ${stat('Table revenue', peso(t.tableFee))}
         ${stat('Product sales', peso(t.productTotal))}
+        ${stat('Cue stick sales', peso(t.cueStickTotal))}
         ${stat('Expenses', peso(t.expenses))}
         ${stat('Net sales', peso(t.net))}
         ${stat('Tables in use now', `${inUse}/${state.tables.length}`)}
@@ -465,14 +467,14 @@ function dailyTab(panel, ctx) {
       ...txs.map((x) => {
         const p = rep.paymentsOf(x);
         return [
-          x.tableId ? x.tableName : 'Walk-in', refNo(x.id), fmtTime(x.tableId ? x.startedAt : x.createdAt),
+          saleLabel(x), refNo(x.id), fmtTime(x.tableId ? x.startedAt : x.createdAt),
           x.tableId ? fmtTime(x.endedAt) : '', x.tableId ? (x.plannedMs ? fmtBooking(x.plannedMs) : 'Open') : '',
-          x.tableId ? Math.round((x.durationMs || 0) / 60000) : '', x.tableId ? x.tableFee : '', x.productTotal, x.total,
+          x.tableId ? Math.round((x.durationMs || 0) / 60000) : '', x.tableId ? x.tableFee : '', x.productTotal || x.cueStickTotal || 0, x.total,
           METHOD_LABEL[x.method] || x.method, p.cash, p.gcash, x.gcashRef || '', x.cashierName,
           rep.cancelInfo(x)?.remark ?? '',
         ];
       }),
-      ['Totals', '', '', '', '', '', t.tableFee, t.productTotal, t.total, '', t.cash, t.gcash, '', '', ''],
+      ['Totals', '', '', '', '', '', t.tableFee, t.productTotal + t.cueStickTotal, t.total, '', t.cash, t.gcash, '', '', ''],
       [], ['Expenses'], ['Time', ...(withShift ? ['Shift'] : []), 'What for', 'Staff', 'Amount'],
       ...expenses.map((e) => [fmtTime(e.createdAt), ...(withShift ? [rep.SHIFT_SHORT[rep.shiftOf(e.createdAt)]] : []), e.description, e.cashierName, e.amount]),
       ['Total expenses', ...(withShift ? [''] : []), '', '', t.expenses],
@@ -659,6 +661,7 @@ function rangeTab(panel, ctx) {
         ${stat('Table sessions', sessions)}
         ${stat('Table revenue', peso(t.tableFee))}
         ${stat('Product sales', peso(t.productTotal))}
+        ${stat('Cue stick sales', peso(t.cueStickTotal))}
         ${stat('Total sales', peso(t.total))}
         ${stat('Expenses', peso(t.expenses))}
         ${stat('Net sales', peso(t.net))}
@@ -735,9 +738,9 @@ function rangeTab(panel, ctx) {
     const t = rep.totals(txs, expenses);
     downloadCsv(`golden-break-range-${fromKey}_to_${toKey}.csv`, [
       [HALL], ['Sales Report'], [rangeLabel()], [],
-      ['Date', 'Table revenue', 'Product sales', 'Sales', 'Cash', 'GCash', 'Expenses', 'Net'],
-      ...rep.byDay(txs, fromKey, toKey, expenses).map((d) => [d.key, d.tableFee, d.productTotal, d.total, d.cash, d.gcash, d.expenses, d.net]),
-      ['Total', t.tableFee, t.productTotal, t.total, t.cash, t.gcash, t.expenses, t.net],
+      ['Date', 'Table revenue', 'Product sales', 'Cue stick sales', 'Sales', 'Cash', 'GCash', 'Expenses', 'Net'],
+      ...rep.byDay(txs, fromKey, toKey, expenses).map((d) => [d.key, d.tableFee, d.productTotal, d.cueStickTotal, d.total, d.cash, d.gcash, d.expenses, d.net]),
+      ['Total', t.tableFee, t.productTotal, t.cueStickTotal, t.total, t.cash, t.gcash, t.expenses, t.net],
       [], ['Expenses'], ['Date', 'Time', 'What for', 'Staff', 'Amount'],
       ...expenses.map((e) => [rep.dayKey(e.createdAt), fmtTime(e.createdAt), e.description, e.cashierName, e.amount]),
       ['Total expenses', '', '', '', t.expenses],
@@ -831,6 +834,7 @@ function monthlyTab(panel) {
         ${stat('Total sales', peso(t.total))}
         ${stat('Table revenue', peso(t.tableFee))}
         ${stat('Product sales', peso(t.productTotal))}
+        ${stat('Cue stick sales', peso(t.cueStickTotal))}
         ${stat('Expenses', peso(t.expenses))}
         ${stat('Net sales', peso(t.net))}
         ${stat('Hours played', hoursPlayed)}
@@ -860,10 +864,10 @@ function monthlyTab(panel) {
     const [first, last] = bounds();
     downloadCsv(`golden-break-monthly-${month}.csv`, [
       [HALL], ['Monthly Report'], [monthLabel()], [],
-      ['Total sales', t.total], ['Table revenue', t.tableFee], ['Product sales', t.productTotal],
+      ['Total sales', t.total], ['Table revenue', t.tableFee], ['Product sales', t.productTotal], ['Cue stick sales', t.cueStickTotal],
       ['Expenses', t.expenses], ['Net sales', t.net], ['Hours played', (t.durationMs / 3600000).toFixed(1)],
-      [], ['Date', 'Table revenue', 'Product sales', 'Sales', 'Expenses', 'Net'],
-      ...rep.byDay(txs, first, last, expenses).map((d) => [d.key, d.tableFee, d.productTotal, d.total, d.expenses, d.net]),
+      [], ['Date', 'Table revenue', 'Product sales', 'Cue stick sales', 'Sales', 'Expenses', 'Net'],
+      ...rep.byDay(txs, first, last, expenses).map((d) => [d.key, d.tableFee, d.productTotal, d.cueStickTotal, d.total, d.expenses, d.net]),
       [], ['Table', 'Sessions', 'Hours played', 'Revenue'],
       ...byTable().map((r) => [r.name, r.sessions, (r.durationMs / 3600000).toFixed(1), r.revenue]),
       [], ['Product', 'Qty', 'Revenue'],

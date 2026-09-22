@@ -1,9 +1,11 @@
 // Time-left alerts for booked (Set Hours) tables:
-//   WARNING — 5 minutes left on the booking: a spoken card, naming the table.
-//   EXPIRY  — the booked time itself runs out (elapsed reaches the booking length): the real bell
-//             recording, the same one used for the hour-mark alert. Handled in checkThresholds() below,
-//             since that's also where the table card turns red for overtime — one clock for the colour,
-//             the card and the sound.
+//   WARNING   — 5 minutes left on the booking: a spoken card, naming the table.
+//   EXPIRY    — the booked time itself runs out (elapsed reaches the booking length): the real bell
+//               recording, the same one used for the hour-mark alert. Handled in checkThresholds() below.
+//   AUTO-STOP — a Set Hours table has no overtime: the instant the booked time runs out, checkAutoStop()
+//               ends the session itself (the same as the cashier tapping End Session), so the clock and
+//               the bill never run past what was booked. Open Time has no booking to run out, so it's
+//               unaffected and keeps its own overtime pricing past the first hour.
 // Each alert fires once per game on this device (remembered for the browser session, so a page reload
 // doesn't repeat it — and tracked by the session's start time, not the table id, so a Transfer Table move
 // carries this state with it rather than re-firing). Open Time tables have no booked length, so neither
@@ -18,6 +20,14 @@ import {
   playUrgentChime, playHourBell, primeAlarmAudio, speakAlert,
 } from './alarm.js';
 import { esc, fmtCountdown } from './ui.js';
+// Dynamic, not a static import: services.js pulls in db.js, which touches browser-only globals
+// (location, localStorage) at module load — fine in the app, fatal if this file is imported by the
+// Node test runner (see tests/unit/time-alerts.test.mjs, which only exercises alertFor()).
+let endSessionFn = null;
+async function autoEndSession(tableId) {
+  if (!endSessionFn) ({ endSession: endSessionFn } = await import('./services.js'));
+  return endSessionFn(tableId);
+}
 
 const MIN = 60 * 1000;
 
@@ -46,6 +56,7 @@ export function alertFor(msLeft) {
 export function startTimeAlerts() {
   const fired = loadFired();
   const open = new Map(); // tableId -> { id, alert }
+  const stopping = new Set(); // tableIds with an endSession() in flight, so a slow round-trip isn't retried every tick
 
   const host = document.createElement('div');
   host.className = 'time-alerts';
@@ -107,8 +118,23 @@ export function startTimeAlerts() {
     }
   }
 
+  // A Set Hours table has no overtime: the moment the booked time is used up, stop the clock right there
+  // (same as the cashier's own End Session), so the bill can never run past what was booked. Any
+  // signed-in device notices and stops it; endSession() checks session.ended inside its own transaction,
+  // so two devices racing to stop the same table can't double-write.
+  function checkAutoStop() {
+    for (const t of state.tables) {
+      const s = t.session;
+      if (!s || s.ended || s.cancelled || !isTimed(s) || stopping.has(t.id)) continue;
+      if (elapsedMs(t) < plannedMs(s)) continue;
+      stopping.add(t.id);
+      autoEndSession(t.id).catch((err) => console.error('Auto-stop failed', err)).finally(() => stopping.delete(t.id));
+    }
+  }
+
   function check() {
     checkThresholds();
+    checkAutoStop();
     let changed = false;
     for (const t of state.tables) {
       const s = t.session;

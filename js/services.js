@@ -396,6 +396,76 @@ export function addStock(productId, qty, user) {
   });
 }
 
+/* ---------- cue sticks ---------- */
+// A separate catalog from products: each cue stick is a unique physical item (not counted stock), so
+// selling one just flips it from 'available' to 'sold' rather than decrementing a quantity.
+
+export function addCueStick({ name, brand, weight, price, photo }) {
+  return db.add('cueSticks', {
+    name, brand, weight, price, photo: photo || null, status: 'available', createdAt: SERVER_TIME, updatedAt: SERVER_TIME,
+  });
+}
+
+export function updateCueStick(cueStickId, { name, brand, weight, price, photo }) {
+  return db.update('cueSticks', cueStickId, { name, brand, weight, price, photo: photo || null, updatedAt: SERVER_TIME });
+}
+
+/**
+ * Ring up a cue stick sale: one or more specific cues, no table, no timer. Kept apart from Quick
+ * Sale/products so it gets its own total in reports. Each cue can only be sold once — the transaction
+ * re-checks every one is still 'available' before marking it 'sold', so two terminals can't sell the
+ * same physical cue twice.
+ */
+export function completeCueStickSale({ items, method, tendered, cashPart, gcashRef }, user) {
+  if (!PAYMENT_METHODS.includes(method)) throw new Error('Choose a payment method.');
+  if (!items || !items.length) throw new Error('Add at least one cue stick to the sale.');
+  const ref = gcashRefFor(method, gcashRef);
+
+  return db.transaction(async (tx) => {
+    const cues = await Promise.all(items.map((i) => tx.get('cueSticks', i.cueStickId)));
+    cues.forEach((c, k) => {
+      if (!c) throw new Error(`${items[k].name} no longer exists.`);
+      if (c.status !== 'available') throw new Error(`${c.name} has already been sold.`);
+    });
+
+    const lines = items.map((i) => ({ ...i, qty: 1, total: round2(i.price) }));
+    const total = round2(lines.reduce((s, l) => s + l.total, 0));
+
+    let paid = null;
+    let payments;
+    if (method === 'cash') {
+      paid = tendered == null ? total : round2(tendered);
+      if (paid < total) throw new Error('Cash tendered is less than the total.');
+      payments = { cash: total, gcash: 0 };
+    } else if (method === 'gcash') {
+      payments = { cash: 0, gcash: total };
+    } else {
+      const cash = round2(Number(cashPart));
+      if (!(cash > 0) || cash >= total) {
+        throw new Error(`For a split payment, enter a cash amount between ₱0 and the ₱${total.toFixed(2)} total.`);
+      }
+      payments = { cash, gcash: round2(total - cash) };
+    }
+
+    const id = db.newId('transactions');
+    cues.forEach((c, k) => tx.update('cueSticks', items[k].cueStickId, {
+      status: 'sold', soldAt: SERVER_TIME, soldTxId: id, soldByName: user.name, updatedAt: SERVER_TIME,
+    }));
+    const record = {
+      tableId: null, tableName: null, pricing: null,
+      startedAt: null, endedAt: null, durationMs: null,
+      plannedMs: null, billedMs: null, mode: null, rounds: 0,
+      saleType: 'cue-stick',
+      tableFee: 0, productTotal: 0, cueStickTotal: total, items: lines, total, method, payments,
+      tendered: paid, change: paid == null ? null : round2(paid - total),
+      gcashRef: ref,
+      cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
+    };
+    tx.set('transactions', id, record);
+    return { id, ...record, createdAt: serverNow() };
+  });
+}
+
 /* ---------- staff & accounts ---------- */
 
 export async function setupOwner({ name, email, password }) {

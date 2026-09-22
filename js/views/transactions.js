@@ -15,6 +15,7 @@ const RANGES = [
 ];
 
 const CANCEL_MINUTES = CANCEL_WINDOW_MS / 60000;
+const saleLabel = (r) => (r.tableId ? r.tableName : r.saleType === 'cue-stick' ? 'Cue Stick' : 'Walk-in');
 
 export function mount(el, ctx) {
   let range = 'today';
@@ -50,7 +51,7 @@ export function mount(el, ctx) {
 
   function filtered() {
     if (!query) return rows;
-    return rows.filter((r) => `${r.tableId ? r.tableName : 'Walk-in'} ${r.cashierName} ${METHOD_LABEL[r.method]} ${r.gcashRef || ''} ${(r.items || []).map((i) => i.name).join(' ')}`
+    return rows.filter((r) => `${saleLabel(r)} ${r.cashierName} ${METHOD_LABEL[r.method]} ${r.gcashRef || ''} ${(r.items || []).map((i) => i.name).join(' ')}`
       .toLowerCase().includes(query));
   }
 
@@ -79,7 +80,7 @@ export function mount(el, ctx) {
           <tr>
             <td class="cell-nowrap">${showDate ? `${fmtDate(r.createdAt)}, ` : ''}${fmtTime(r.createdAt)}</td>
             <td>
-              <strong>${r.tableId ? esc(r.tableName) : 'Walk-in'}</strong>
+              <strong>${esc(saleLabel(r))}</strong>
               ${r.gameCancelled ? `<span class="tx-voided">Game cancelled · ${esc(r.cancelReason)}</span>` : ''}
               ${r.tableFeeVoided ? `<span class="tx-voided">Table fee voided · ${peso(r.refundAmount)} refunded</span>` : ''}
             </td>
@@ -88,7 +89,7 @@ export function mount(el, ctx) {
             <td class="cell-nowrap">${esc(r.cashierName)}</td>
             <td class="t-right num"><strong>${peso(r.total)}</strong></td>
             <td class="t-right cell-nowrap">
-              <button type="button" class="link-btn" data-id="${esc(r.id)}" aria-label="Receipt for ${r.tableId ? esc(r.tableName) : 'walk-in sale'}, ${fmtTime(r.createdAt)}">Receipt</button>
+              <button type="button" class="link-btn" data-id="${esc(r.id)}" aria-label="Receipt for ${esc(saleLabel(r))}, ${fmtTime(r.createdAt)}">Receipt</button>
             </td>
           </tr>`).join('')}
         </tbody>

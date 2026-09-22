@@ -159,18 +159,19 @@ export const auth = {
   async isSetupDone() { return true; },
   async createOwner() { return newId(); },
   async createAccount() { return `u-${newId()}`; },
-  /** Start from zero: no sales, expenses or restocks, every table free. Staff, tables and products stay. */
+  /** Start from zero: no sales, expenses or restocks, every table free, every cue stick unsold. Staff, tables, products and cue sticks stay. */
   clearDemoSales() {
     data.transactions = {};
     data.expenses = {};
     data.restocks = {};
     for (const t of Object.values(data.tables || {})) Object.assign(t, { status: 'available', session: null, light: false, lastTxId: null });
-    commit(new Set(['tables', 'restocks', 'transactions', 'expenses']));
+    for (const c of Object.values(data.cueSticks || {})) Object.assign(c, { status: 'available', soldAt: null, soldTxId: null, soldByName: null });
+    commit(new Set(['tables', 'cueSticks', 'restocks', 'transactions', 'expenses']));
   },
   resetDemo() {
     localStorage.removeItem(KEY);
     sessionStorage.removeItem(SESSION_KEY);
-    channel?.postMessage(['tables', 'products', 'users', 'restocks', 'transactions', 'expenses']);
+    channel?.postMessage(['tables', 'products', 'cueSticks', 'users', 'restocks', 'transactions', 'expenses']);
     location.reload();
   },
 };
@@ -254,6 +255,13 @@ function seed() {
   open('t-05', 51 * MIN, 4 * MIN, [item('p-coke', 2)]);
   open('t-07', 125 * MIN + 3000, null, [item('p-rh', 4), item('p-wings', 1), item('p-chalk', 1)], ['u-bea', 'Bea Lim'], 2 * H); // booked 2h, now in overtime
 
+  const cueSticks = {
+    'cs-1': { name: 'Predator Sport II', brand: 'Predator', weight: '19oz', price: 8500, photo: null, status: 'available', createdAt: now - 40 * D, updatedAt: now - 40 * D },
+    'cs-2': { name: 'Players C-960', brand: 'Players', weight: '20oz', price: 4200, photo: null, status: 'available', createdAt: now - 30 * D, updatedAt: now - 30 * D },
+    'cs-3': { name: 'House Cue (Maple)', brand: null, weight: '18oz', price: 1200, photo: null, status: 'available', createdAt: now - 20 * D, updatedAt: now - 20 * D },
+    'cs-4': { name: 'McDermott G-Core', brand: 'McDermott', weight: '19.5oz', price: 9800, photo: null, status: 'sold', soldAt: now - 6 * D, soldTxId: 'x-cue-sample', soldByName: 'Joy Santos', createdAt: now - 60 * D, updatedAt: now - 6 * D },
+  };
+
   const restocks = {
     'r-1': { productId: 'p-water', productName: 'Bottled Water 500ml', qty: 24, byId: 'u-owner', byName: 'Marco Reyes', createdAt: now - 2 * D },
     'r-2': { productId: 'p-smb', productName: 'San Miguel Pale Pilsen', qty: 24, byId: 'u-owner', byName: 'Marco Reyes', createdAt: now - 3 * D },
@@ -326,6 +334,23 @@ function seed() {
       cancelledById: 'u-joy', cancelledByName: 'Joy Santos',
     };
   }
+  // A cue stick sold a few days ago, matching cs-4's soldTxId, so its receipt and the Cue Stick Sales
+  // report line have something to show.
+  {
+    const createdAt = now - 6 * D;
+    const cueStickTotal = 9800;
+    transactions['x-cue-sample'] = {
+      tableId: null, tableName: null, pricing: null,
+      startedAt: null, endedAt: null, durationMs: null,
+      plannedMs: null, billedMs: null, mode: null, rounds: 0,
+      saleType: 'cue-stick',
+      tableFee: 0, productTotal: 0, cueStickTotal,
+      items: [{ cueStickId: 'cs-4', name: 'McDermott G-Core', brand: 'McDermott', price: cueStickTotal, qty: 1, total: cueStickTotal }],
+      total: cueStickTotal, method: 'gcash', payments: { cash: 0, gcash: cueStickTotal },
+      tendered: null, change: null, gcashRef: '48213',
+      cashierId: 'u-joy', cashierName: 'Joy Santos', createdAt,
+    };
+  }
   // Cash paid out of the drawer by whoever was on duty: a few small expenses most days.
   const EXPENSES = [['Drinking water refill', 60], ['Ice', 80], ['Tricycle fare (supplies)', 40], ['Cleaning supplies', 150], ['Chalk (market)', 120], ['LPG refill', 950]];
   const expenses = {};
@@ -341,5 +366,7 @@ function seed() {
     }
   }
 
-  return { users, products, tables, restocks, transactions, expenses, meta: { setup: { ownerId: 'u-owner', createdAt: now } } };
+  return {
+    users, products, cueSticks, tables, restocks, transactions, expenses, meta: { setup: { ownerId: 'u-owner', createdAt: now } },
+  };
 }

@@ -86,7 +86,8 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
   - Sessions can't be paused. **End Session** (or Complete Transaction) stops the clock once, and that is final.
 - `products/{id}` — `name, category, price, stock, reorderLevel, lastRestockedAt`
 - `restocks/{id}` — restock log (feeds "Restocked this week")
-- `transactions/{id}` — `tableId`/`tableName`, `startedAt`/`endedAt`/`durationMs` copied from the session, `mode` (open | timed), `plannedMs`, `billedMs`, `pricing` used, table fee, rounds, line items, totals, `method` (cash | gcash | split, or none for a ₱0 cancelled game), `payments {cash, gcash}`, cashier, `createdAt` (server time); a cancelled game also carries `gameCancelled`, `cancelReason`, `cancelNote`, `cancelledById`, `cancelledByName` (older sales may carry the retired `tableFeeVoided…` fields). While a game is open, a cancel is stored as `session.cancelled = { reason, note, byId, byName, at }`. A **Quick Sale** (walk-in) has `tableId: null` and no table-session fields — see below.
+- `cueSticks/{id}` — `name, brand, weight, price, photo, status (available|sold), soldAt, soldTxId, soldByName` — see **Cue Sticks** below
+- `transactions/{id}` — `tableId`/`tableName`, `startedAt`/`endedAt`/`durationMs` copied from the session, `mode` (open | timed), `plannedMs`, `billedMs`, `pricing` used, table fee, rounds, line items, totals, `method` (cash | gcash | split, or none for a ₱0 cancelled game), `payments {cash, gcash}`, cashier, `createdAt` (server time); a cancelled game also carries `gameCancelled`, `cancelReason`, `cancelNote`, `cancelledById`, `cancelledByName` (older sales may carry the retired `tableFeeVoided…` fields). While a game is open, a cancel is stored as `session.cancelled = { reason, note, byId, byName, at }`. A **Quick Sale** (walk-in) has `tableId: null` and no table-session fields — see below. A **Cue Sticks** sale instead carries `saleType: 'cue-stick'` and `cueStickTotal` (kept apart from `productTotal` so it reports separately).
 - `users/{uid}` — `name, email, role, active, online, lastSeen`
 - `expenses/{id}` — `description, amount, cashierId, cashierName, createdAt` (server time). Cash taken from the drawer. Nobody edits one; only the owner can delete one.
 - `settings/shifts` — `twoShifts` (owner-only). Off by default: one shift per business day.
@@ -129,9 +130,10 @@ One rate for every table (`PRICING` in `js/billing.js`):
 | 2:06:00 and every 15 minutes after | + ₱50 each (₱450, ₱500, ₱550, …) |
 
 The grace period exists so a customer who says "end na ko" at 1:00 isn't charged another ₱50 because the cashier was busy.
-It is **not** free time: the clock keeps counting the real elapsed time (the table card shows e.g. `Overtime +00:04:30` next to
-`Bill ₱200.00`, then `+00:06:00` next to `₱250.00`), and it is not transferable. One customer is one session is one
-transaction; a new session always pays its own first hour.
+It is **not** free time: the clock keeps counting the real elapsed time (an Open Time table card shows e.g. `Overtime
++00:04:30` next to `Bill ₱200.00`, then `+00:06:00` next to `₱250.00`), and it is not transferable. One customer is one
+session is one transaction; a new session always pays its own first hour. **A Set Hours booking never actually lingers in
+this window** — see *Auto-stop* below — so the grace period and the fee steps past it are, in practice, an Open Time thing.
 
 ### Overtime colour on the table card
 
@@ -144,24 +146,34 @@ The card shows overtime by its look (no text banner, so every card keeps the sam
 | last 5 min before it ends (a 1h booking: 0:55:00 - 1:00:00) | yellow border, soft pulse | ₱200 |
 | overtime, from 1:00:01 on a 1h booking | **red** border and rail, red pulse, bill in a red pill, one chime | ₱200 until 1:05:59 (grace), ₱250 at 1:06:00, ₱300 at 1:21:00, ... |
 
-Once red it stays red until checkout; the fee steps (1:06, 1:21, 1:36, ...) don't change the colour, but each plays one chime.
-A 2h booking stays normal until 1:55:00 (yellow), goes red after 2:00:00, and its bill steps up at 2:06:00.
-Open Time counts overtime from the end of the first hour. `billingStatus()` in `js/billing.js` uses the same elapsed time as
-the bill, so colour, animation, chime and amount can't disagree. Screen readers hear "Approaching overtime" / "Overtime".
-A stopped or cancelled clock shows nothing.
+On an **Open Time** table, once red it stays red until checkout; the fee steps (1:06, 1:21, 1:36, ...) don't change the
+colour, but each plays one chime. Open Time counts overtime from the end of the first hour.
+On a **Set Hours** table this red state is only ever momentary: *Auto-stop* (below) ends the session the instant the booked
+time is reached, so the card flips straight to "Clock Stopped" rather than sitting in overtime.
+`billingStatus()` in `js/billing.js` uses the same elapsed time as the bill, so colour, animation, chime and amount can't
+disagree. Screen readers hear "Approaching overtime" / "Overtime". A stopped or cancelled clock shows nothing.
 
 ### Open Time vs Set Hours
 
-- **Open Time:** the clock runs until the cashier stops it. Billed on the time actually played.
+- **Open Time:** the clock runs until the cashier stops it. Billed on the time actually played. Can run into overtime
+  (see above) for as long as the table is left running.
 - **Set Hours:** the customer books a length, e.g. 1h, 2h, 3h, or a custom length in 15-minute steps. The card counts down
-  "Time left" and turns amber with "Overtime +mm:ss" when the booking runs out.
+  "Time left", turns amber in the last 5 minutes, and **auto-stops** — ends the session itself, exactly like the cashier
+  tapping End Session — the instant the booking runs out. There is no overtime to walk into: the table just stops, waiting
+  for payment.
+  - **Auto-stop:** `checkAutoStop()` in `js/time-alerts.js` runs on the same one-second tick as everything else; whichever
+    signed-in device notices the booked time has been reached calls the same `endSession()` the End Session button uses.
+    That function only ends a session that isn't already ended, inside one Firestore transaction, so two devices noticing
+    at once can't double-stop or double-charge a table. Like the hour-mark and 5-minute alerts, this only runs while some
+    device has the app open — a booking that runs out while every device is closed auto-stops as soon as one reopens.
   - **Booked time is not the bill.** Three separate things: the *booked* length (what the customer chose), the *actual elapsed*
     time (end stamp − start stamp) and the *billable amount*, which is calculated from the actual elapsed time only. Stopping a
-    1h15 booking after 59 seconds costs ₱200, at 1:05:59 still ₱200 (grace), at 1:06:00 ₱250, at 1:15:00 ₱250. Unused booked time
-    is never charged. The booking only sets the "Time left" countdown, the alerts and when overtime (red) starts, and it is kept on
-    the sale for reference.
-  - **Add time** (at checkout) extends a booking. An Open Time table can also be switched to a booking there. The rules allow
-    a booking to grow, never shrink.
+    1h15 booking after 59 seconds costs ₱200, and reaching 1:06:00+ of a longer booking bills the matching bracket exactly —
+    unused booked time is never charged, and none of it can run over into the next bracket by accident. The booking sets the
+    "Time left" countdown, the alerts, and when auto-stop fires, and it is kept on the sale for reference.
+  - **Add time** (at checkout) extends a booking before it runs out, so the customer keeps playing past what they first
+    booked. An Open Time table can also be switched to a booking there. The rules allow a booking to grow, never shrink —
+    so the only way to keep a Set Hours table running past "Time left: 0:00" is to add time before it gets there.
 
 Formula, on exact milliseconds: `< 1:06:00 → ₱200`, otherwise `₱200 + (1 + floor((elapsed − 1:06:00) / 15 min)) × ₱50`.
 It lives in **one** function, `calculateBilliardBill()` in `js/billing.js`. Open Time, Set Hours, the table card, checkout,
@@ -275,6 +287,31 @@ playing at a table: no timer, no table fee, just the items and a payment.
   table name/number (Dashboard's Recent Transactions and the receipt do the same). A Quick Sale has no
   table fee, so there's nothing to cancel.
 
+## Cue Sticks (a separate little shop)
+
+A second catalog, apart from Inventory/Quick Sale, for the cue sticks the hall sells: each one is a
+unique physical item (not counted stock), with its own photo so it can be shown off before it sells.
+
+- **Where it lives:** its own nav item, "Cue Sticks" — a photo showcase of every cue currently in stock.
+  Tap one to add it to the sale (each cue can only be added once, since it's one physical item, not a
+  quantity), choose a payment method and **Complete Sale**, exactly like Quick Sale.
+- **Manage Cue Sticks** (owner-only, a button on that screen, not a separate nav item — the same pattern
+  as **Manage Tables**): add a cue with a name, brand, weight, price and photo, or edit one later
+  (details can still be fixed after it's sold, for the owner's own records).
+- **Photo:** chosen from the device, resized and compressed to a small JPEG **in the browser** and stored
+  directly on the cue stick's document — there's no separate file-storage service in this app. A cue
+  stick photo over roughly 900KB is rejected by `firestore.rules`.
+- **Selling one:** `completeCueStickSale()` in `js/services.js` re-checks every selected cue is still
+  `available` inside one Firestore transaction, marks each `sold` (`soldAt`, `soldTxId`, `soldByName`),
+  and writes a transaction with `saleType: 'cue-stick'` and its own `cueStickTotal` — no table fee, no
+  product total, so it never gets mixed into Quick Sale's numbers.
+- **Reports:** a dedicated **Cue stick sales** card on the Daily, Custom range and Monthly tabs, and
+  `saleType: 'cue-stick'` transactions show up tagged **Cue Stick** everywhere `Walk-in` shows up for a
+  Quick Sale (Transactions, receipts, the Owner Dashboard's recent sales).
+- **Enforced on the server:** `firestore.rules` (`cueSticks` collection + `cueStickSaleOk`) lets a
+  cashier only flip an available cue to sold, server-timestamped, one-way — the same trust level a
+  product's stock decrement already gets — while only the owner can add, edit or delete a cue stick.
+
 ## Hour-mark alert (table cards)
 
 A running table warns the cashier as it nears each whole hour of play (1:00, 2:00, ...), so they can tell the customer
@@ -322,8 +359,8 @@ For **Set Hours** (booked) tables, every signed-in screen speaks a **5-minutes-l
 ("Table 04, 5 minutes left"), and shows a red alert card until someone taps OK or opens the table
 (`js/time-alerts.js`, `speakAlert()` in `js/alarm.js` — Web Speech API, falls back to a tone chime on a browser with
 no voices). **Expiry** — the booked time itself running out — rings the real bell recording instead (the same one
-used for the *Hour-mark alert*), since that's also the instant the card turns red for overtime. Each alert fires once
-per game, tracked by the session's own start time rather than the table, so a **Transfer Table** move carries the
+used for the *Hour-mark alert*), since that's also the instant **auto-stop** (see *Open Time vs Set Hours*) ends the
+session. Each alert fires once per game, tracked by the session's own start time rather than the table, so a **Transfer Table** move carries the
 already-fired state with it instead of re-alerting. Open Time tables have no end time, so neither applies to them —
 they still get the plain hourly chime below. Browsers only allow sound after the screen has been tapped once, so tap
 anywhere after opening the app.

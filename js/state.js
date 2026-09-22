@@ -3,6 +3,7 @@ export const state = {
   user: null,
   tables: [],
   products: [],
+  cueSticks: [],
   users: [],
   restocks: [],
   settings: {},
@@ -32,6 +33,7 @@ export function reset() {
   state.user = null;
   state.tables = [];
   state.products = [];
+  state.cueSticks = [];
   state.users = [];
   state.restocks = [];
   state.settings = {};

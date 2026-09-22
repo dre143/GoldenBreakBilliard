@@ -33,4 +33,6 @@ export const ICONS = {
   refresh: '<path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/>',
   bag: '<path d="M7 8V6.5a5 5 0 0 1 10 0V8"/><path d="M4.5 8h15l-1.1 12.1a2 2 0 0 1-2 1.9H7.6a2 2 0 0 1-2-1.9L4.5 8Z"/><path d="M8.5 11.5v2M15.5 11.5v2"/>',
   transfer: '<path d="M4 8h13M13 4l4 4-4 4"/><path d="M20 16H7M11 12l-4 4 4 4"/>',
+  cue: '<path d="M20 3 6.5 16.5"/><circle cx="4.5" cy="18.5" r="2.3"/><path d="M9 20l2-2M13 20l2-2"/>',
+  camera: '<path d="M4 8h3l1.6-2.4A2 2 0 0 1 10.3 4.6h3.4a2 2 0 0 1 1.7 1L17 8h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13.5" r="3.6"/>',
 };

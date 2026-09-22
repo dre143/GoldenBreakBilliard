@@ -275,6 +275,26 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ---------------- cue sticks ----------------
+    // A separate catalog from products: each cue stick is a unique physical item, not counted stock,
+    // so a sale flips status available -> sold instead of decrementing a quantity. The photo, if any,
+    // is a compressed image kept right on the document (no separate file storage in this app).
+    match /cueSticks/{id} {
+      allow read: if isStaff();
+      allow create: if isOwner()
+        && (request.resource.data.get('photo', null) == null || request.resource.data.photo.size() < 900000);
+      allow delete: if isOwner();
+      // Cashiers may only mark an available cue sold at sale time, server-timestamped, one-way — the
+      // same shape as a product's stock only ever decreasing for a cashier.
+      allow update: if (isOwner()
+            && (request.resource.data.get('photo', null) == null || request.resource.data.photo.size() < 900000))
+        || (isStaff()
+            && onlyChanges(['status', 'soldAt', 'soldTxId', 'soldByName', 'updatedAt'])
+            && resource.data.status == 'available'
+            && request.resource.data.status == 'sold'
+            && request.resource.data.soldAt == request.time);
+    }
+
     // ---------------- transactions ----------------
     // Append-only ledger. A sale can only be created for a table whose clock was stopped by the server,
     // with the table fee recomputed from that session's server stamps, in the same write that frees the table.
@@ -285,6 +305,19 @@ service cloud.firestore {
         && sale.items is list
         && sale.productTotal is number && sale.productTotal >= 0
         && math.abs(sale.total - sale.productTotal) < 0.005;
+    }
+
+    // A cue stick sale: no table fee, no products — the total is entirely cueStickTotal. The cues
+    // themselves are independently marked 'sold' (see /cueSticks above), not cross-checked here, the
+    // same trust level a Quick Sale's product-stock deduction already gets.
+    function cueStickSaleOk(sale) {
+      return sale.tableId == null
+        && sale.get('saleType', null) == 'cue-stick'
+        && sale.tableFee == 0
+        && sale.get('productTotal', 0) == 0
+        && sale.items is list
+        && sale.cueStickTotal is number && sale.cueStickTotal >= 0
+        && math.abs(sale.total - sale.cueStickTotal) < 0.005;
     }
 
     function saleMatchesSession(sale, id) {
@@ -323,7 +356,8 @@ service cloud.firestore {
             || (request.resource.data.get('gcashRef', null) is string
                 && request.resource.data.gcashRef.matches('^[0-9]{5}$')))
         && request.resource.data.createdAt == request.time
-        && ((request.resource.data.tableId == null && quickSaleOk(request.resource.data))
+        && ((request.resource.data.tableId == null
+              && (quickSaleOk(request.resource.data) || cueStickSaleOk(request.resource.data)))
             || (request.resource.data.tableId != null && saleMatchesSession(request.resource.data, id)));
       // The ledger is append-only. A game is cancelled on the table before payment (cancelsGame),
       // never by changing a completed sale.

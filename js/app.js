@@ -8,6 +8,7 @@ import * as tablesView from './views/tables.js';
 import * as checkoutView from './views/checkout.js';
 import * as quickSaleView from './views/quick-sale.js';
 import * as inventoryView from './views/inventory.js';
+import * as cueSticksView from './views/cue-sticks.js';
 import * as transactionsView from './views/transactions.js';
 import * as dashboardView from './views/dashboard.js';
 import * as staffView from './views/staff.js';
@@ -38,6 +39,7 @@ const ROUTES = {
   inventory: { label: 'Inventory', icon: 'box', view: inventoryView },
   checkout: { label: 'Checkout', icon: 'receipt', view: checkoutView },
   'quick-sale': { label: 'Quick Sale', icon: 'bag', view: quickSaleView },
+  'cue-sticks': { label: 'Cue Sticks', icon: 'cue', view: cueSticksView },
   transactions: { label: 'Transactions', icon: 'list', view: transactionsView },
   dashboard: { label: 'Owner Dashboard', icon: 'chart', view: dashboardView, owner: true },
   reports: { label: 'Reports', icon: 'report', view: reportsView },
@@ -117,6 +119,7 @@ function startData() {
   dataCleanups = [
     db.listen('tables', (rows) => set('tables', rows.sort((a, b) => (a.number ?? 0) - (b.number ?? 0) || byName(a, b))), {}, onDataError),
     db.listen('products', (rows) => set('products', rows.sort(byName)), {}, onDataError),
+    db.listen('cueSticks', (rows) => set('cueSticks', rows.sort(byName)), {}, onDataError),
     // Superadmin accounts are filtered out at the database for everyone but a superadmin (see roles.js / firestore.rules).
     db.listen('users', (rows) => set('users', rows.sort(byName)), usersQuery(state.user), onDataError),
     db.listen('restocks', (rows) => set('restocks', rows), { where: [['createdAt', '>=', addDays(Date.now(), -7)]] }, onDataError),
@@ -190,7 +193,7 @@ function renderShell() {
       <aside class="sidebar" id="sidebar">
         ${brand()}
         <nav class="nav" aria-label="Primary">
-          ${['tables', 'inventory', 'checkout', 'quick-sale', 'transactions', 'reports'].map(link).join('')}
+          ${['tables', 'inventory', 'checkout', 'quick-sale', 'cue-sticks', 'transactions', 'reports'].map(link).join('')}
           ${owner ? `<p class="nav__label">Owner</p>${['dashboard', 'staff'].map(link).join('')}` : ''}
         </nav>
         <div class="sidebar__spacer"></div>
@@ -237,7 +240,7 @@ function renderShell() {
     root.querySelector('[data-region=printer-state]').textContent = s.kind ? `, connected: ${s.name}` : ', not connected';
   });
   root.querySelector('[data-action=clear-demo]')?.addEventListener('click', () => {
-    if (!confirm('Clear all demo sales, expenses and open tables? Staff, tables and products stay.')) return;
+    if (!confirm('Clear all demo sales, expenses and open tables (and unsell every cue stick)? Staff, tables, products and cue sticks stay.')) return;
     auth.clearDemoSales();
     toast('All demo sales cleared. Everything starts at zero.');
   });

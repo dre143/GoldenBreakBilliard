@@ -101,7 +101,7 @@ export function paymentsOf(tx) {
 
 const emptyTotals = () => ({
   count: 0, durationMs: 0, rounds: 0, items: 0,
-  tableFee: 0, productTotal: 0, total: 0, cash: 0, gcash: 0, other: 0,
+  tableFee: 0, productTotal: 0, cueStickTotal: 0, total: 0, cash: 0, gcash: 0, other: 0,
   expenses: 0, expenseCount: 0,
 });
 
@@ -119,6 +119,7 @@ function add(acc, tx) {
   acc.items += (tx.items || []).reduce((n, i) => n + i.qty, 0);
   acc.tableFee += tx.tableFee || 0;
   acc.productTotal += tx.productTotal || 0;
+  acc.cueStickTotal += tx.cueStickTotal || 0;
   acc.total += tx.total || 0;
   acc.cash += p.cash;
   acc.gcash += p.gcash;
@@ -133,7 +134,7 @@ function add(acc, tx) {
  * A table-fee void already subtracts its refund from the sale's payments, so no further adjustment is needed.
  */
 function rounded(acc) {
-  for (const k of ['tableFee', 'productTotal', 'total', 'cash', 'gcash', 'other', 'expenses']) acc[k] = round2(acc[k]);
+  for (const k of ['tableFee', 'productTotal', 'cueStickTotal', 'total', 'cash', 'gcash', 'other', 'expenses']) acc[k] = round2(acc[k]);
   acc.net = round2(acc.total - acc.expenses);
   acc.cashToCount = round2(acc.cash - acc.expenses);
   return acc;
@@ -169,6 +170,7 @@ export function topProducts(txs, limit = 10) {
   const map = new Map();
   for (const tx of txs) {
     for (const i of tx.items || []) {
+      if (!i.productId) continue; // a cue stick sale's items key by cueStickId instead — kept out of this list
       const row = map.get(i.productId) || { productId: i.productId, name: i.name, category: i.category, qty: 0, revenue: 0 };
       row.qty += i.qty;
       row.revenue += i.total ?? i.price * i.qty;

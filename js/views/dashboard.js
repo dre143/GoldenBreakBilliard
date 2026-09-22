@@ -144,7 +144,7 @@ export function mount(el, ctx) {
       <li>
         <button type="button" class="tx-row" data-id="${esc(x.id)}">
           <span class="tx-row__main">
-            <span class="tx-row__title">${x.tableId ? esc(x.tableName) : '<span class="badge badge--neutral">Walk-in</span>'}${cancelInfo(x) ? ' <span class="badge badge--danger">Cancelled</span>' : ''}</span>
+            <span class="tx-row__title">${x.tableId ? esc(x.tableName) : `<span class="badge badge--neutral">${x.saleType === 'cue-stick' ? 'Cue Stick' : 'Walk-in'}</span>`}${cancelInfo(x) ? ' <span class="badge badge--danger">Cancelled</span>' : ''}</span>
             <span class="tx-row__sub">${fmtTime(x.createdAt)} · ${METHOD_LABEL[x.method] || esc(x.method)} · ${esc(x.cashierName)}</span>
           </span>
           <span class="tx-row__amount num">${peso(x.total)}</span>
