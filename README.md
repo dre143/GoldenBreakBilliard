@@ -344,8 +344,10 @@ so that screen never needs to borrow a real staff member's login (and everything
 
 ## Hour-mark alert (table cards)
 
-A running table warns the cashier as it nears each whole hour of play (1:00, 2:00, ...), so they can tell the customer
-before the next rate step. It is a state layered on the card and changes nothing about billing:
+A **Set Hours** table warns the cashier as it nears each whole hour of play (1:00, 2:00, ...), so they can tell the
+customer before the next rate step. It is a state layered on the card and changes nothing about billing.
+**Open Time never gets this** — no rail glow, no bell badge, no chime, no hour-crossing bell — it has no warning or
+expiry effects of any kind (see *Time-left alerts* and *Open Time vs Set Hours*); it's left as a plain running table.
 
 - **Last 5 minutes:** amber wood rail with a slow pulse, amber timer, a bell badge (top-right), a × dismiss button
   (top-left), and one short chime.

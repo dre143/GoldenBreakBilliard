@@ -2,6 +2,9 @@
 // play, "crit" in the last minute. The level is derived from elapsed time on every tick, so it clears the
 // instant the hour passes (or the session is stopped) and re-arms for the next hour on its own.
 //
+// Set Hours only — Open Time has no warning or expiry effects of any kind (see time-alerts.js), and that
+// includes this one: it never gets the rail glow, the bell badge, the chime, or the hour-crossing bell.
+//
 // Per hour mark (session start + hour number — not the table id, so a Transfer Table move carries this
 // state with it rather than restarting it) there is one chime, at the start of the warning, and one
 // optional manual dismissal that hides that card's glow/badge until the next hour mark. Both are
@@ -42,7 +45,7 @@ const HOUR_RING_WINDOW_MS = 15 * 1000;
 function checkHourCrossings(now) {
   for (const t of state.tables) {
     const s = t.session;
-    if (!s || s.ended || s.cancelled || t.status !== 'in_use') continue;
+    if (!s || s.ended || s.cancelled || t.status !== 'in_use' || !isTimed(s)) continue;
     const elapsed = elapsedMs(t, now);
     const completedHours = Math.floor(elapsed / HOUR_MS);
     if (completedHours < 1) continue;
@@ -61,7 +64,7 @@ function checkHourCrossings(now) {
  */
 export function hourAlertFor(table, now = serverNow()) {
   const s = table?.session;
-  if (!s || s.ended || s.cancelled || table.status !== 'in_use') return null;
+  if (!s || s.ended || s.cancelled || table.status !== 'in_use' || !isTimed(s)) return null;
   const a = hourAlert(elapsedMs(table, now));
   if (!a.level) return null;
   const key = `${s.startedAt}:${a.boundary}`;
