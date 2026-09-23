@@ -420,6 +420,7 @@ export function staffDialog(member, currentUser) {
         <label for="u-role">Role</label>
         <select id="u-role" name="role" ${self ? 'disabled' : ''}>
           <option value="cashier" ${member?.role === 'cashier' || !member ? 'selected' : ''}>Cashier</option>
+          <option value="display" ${member?.role === 'display' ? 'selected' : ''}>Display (TV / kiosk, view only)</option>
           <option value="owner" ${member?.role === 'owner' ? 'selected' : ''}>Owner</option>
           ${isSuperadmin(currentUser) ? `<option value="superadmin" ${member?.role === 'superadmin' ? 'selected' : ''}>Superadmin (hidden from owners)</option>` : ''}
         </select>

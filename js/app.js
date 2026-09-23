@@ -17,7 +17,7 @@ import * as reportsView from './views/reports.js';
 import * as printer from './printer.js';
 import { startTimeAlerts } from './time-alerts.js';
 import { startHourAlerts } from './hour-alerts.js';
-import { isOwnerLevel, roleLabel, usersQuery } from './roles.js';
+import { isOwnerLevel, isDisplay, roleLabel, usersQuery } from './roles.js';
 import { printerDialog, cashDrawerDialog, gcashQrDialog } from './dialogs.js';
 
 const root = document.getElementById('root');
@@ -119,20 +119,27 @@ let dataCleanups = [];
 
 function startData() {
   const byName = (a, b) => String(a.name).localeCompare(String(b.name));
+  // A display account's firestore.rules only allow reading tables and cue sticks (see isWorkingStaff()) —
+  // subscribing to anything else would just log permission-denied errors for data it never uses.
+  const display = isDisplay(state.user);
   dataCleanups = [
     db.listen('tables', (rows) => set('tables', rows.sort((a, b) => (a.number ?? 0) - (b.number ?? 0) || byName(a, b))), {}, onDataError),
-    db.listen('products', (rows) => set('products', rows.sort(byName)), {}, onDataError),
     db.listen('cueSticks', (rows) => set('cueSticks', rows.sort(byName)), {}, onDataError),
-    // Superadmin accounts are filtered out at the database for everyone but a superadmin (see roles.js / firestore.rules).
-    db.listen('users', (rows) => set('users', rows.sort(byName)), usersQuery(state.user), onDataError),
-    db.listen('restocks', (rows) => set('restocks', rows), { where: [['createdAt', '>=', addDays(Date.now(), -7)]] }, onDataError),
-    db.listenDoc('settings', 'shifts', (doc) => set('settings', { ...state.settings, twoShifts: !!doc?.twoShifts }), onDataError),
-    db.listenDoc('settings', 'cashDrawer', (doc) => set('settings', { ...state.settings, drawerPinSet: !!doc?.pinHash }), onDataError),
-    db.listenDoc('settings', 'gcash', (doc) => set('settings', { ...state.settings, gcashQr: doc?.qrImage || null }), onDataError),
   ];
-  printer.tryReconnect(); // quietly reconnect the last thermal printer, if the browser kept permission
-  dataCleanups.push(startTimeAlerts()); // 15- and 5-minutes-left chimes for booked tables
-  dataCleanups.push(startHourAlerts()); // 5-minute / 1-minute warning before each whole hour on a running table
+  if (!display) {
+    dataCleanups.push(
+      db.listen('products', (rows) => set('products', rows.sort(byName)), {}, onDataError),
+      // Superadmin accounts are filtered out at the database for everyone but a superadmin (see roles.js / firestore.rules).
+      db.listen('users', (rows) => set('users', rows.sort(byName)), usersQuery(state.user), onDataError),
+      db.listen('restocks', (rows) => set('restocks', rows), { where: [['createdAt', '>=', addDays(Date.now(), -7)]] }, onDataError),
+      db.listenDoc('settings', 'shifts', (doc) => set('settings', { ...state.settings, twoShifts: !!doc?.twoShifts }), onDataError),
+      db.listenDoc('settings', 'cashDrawer', (doc) => set('settings', { ...state.settings, drawerPinSet: !!doc?.pinHash }), onDataError),
+      db.listenDoc('settings', 'gcash', (doc) => set('settings', { ...state.settings, gcashQr: doc?.qrImage || null }), onDataError),
+    );
+    printer.tryReconnect(); // quietly reconnect the last thermal printer, if the browser kept permission
+    dataCleanups.push(startTimeAlerts()); // 5-minutes-left / expiry alerts for booked tables
+    dataCleanups.push(startHourAlerts()); // 5-minute / 1-minute warning before each whole hour on a running table
+  }
   const beat = () => state.user && svc.setPresence(state.user.uid, true).catch(() => {});
   beat();
   syncClock();
@@ -273,7 +280,15 @@ function route() {
   if (!main || !state.user) return;
   let [name, ...params] = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   const r = ROUTES[name];
-  if (!r || (r.owner && !isOwnerLevel(state.user))) {
+  // A display account (an unattended screen running Showcase) has nowhere else to go — every other
+  // route, even one it could technically load, would just show live data it has no reason to see.
+  if (isDisplay(state.user)) {
+    if (name !== 'showcase') {
+      name = 'showcase';
+      params = [];
+      history.replaceState(null, '', '#/showcase');
+    }
+  } else if (!r || (r.owner && !isOwnerLevel(state.user))) {
     name = 'tables';
     params = [];
     history.replaceState(null, '', '#/tables');

@@ -46,6 +46,8 @@ open tables but keeps staff, tables and products.
 | Staff & accounts, Manage Tables (names) | — | ✓ |
 | Everything an owner can do, hidden from owners and cashiers (see below) | — | Superadmin only |
 
+A fourth role, **Display**, isn't in this table because it can't do any of it — see **Showcase (TV display)** below.
+
 ## Superadmin (hidden account with every owner function)
 
 A **superadmin** can do everything an owner can (all screens, products, tables, reports, staff accounts, expenses) and is
@@ -314,23 +316,42 @@ unique physical item (not counted stock), with its own photo so it can be shown 
 
 ### Showcase (TV display)
 
-A fullscreen, chrome-free slideshow of the cue stick catalog, meant for a screen behind the counter or
-near the tables — not a screen staff use day to day.
+A fullscreen, chrome-free slideshow — table status, then the cue stick catalog — meant for a screen
+behind the counter or near the tables, not a screen staff use day to day.
 
 - **Where it lives:** `#/showcase` (`js/views/showcase.js`), reached from the **Open Showcase** link on
-  the Cue Sticks page. It's a real route but deliberately left out of the sidebar, since nobody needs it
-  in their daily nav. Point whatever device drives the TV (an old laptop, an Android TV box, a Fire
-  Stick's browser) at that URL, sign in once, and leave it fullscreen.
-- **What it shows:** every *available* cue stick (sold ones drop out), one at a time — photo, name,
-  brand/weight, price — auto-advancing every 7 seconds, with a small dot indicator. No photo yet falls
-  back to a plain cue icon rather than leaving a gap.
-- **Live, not a slideshow file:** it reads the same `state.cueSticks` data as the sell screen, so adding
-  a cue, editing one, or selling it out updates the loop on its own — nothing here is ever exported or
-  re-uploaded by hand.
+  the Cue Sticks page, or as the forced landing screen for a **Display** account (below). It's a real
+  route but deliberately left out of the sidebar, since nobody needs it in their daily nav.
+- **What it shows, on a loop:** one **Table Status** slide (every table's name and Available/In Use, no
+  bill, no timer — just whether a customer can walk up to it), then one slide per *available* cue stick
+  (sold ones drop out) — photo, name, brand/weight, price. Auto-advances every 7 seconds, with a small
+  dot indicator. A cue with no photo yet falls back to a plain cue icon rather than leaving a gap.
+- **Live, not a slideshow file:** it reads the same `state.tables`/`state.cueSticks` as the rest of the
+  app, so a table freeing up, a new cue, or one selling out updates the loop on its own — nothing here is
+  ever exported or re-uploaded by hand.
 - **How the fullscreen works:** the view adds a `showcase-mode` class to the app's `.shell` element,
   which is what actually hides the sidebar/top bar and lets the page fill the screen (see `css/styles.css`);
-  the class comes off again when the view unmounts. A small "Back to app" link (top-left, shown on hover)
-  gets you back to the normal screens on the same device if you ever need to.
+  the class comes off again when the view unmounts. A staff account sees a small "Back to app" link
+  (top-left, shown on hover); a Display account sees **Sign out** there instead, since it has nowhere
+  else in the app to go back *to*.
+
+### Display role (an unattended screen, e.g. the TV itself)
+
+A fourth role, alongside Cashier/Owner/Superadmin, for a device that just sits there running Showcase —
+so that screen never needs to borrow a real staff member's login (and everything that login could do).
+
+- **Set it up** like any staff account: **Staff & Accounts → Add Staff**, role **Display**. Sign into it
+  once on whatever device drives the TV (old laptop, Android TV box, Fire Stick's browser), leave it
+  fullscreen. Its presence (online/offline) shows on the Owner Dashboard's staff list like anyone else's,
+  so the owner can tell at a glance whether the TV is actually connected.
+- **Nowhere else to go:** `route()` in `js/app.js` sends a Display account straight to `#/showcase` and
+  bounces any other hash right back — there's no path to Tables, Checkout, Transactions, or anything
+  else, even by typing a different URL.
+- **Enforced on the server, not just hidden on screen:** `firestore.rules`' `isWorkingStaff()` is
+  `isStaff()` minus the Display role, and gates every collection except `tables` and `cueSticks` (which
+  stay on the broader `isStaff()`, since that's the whole point). A Display account's credentials, if
+  anyone ever got hold of them, can read table status and the cue stick catalog and nothing more — no
+  transactions, expenses, other staff's names, settings, or write access of any kind.
 
 ## Hour-mark alert (table cards)
 

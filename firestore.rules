@@ -1,9 +1,12 @@
 rules_version = '2';
 
-// Roles live in users/{uid}.role ("superadmin" | "owner" | "cashier"); users/{uid}.active gates access.
-// A superadmin has every owner permission (isOwner() below is true for both) and is invisible to everyone
-// else: only a superadmin can read, create, edit or deactivate a superadmin account. Superadmin accounts are
-// first created in the Firebase console (Authentication user + users/{uid} document with role "superadmin").
+// Roles live in users/{uid}.role ("superadmin" | "owner" | "cashier" | "display"); users/{uid}.active gates
+// access. A superadmin has every owner permission (isOwner() below is true for both) and is invisible to
+// everyone else: only a superadmin can read, create, edit or deactivate a superadmin account. Superadmin
+// accounts are first created in the Firebase console (Authentication user + users/{uid} document with role
+// "superadmin"). A "display" account is for an unattended screen (e.g. a TV running Showcase) — it can sign
+// in and read tables/cueSticks, nothing else; isWorkingStaff() below is isStaff() minus that role, and gates
+// everything a display account shouldn't reach.
 //
 // Time integrity: session start/end times and sale times must equal request.time (the server clock),
 // and every sale's table fee is recomputed here from those stamps. A device with a wrong or changed
@@ -24,6 +27,10 @@ service cloud.firestore {
     // Owner-level access. True for a superadmin too, so a superadmin can do everything an owner can.
     function isOwner() { return isStaff() && get(userPath(request.auth.uid)).data.role in ['owner', 'superadmin']; }
     function isSuperadmin() { return isStaff() && get(userPath(request.auth.uid)).data.role == 'superadmin'; }
+    // A "display" account (e.g. the TV/kiosk showing Showcase) is staff for sign-in purposes, but reads
+    // only tables and cue sticks — nowhere with money, other staff's names, or any write access. Every
+    // isStaff() below that guards something a display account shouldn't reach uses this instead.
+    function isWorkingStaff() { return isStaff() && get(userPath(request.auth.uid)).data.role != 'display'; }
     function onlyChanges(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
 
     // ---- Official table rate (mirrors PRICING in js/billing.js) ----
@@ -56,7 +63,7 @@ service cloud.firestore {
       // Superadmin profiles are readable only by superadmins (and by the superadmin themself). Lists must
       // therefore filter with where('role', '!=', 'superadmin'), which the app does for everyone else.
       allow read: if signedIn()
-        && (request.auth.uid == uid || isSuperadmin() || (isStaff() && resource.data.role != 'superadmin'));
+        && (request.auth.uid == uid || isSuperadmin() || (isWorkingStaff() && resource.data.role != 'superadmin'));
       allow create: if isSuperadmin()
         || (isOwner() && request.resource.data.role != 'superadmin')
         || (request.auth.uid == uid
@@ -238,7 +245,7 @@ service cloud.firestore {
       allow create: if isOwner()
         && request.resource.data.status == 'available' && request.resource.data.session == null;
       allow delete: if isOwner() && resource.data.status == 'available';
-      allow update: if isStaff()
+      allow update: if isWorkingStaff()
         && request.resource.data.status in ['available', 'in_use']
         && ((isOwner() && onlyChanges(['name', 'number', 'light', 'updatedAt']))
             || onlyChanges(['light', 'updatedAt'])
@@ -257,12 +264,12 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow read: if isStaff();
+      allow read: if isWorkingStaff();
       allow create, delete: if isOwner();
       // Cashiers may only decrement stock (checkout deduction). Voiding a sale never returns stock —
       // items stay sold — so there is no path for a cashier to raise it back up.
       allow update: if isOwner()
-        || (isStaff()
+        || (isWorkingStaff()
             && onlyChanges(['stock', 'updatedAt'])
             && request.resource.data.stock is int
             && request.resource.data.stock >= 0
@@ -270,7 +277,7 @@ service cloud.firestore {
     }
 
     match /restocks/{id} {
-      allow read: if isStaff();
+      allow read: if isWorkingStaff();
       allow create: if isOwner() && request.resource.data.createdAt == request.time;
       allow update, delete: if false;
     }
@@ -288,7 +295,7 @@ service cloud.firestore {
       // same shape as a product's stock only ever decreasing for a cashier.
       allow update: if (isOwner()
             && (request.resource.data.get('photo', null) == null || request.resource.data.photo.size() < 900000))
-        || (isStaff()
+        || (isWorkingStaff()
             && onlyChanges(['status', 'soldAt', 'soldTxId', 'soldByName', 'updatedAt'])
             && resource.data.status == 'available'
             && request.resource.data.status == 'sold'
@@ -345,9 +352,9 @@ service cloud.firestore {
     }
 
     match /transactions/{id} {
-      allow read: if isStaff();
+      allow read: if isWorkingStaff();
       // Nothing to pay (a cancelled game with no items) is recorded as method 'none'.
-      allow create: if isStaff()
+      allow create: if isWorkingStaff()
         && request.resource.data.cashierId == request.auth.uid
         && (request.resource.data.method in ['cash', 'gcash', 'split']
             || (request.resource.data.method == 'none' && request.resource.data.total == 0))
@@ -365,7 +372,7 @@ service cloud.firestore {
     }
     // Hall-wide settings (e.g. settings/shifts: whether the hall runs one shift or Day + Night).
     match /settings/{id} {
-      allow read: if isStaff();
+      allow read: if isWorkingStaff();
       allow write: if isOwner();
     }
 
@@ -374,8 +381,8 @@ service cloud.firestore {
     // server time so each one lands on the shift that was actually on duty. Nobody can edit a logged
     // expense. Only the owner can remove a mistaken one, so the shift report stays an audit trail.
     match /expenses/{id} {
-      allow read: if isStaff();
-      allow create: if isStaff()
+      allow read: if isWorkingStaff();
+      allow create: if isWorkingStaff()
         && request.resource.data.keys().hasOnly(['description', 'amount', 'cashierId', 'cashierName', 'createdAt'])
         && request.resource.data.description is string
         && request.resource.data.description.size() > 0

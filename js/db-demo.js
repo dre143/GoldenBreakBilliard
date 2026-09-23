@@ -200,6 +200,7 @@ function seed() {
     'u-joy': { name: 'Joy Santos', email: 'joy@goldenbreak.demo', role: 'cashier', active: true, online: true, demoPresence: true, lastSeen: now, createdAt: now - 200 * D },
     'u-bea': { name: 'Bea Lim', email: 'bea@goldenbreak.demo', role: 'cashier', active: true, online: true, demoPresence: true, lastSeen: now, createdAt: now - 90 * D },
     'u-paolo': { name: 'Paolo Cruz', email: 'paolo@goldenbreak.demo', role: 'cashier', active: true, online: false, lastSeen: now - 19 * H, createdAt: now - 150 * D },
+    'u-tv': { name: 'Lobby TV', email: 'tv@goldenbreak.demo', role: 'display', active: true, online: false, lastSeen: now - 5 * H, createdAt: now - 40 * D },
   };
 
   const P = [

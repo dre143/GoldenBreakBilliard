@@ -181,7 +181,7 @@ function renderDemo(root) {
           <span class="gb-avatar" aria-hidden="true">${esc(initials(u.name))}</span>
           <span class="gb-account__text">
             <span class="gb-account__name">${esc(u.name)}</span>
-            <span class="gb-account__role">${u.role === 'cashier' ? 'Cashier' : `${roleLabel(u.role)} · full access`}</span>
+            <span class="gb-account__role">${u.role === 'cashier' ? 'Cashier' : u.role === 'display' ? 'Display · view only' : `${roleLabel(u.role)} · full access`}</span>
           </span>
           <span class="gb-account__go" aria-hidden="true">Sign in</span>
         </button>

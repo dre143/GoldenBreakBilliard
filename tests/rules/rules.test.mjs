@@ -36,6 +36,7 @@ beforeEach(async () => {
     'users/owner': { name: 'Marco', role: 'owner', active: true },
     'users/joy': { name: 'Joy', role: 'cashier', active: true },
     'users/bea': { name: 'Bea', role: 'cashier', active: true },
+    'users/tv': { name: 'Lobby TV', role: 'display', active: true },
     'products/beer': { name: 'Beer', price: 85, stock: 10, reorderLevel: 5 },
   });
 });
@@ -656,6 +657,44 @@ test('clock probe and presence must use server time', async () => {
   await assertFails(setDoc(doc(joy, 'clock/bea'), { t: serverTimestamp() }));
   await assertSucceeds(updateDoc(doc(joy, 'users/joy'), { online: true, lastSeen: serverTimestamp() }));
   await assertFails(updateDoc(doc(joy, 'users/joy'), { online: true, lastSeen: ts(Date.now() + 60 * MIN) }));
+});
+
+/* ---------------- display role (an unattended screen, e.g. a TV running Showcase) ---------------- */
+
+test('a display account can read tables and cue sticks, same as any staff', async () => {
+  await seed({ 'tables/t1': freeTable, 'cueSticks/c1': { name: 'Cue', status: 'available', price: 1000 } });
+  const tv = as('tv');
+  await assertSucceeds(getDoc(doc(tv, 'tables/t1')));
+  await assertSucceeds(getDoc(doc(tv, 'cueSticks/c1')));
+});
+
+test('a display account cannot read products, transactions, expenses, settings or other staff', async () => {
+  await seed({
+    'transactions/x1': { tableId: null, tableFee: 0, productTotal: 0, total: 0, method: 'none', cashierId: 'joy', cashierName: 'Joy', createdAt: ts(Date.now()) },
+    'expenses/e1': { description: 'Ice', amount: 50, cashierId: 'joy', cashierName: 'Joy', createdAt: ts(Date.now()) },
+    'settings/shifts': { twoShifts: false },
+  });
+  const tv = as('tv');
+  await assertFails(getDoc(doc(tv, 'products/beer')));
+  await assertFails(getDoc(doc(tv, 'transactions/x1')));
+  await assertFails(getDoc(doc(tv, 'expenses/e1')));
+  await assertFails(getDoc(doc(tv, 'settings/shifts')));
+  await assertFails(getDoc(doc(tv, 'users/joy')));
+});
+
+test('a display account cannot start, end or otherwise write a table, or sell a cue stick', async () => {
+  await seed({ 'tables/t1': freeTable, 'cueSticks/c1': { name: 'Cue', status: 'available', price: 1000 } });
+  const tv = as('tv');
+  await assertFails(updateDoc(doc(tv, 'tables/t1'), { status: 'in_use', session: newSession(0), updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(tv, 'cueSticks/c1'), {
+    status: 'sold', soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Lobby TV', updatedAt: serverTimestamp(),
+  }));
+});
+
+test('a display account can still update only its own presence, like any signed-in account', async () => {
+  const tv = as('tv');
+  await assertSucceeds(updateDoc(doc(tv, 'users/tv'), { online: true, lastSeen: serverTimestamp() }));
+  await assertFails(updateDoc(doc(tv, 'users/joy'), { online: true, lastSeen: serverTimestamp() }));
 });
 
 function assert(ok, msg) { if (!ok) throw new Error(msg); }

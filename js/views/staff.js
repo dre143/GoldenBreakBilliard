@@ -20,6 +20,10 @@ export function mount(el, ctx) {
         <h2 class="card-title">Owner</h2>
         <p class="muted">Everything a cashier can do, plus product &amp; stock management, table rates, the dashboard and staff accounts.</p>
       </article>
+      <article class="card role-note">
+        <h2 class="card-title">Display</h2>
+        <p class="muted">For an unattended screen (a TV showing Showcase). Signs in and goes straight there, nowhere else — reads only table status and the cue stick catalog, no money, no other staff.</p>
+      </article>
       ${isSuperadmin(ctx.user) ? `<article class="card role-note">
         <h2 class="card-title">Superadmin</h2>
         <p class="muted">Everything an owner can do. Only superadmins can see, edit or deactivate a superadmin account; owners and cashiers never see it.</p>
@@ -63,7 +67,7 @@ export function mount(el, ctx) {
                     </div>
                   </div>
                 </td>
-                <td><span class="badge ${u.role === 'cashier' ? 'badge--neutral' : 'badge--in-use'}">${roleLabel(u.role)}</span></td>
+                <td><span class="badge ${u.role === 'cashier' || u.role === 'display' ? 'badge--neutral' : 'badge--in-use'}">${roleLabel(u.role)}</span></td>
                 <td><span class="presence ${online ? 'is-online' : ''}"><span class="presence__dot" aria-hidden="true"></span>${online ? 'Online' : `Offline · ${relTime(u.lastSeen)}`}</span></td>
                 <td>${u.active === false ? '<span class="badge badge--danger">Deactivated</span>' : '<span class="badge badge--available">Active</span>'}</td>
                 <td class="cell-nowrap">${u.createdAt ? fmtDate(u.createdAt) : '—'}</td>
