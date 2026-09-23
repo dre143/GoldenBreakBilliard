@@ -132,20 +132,20 @@ One rate for every table (`PRICING` in `js/billing.js`):
 | 2:06:00 and every 15 minutes after | + ₱50 each (₱450, ₱500, ₱550, …) |
 
 The grace period exists so a customer who says "end na ko" at 1:00 isn't charged another ₱50 because the cashier was busy.
-It is **not** free time: the clock keeps counting the real elapsed time — an Open Time table card's second line switches
-from "Rate" to "Extra time" once the first hour is used up, and keeps climbing (`+00:04:30`, then `+00:06:00`) right next
-to the bill as it steps up — and it is not transferable. One customer is one session is one transaction; a new session
-always pays its own first hour. **A Set Hours booking never actually lingers in this window** — see *Auto-stop* below —
-so the grace period and the fee steps past it are, in practice, an Open Time thing.
+It is **not** free time: the clock keeps counting the real elapsed time, and the bill keeps climbing with it (₱200, then
+₱250 at 1:06:00, ₱300 at 1:21:00, ...) — it is not transferable. One customer is one session is one transaction; a new
+session always pays its own first hour. **A Set Hours booking never actually lingers in this window** — see *Auto-stop*
+below — so the grace period and the fee steps past it are, in practice, an Open Time thing.
 
-The card carries no colour or alarm state for this — past the first hour (or the booking) it looks exactly like any other
-running table, just with "Extra time" and a bill that keeps climbing. The only things that ever change a card's look are
-the **hour-mark alert** (amber/red rail before each whole hour, see below) and a table actually stopping.
+The card carries no colour or alarm state for this, and an Open Time card's second line always just reads "Rate" — there's
+no booking to count down or run past, so nothing there changes once the first hour is up. The bill next to it is still the
+real, live total the whole time. The only things that ever change a card's look are the **hour-mark alert** (amber/red
+rail before each whole hour, see below) and a table actually stopping.
 
 ### Open Time vs Set Hours
 
 - **Open Time:** the clock runs until the cashier stops it, billed on the time actually played, for as long as the table
-  is left running — the card just keeps counting up ("Extra time") and the bill keeps climbing per the rate table.
+  is left running. The card's second line always shows "Rate"; the Bill line is what actually keeps climbing.
 - **Set Hours:** the customer books a length, e.g. 1h, 2h, 3h, or a custom length in 15-minute steps. The card counts down
   "Time left", and **auto-stops** — ends the session itself, exactly like the cashier tapping End Session — the instant
   the booking runs out.

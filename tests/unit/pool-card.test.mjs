@@ -48,14 +48,14 @@ for (const session of [{}, { plannedMs: 60 * MIN }]) {
   }
 }
 
-test('past the first hour (Open Time) or the booking (Set Hours), the readout switches to "Extra time"', () => {
-  const open = renderAt(at(70));
-  assert.match(open, /<dt[^>]*>Extra time<\/dt>/);
-  assert.match(open, /\+00:10:00/);
-
+test('past the booking, a Set Hours card switches to "Extra time"; Open Time has no booking, so it never does', () => {
   const booked = renderAt(at(70), { plannedMs: 60 * MIN });
   assert.match(booked, /<dt[^>]*>Extra time<\/dt>/);
   assert.match(booked, /\+00:10:00/);
+
+  const open = renderAt(at(70));
+  assert.doesNotMatch(open, /Extra time/);
+  assert.match(open, /<dt[^>]*>Rate<\/dt>/);
 });
 
 test('before the threshold, the readout is "Rate" (Open Time) or "Time left" (Set Hours)', () => {

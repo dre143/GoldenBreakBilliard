@@ -14,10 +14,9 @@ const POCKETS = ['tl', 'tr', 'ml', 'mr', 'bl', 'br']
 
 /**
  * The card's second readout. A booked table counts down "Time left", then shows "Extra time" once the
- * booking runs out. An Open Time table shows its rate for the first hour, then "Extra time" for as long
- * as it keeps running. This is purely informational — the bill next to it comes from
- * calculateBilliardBill on the actual elapsed time either way; there's no separate colour or state tied
- * to it, just the running total.
+ * booking runs out. An Open Time table has no booking to count down, so it just always shows the rate —
+ * the actual running total is the Bill line next to it, which comes from calculateBilliardBill on the
+ * real elapsed time regardless of what this readout says.
  */
 export function bookingStatus(t, elapsed) {
   if (isTimed(t.session)) {
@@ -26,10 +25,7 @@ export function bookingStatus(t, elapsed) {
       ? { label: 'Extra time', value: `+${fmtDuration(over)}` }
       : { label: 'Time left', value: fmtDuration(remainingMs(t.session, elapsed)) };
   }
-  const over = elapsed - PRICING.baseMinutes * 60000;
-  return over > 0
-    ? { label: 'Extra time', value: `+${fmtDuration(over)}` }
-    : { label: 'Rate', value: `₱${PRICING.basePrice} / 1st hr` };
+  return { label: 'Rate', value: `₱${PRICING.basePrice} / 1st hr` };
 }
 
 /**
