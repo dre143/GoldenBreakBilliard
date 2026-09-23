@@ -312,6 +312,26 @@ unique physical item (not counted stock), with its own photo so it can be shown 
   cashier only flip an available cue to sold, server-timestamped, one-way — the same trust level a
   product's stock decrement already gets — while only the owner can add, edit or delete a cue stick.
 
+### Showcase (TV display)
+
+A fullscreen, chrome-free slideshow of the cue stick catalog, meant for a screen behind the counter or
+near the tables — not a screen staff use day to day.
+
+- **Where it lives:** `#/showcase` (`js/views/showcase.js`), reached from the **Open Showcase** link on
+  the Cue Sticks page. It's a real route but deliberately left out of the sidebar, since nobody needs it
+  in their daily nav. Point whatever device drives the TV (an old laptop, an Android TV box, a Fire
+  Stick's browser) at that URL, sign in once, and leave it fullscreen.
+- **What it shows:** every *available* cue stick (sold ones drop out), one at a time — photo, name,
+  brand/weight, price — auto-advancing every 7 seconds, with a small dot indicator. No photo yet falls
+  back to a plain cue icon rather than leaving a gap.
+- **Live, not a slideshow file:** it reads the same `state.cueSticks` data as the sell screen, so adding
+  a cue, editing one, or selling it out updates the loop on its own — nothing here is ever exported or
+  re-uploaded by hand.
+- **How the fullscreen works:** the view adds a `showcase-mode` class to the app's `.shell` element,
+  which is what actually hides the sidebar/top bar and lets the page fill the screen (see `css/styles.css`);
+  the class comes off again when the view unmounts. A small "Back to app" link (top-left, shown on hover)
+  gets you back to the normal screens on the same device if you ever need to.
+
 ## Hour-mark alert (table cards)
 
 A running table warns the cashier as it nears each whole hour of play (1:00, 2:00, ...), so they can tell the customer
@@ -336,6 +356,22 @@ portion and the rest of the total goes on GCash. For **GCash and Split** the cas
 GCash reference number** (`gcashRef`, required by `firestore.rules`). It shows on the receipt, in the Transactions list
 (and search), and on the Daily sales report and its CSV. Every transaction stores `payments.cash` and `payments.gcash`, so
 reports can add up money by type whatever the method was. (Older `card` records still show up, as "Other".)
+
+### GCash QR code
+
+GCash payment is always the customer scanning a QR in their own app — there's no way to push money without a real GCash
+merchant API integration, which this app doesn't have. So instead: the owner uploads the hall's own **"Scan to Pay"** QR
+code once, and it's shown automatically whenever GCash or Split is chosen, on Checkout, Quick Sale and Cue Sticks alike.
+
+- **Setting it up:** the **GCash QR** button (owner-only; sidebar on desktop, the top bar's icon group on
+  phones/tablets) opens a small dialog to upload, replace or remove it. The image is resized and saved as a **lossless
+  PNG** (not JPEG — compression artifacts can blur a QR's fine modules enough that a phone camera won't read it), stored
+  directly on `settings/gcash` (`qrImage`), the same "small image straight on the document" approach as a cue stick's photo.
+- **What it doesn't do:** this is the hall's own static merchant code, the same one that might otherwise be printed and
+  taped to the counter — it carries no amount, so the customer still types the total into their own GCash app, and the
+  cashier still records the last 5 digits of the reference number afterward, exactly as before.
+- Built once, in `gcashRefField()` (`js/ui.js`), so all three sale screens (Checkout, Quick Sale, Cue Sticks) show it
+  the same way without their own copy of the logic.
 
 ## Thermal printer
 

@@ -22,7 +22,9 @@ export function mount(el, ctx) {
     ${pageHeader({
       title: 'Cue Sticks',
       subtitle: 'The shop’s cue stick catalog — sell one straight from here.',
-      actions: owner ? `<button type="button" class="btn btn--neutral" data-action="manage">${icon('edit')}Manage Cue Sticks</button>` : '',
+      actions: `
+        <a class="btn btn--neutral" href="#/showcase">${icon('cue')}Open Showcase</a>
+        ${owner ? `<button type="button" class="btn btn--neutral" data-action="manage">${icon('edit')}Manage Cue Sticks</button>` : ''}`,
     })}
     <div class="checkout">
       <div class="checkout__main">

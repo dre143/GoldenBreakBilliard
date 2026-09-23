@@ -364,6 +364,16 @@ export async function verifyDrawerPin(pin) {
 export const setTwoShifts = (on) =>
   db.set('settings', 'shifts', { twoShifts: !!on, updatedAt: SERVER_TIME }, { merge: true }).then(() => !!on);
 
+/**
+ * The hall's own GCash "Scan to Pay" QR code, shown at checkout whenever GCash or Split is chosen. It's
+ * a static merchant QR (no amount encoded), the same as a printed one taped at the counter — the
+ * customer still enters the total in their own GCash app, and the cashier still records the last 5
+ * digits of the reference number for the audit trail.
+ */
+export const setGcashQr = (qrImage) =>
+  db.set('settings', 'gcash', { qrImage, updatedAt: SERVER_TIME }, { merge: true });
+export const removeGcashQr = () => setGcashQr(null);
+
 /* ---------- tables (owner) ---------- */
 
 export function addTable({ name, number }) {

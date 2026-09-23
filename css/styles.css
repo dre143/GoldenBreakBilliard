@@ -274,6 +274,12 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .main:focus { outline: none; }
 .view { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
 
+/* Showcase (js/views/showcase.js): a fullscreen TV slideshow, so the app chrome gets out of the way. */
+.shell.showcase-mode { grid-template-columns: minmax(0, 1fr); }
+.shell.showcase-mode .sidebar, .shell.showcase-mode .topbar, .shell.showcase-mode .scrim { display: none !important; }
+.shell.showcase-mode .main { padding: 0; gap: 0; }
+.shell.showcase-mode .view { gap: 0; height: 100vh; height: 100dvh; }
+
 /* ---------- page header ---------- */
 
 .page-head {
@@ -816,6 +822,11 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .cash[hidden] { display: none; }
 .cash__change { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; font-weight: 600; color: var(--ink-soft); }
 .cash__change .num { font-size: 20px; color: var(--felt); }
+
+/* GCash QR shown at checkout (gcashRefField() in js/ui.js) — the hall's own "Scan to Pay" code. */
+.gcash-qr { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px; background: var(--ground); border-radius: var(--radius-md); text-align: center; }
+.gcash-qr__img { width: 176px; height: 176px; object-fit: contain; background: var(--surface); border-radius: var(--radius-sm); padding: 10px; }
+.gcash-qr__hint { font-size: 13px; color: var(--ink-soft); }
 .cash__change .num.is-short { color: var(--danger); }
 
 .pick-list { display: flex; flex-direction: column; gap: 8px; }
@@ -847,6 +858,9 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .photo-pick__preview img { width: 100%; height: 100%; object-fit: cover; }
 .photo-pick__preview .ico { width: 28px; height: 28px; color: var(--ink-soft); }
 .photo-pick__actions { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+/* Bigger, uncropped preview — used for the GCash QR (a QR must never be cropped to stay scannable). */
+.photo-pick--lg .photo-pick__preview { width: 140px; height: 140px; }
+.photo-pick--lg .photo-pick__preview img { object-fit: contain; padding: 8px; }
 
 .cue-thumb { object-fit: cover; }
 
@@ -875,6 +889,68 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .cue-card__name { font-weight: 700; font-size: 14px; }
 .cue-card__meta { font-size: 12px; color: var(--ink-soft); }
 .cue-card__price { font-size: 16px; }
+
+/* ---------- cue stick showcase (fullscreen TV slideshow) ---------- */
+
+.showcase {
+  position: relative;
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 30% 20%, #163C29 0%, var(--felt-deep) 60%, #081A12 100%);
+  color: var(--ivory);
+  overflow: hidden;
+}
+.showcase__back {
+  position: absolute; top: 20px; left: 20px; z-index: 2;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  color: rgba(246, 243, 236, .55); text-decoration: none; font-size: 13px; font-weight: 600;
+  border: 1px solid rgba(246, 243, 236, .18); border-radius: 999px;
+  opacity: 0; transition: opacity .2s;
+}
+.showcase:hover .showcase__back, .showcase__back:focus-visible { opacity: 1; }
+.showcase__stage { width: min(1400px, 92vw); }
+.showcase__card {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: clamp(24px, 5vw, 72px);
+  animation: showcase-in .6s ease both;
+}
+@keyframes showcase-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+.showcase__photo {
+  aspect-ratio: 1 / 1;
+  display: grid; place-items: center;
+  border-radius: 28px;
+  background: rgba(246, 243, 236, .06);
+  border: 1px solid rgba(246, 243, 236, .12);
+  box-shadow: 0 40px 80px -30px rgba(0, 0, 0, .6);
+  overflow: hidden;
+}
+.showcase__photo img { width: 100%; height: 100%; object-fit: cover; }
+.showcase__photo .ico { width: 25%; height: 25%; color: rgba(246, 243, 236, .3); }
+.showcase__info { min-width: 0; }
+.showcase__eyebrow {
+  font-size: clamp(14px, 1.6vw, 20px); font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--amber);
+}
+.showcase__name {
+  margin-top: 14px;
+  font: 700 clamp(36px, 5.5vw, 76px)/1.05 var(--font-display);
+  overflow-wrap: break-word;
+}
+.showcase__meta { margin-top: 14px; font-size: clamp(16px, 2vw, 26px); color: rgba(246, 243, 236, .68); }
+.showcase__price { margin-top: 22px; font: 600 clamp(30px, 4.2vw, 56px)/1 var(--font-display); color: var(--ivory); }
+.showcase__empty { text-align: center; font-size: clamp(20px, 2.4vw, 32px); color: rgba(246, 243, 236, .7); }
+.showcase__empty .showcase__eyebrow { display: block; margin-bottom: 18px; }
+.showcase__dots {
+  position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 2;
+  display: flex; gap: 10px;
+}
+.showcase__dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(246, 243, 236, .25); }
+.showcase__dot.is-active { background: var(--amber); }
+@media (max-width: 900px) {
+  .showcase__card { grid-template-columns: minmax(0, 1fr); text-align: center; }
+  .showcase__photo { width: min(70vw, 420px); margin: 0 auto; }
+}
+@media (prefers-reduced-motion: reduce) { .showcase__card { animation: none; } }
 
 /* ---------- data tables ---------- */
 

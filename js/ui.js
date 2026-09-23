@@ -1,5 +1,6 @@
 import { ICONS } from './icons.js';
 import { serverNow, HALL_TZ, HALL_OFFSET_MS } from './clock.js';
+import { state } from './state.js';
 
 export const icon = (name, cls = '') =>
   `<svg class="ico ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name] || ''}</svg>`;
@@ -74,9 +75,18 @@ export const METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', split: 'Split', card
 
 /* ---------- small components ---------- */
 
-/** GCash reference input (last 5 digits), shown for GCash and Split payments on Checkout and Quick Sale. */
+/**
+ * GCash payment: the hall's own "Scan to Pay" QR (if the owner has uploaded one, via the GCash QR tool
+ * in the sidebar) so the customer can scan and pay right here, plus the reference input (last 5 digits)
+ * for the audit trail — shown for GCash and Split payments on Checkout, Quick Sale and Cue Sticks.
+ */
 export const gcashRefField = () => `
   <div class="cash" data-region="gcash-ref" hidden>
+    ${state.settings.gcashQr ? `
+    <div class="gcash-qr">
+      <img class="gcash-qr__img" src="${esc(state.settings.gcashQr)}" alt="GCash QR code">
+      <p class="gcash-qr__hint">Have the customer scan this to pay, then enter the reference number below.</p>
+    </div>` : ''}
     <div class="field">
       <label for="gcash-ref">GCash ref no. <span class="muted">(last 5 digits)</span></label>
       <input id="gcash-ref" type="text" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="e.g. 48213">
@@ -106,11 +116,12 @@ export function thumb(name, category, size = '') {
 }
 
 /** Icon-only Refresh / Thermal printer / Cash drawer buttons. Clicks are handled once, in app.js (data-tool). */
-export const toolIcons = (cls = '') => `
+export const toolIcons = (cls = '', owner = false) => `
   <div class="tool-icons ${cls}" role="group" aria-label="Tools">
     <button type="button" class="tool-btn" data-tool="refresh" aria-label="Refresh" title="Refresh">${icon('refresh')}</button>
     <button type="button" class="tool-btn" data-tool="printer" aria-label="Thermal printer" title="Thermal printer">${icon('print')}<span class="tool-dot" aria-hidden="true"></span></button>
     <button type="button" class="tool-btn" data-tool="drawer" aria-label="Cash drawer" title="Cash drawer">${icon('box')}</button>
+    ${owner ? `<button type="button" class="tool-btn" data-tool="gcash-qr" aria-label="GCash QR" title="GCash QR">${icon('qr')}</button>` : ''}
   </div>`;
 
 export const pageHeader = ({ title, subtitle = '', actions = '' }) => `

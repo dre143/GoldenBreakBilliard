@@ -149,8 +149,12 @@ export function manageTablesDialog() {
   render();
 }
 
-/** Shrinks a chosen photo to a small JPEG data URL so it can sit directly on a Firestore document. */
-function compressImage(file, maxSize = 640, quality = 0.7) {
+/**
+ * Shrinks a chosen photo to a small data URL so it can sit directly on a Firestore document.
+ * PNG (lossless) for anything with sharp edges that must stay scannable/legible, like a QR code —
+ * JPEG's compression artifacts can blur the fine modules enough that a phone camera can't read it.
+ */
+function compressImage(file, maxSize = 640, quality = 0.7, format = 'jpeg') {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -161,7 +165,7 @@ function compressImage(file, maxSize = 640, quality = 0.7) {
       canvas.width = Math.max(1, Math.round(img.width * scale));
       canvas.height = Math.max(1, Math.round(img.height * scale));
       canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', quality));
+      resolve(canvas.toDataURL(`image/${format}`, format === 'png' ? undefined : quality));
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read that image.')); };
     img.src = url;
@@ -856,4 +860,54 @@ export function cashDrawerDialog() {
   region.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target.id === 'new-drawer-pin') { e.preventDefault(); region.querySelector('[data-d=save-pin]')?.click(); }
   });
+}
+
+/**
+ * The hall's GCash "Scan to Pay" QR code (owner-only): upload once, and it's shown automatically at
+ * checkout whenever GCash or Split is chosen (gcashRefField() in js/ui.js), so the customer can scan
+ * and pay right there instead of needing a separate printed code at the counter. It's the hall's own
+ * merchant code — it carries no amount, so the customer still enters the total themselves, and the
+ * cashier still records the last 5 digits of the reference number afterward.
+ */
+export function gcashQrDialog() {
+  let qr = state.settings.gcashQr || null;
+  let off = () => {};
+  const { dlg } = openDialog({
+    title: 'GCash QR code',
+    cancelLabel: 'Close',
+    body: '<div data-region="qr"></div>',
+    onClose: () => off(),
+  });
+  const region = dlg.querySelector('[data-region=qr]');
+
+  const render = () => {
+    region.innerHTML = `
+      <p class="muted small">Shown to the customer at checkout whenever GCash or Split is picked, so they can scan and
+        pay. This is your hall's own "Scan to Pay" code from the GCash app — it doesn't carry an amount, so the
+        customer still enters the total themselves.</p>
+      <div class="photo-pick photo-pick--lg">
+        <span class="photo-pick__preview" aria-hidden="true">${qr ? `<img src="${esc(qr)}" alt="">` : icon('qr')}</span>
+        <div class="photo-pick__actions">
+          <input id="gcash-qr-file" type="file" accept="image/*" class="sr-only">
+          <label for="gcash-qr-file" class="btn btn--neutral btn--sm">${icon('camera')}${qr ? 'Change QR' : 'Upload QR'}</label>
+          ${qr ? '<button type="button" class="link-btn link-btn--danger" data-action="remove-qr">Remove</button>' : ''}
+        </div>
+      </div>`;
+    region.querySelector('#gcash-qr-file').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const compressed = await compressImage(file, 640, undefined, 'png');
+        await svc.setGcashQr(compressed);
+        toast('GCash QR saved.');
+      } catch (err) { toast(err.message, 'error'); }
+    });
+    region.querySelector('[data-action=remove-qr]')?.addEventListener('click', async () => {
+      await svc.removeGcashQr();
+      toast('GCash QR removed.');
+    });
+  };
+
+  off = on('settings', () => { qr = state.settings.gcashQr || null; render(); });
+  render();
 }

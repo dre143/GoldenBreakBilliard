@@ -9,6 +9,7 @@ import * as checkoutView from './views/checkout.js';
 import * as quickSaleView from './views/quick-sale.js';
 import * as inventoryView from './views/inventory.js';
 import * as cueSticksView from './views/cue-sticks.js';
+import * as showcaseView from './views/showcase.js';
 import * as transactionsView from './views/transactions.js';
 import * as dashboardView from './views/dashboard.js';
 import * as staffView from './views/staff.js';
@@ -17,7 +18,7 @@ import * as printer from './printer.js';
 import { startTimeAlerts } from './time-alerts.js';
 import { startHourAlerts } from './hour-alerts.js';
 import { isOwnerLevel, roleLabel, usersQuery } from './roles.js';
-import { printerDialog, cashDrawerDialog } from './dialogs.js';
+import { printerDialog, cashDrawerDialog, gcashQrDialog } from './dialogs.js';
 
 const root = document.getElementById('root');
 
@@ -40,6 +41,8 @@ const ROUTES = {
   checkout: { label: 'Checkout', icon: 'receipt', view: checkoutView },
   'quick-sale': { label: 'Quick Sale', icon: 'bag', view: quickSaleView },
   'cue-sticks': { label: 'Cue Sticks', icon: 'cue', view: cueSticksView },
+  // Not in the sidebar nav (see below) — a fullscreen TV display, reached from a link on Cue Sticks.
+  showcase: { label: 'Cue Stick Showcase', icon: 'cue', view: showcaseView },
   transactions: { label: 'Transactions', icon: 'list', view: transactionsView },
   dashboard: { label: 'Owner Dashboard', icon: 'chart', view: dashboardView, owner: true },
   reports: { label: 'Reports', icon: 'report', view: reportsView },
@@ -125,6 +128,7 @@ function startData() {
     db.listen('restocks', (rows) => set('restocks', rows), { where: [['createdAt', '>=', addDays(Date.now(), -7)]] }, onDataError),
     db.listenDoc('settings', 'shifts', (doc) => set('settings', { ...state.settings, twoShifts: !!doc?.twoShifts }), onDataError),
     db.listenDoc('settings', 'cashDrawer', (doc) => set('settings', { ...state.settings, drawerPinSet: !!doc?.pinHash }), onDataError),
+    db.listenDoc('settings', 'gcash', (doc) => set('settings', { ...state.settings, gcashQr: doc?.qrImage || null }), onDataError),
   ];
   printer.tryReconnect(); // quietly reconnect the last thermal printer, if the browser kept permission
   dataCleanups.push(startTimeAlerts()); // 15- and 5-minutes-left chimes for booked tables
@@ -188,7 +192,7 @@ function renderShell() {
       <header class="topbar">
         <button type="button" class="icon-btn icon-btn--light" data-action="toggle-nav" aria-controls="sidebar" aria-expanded="false" aria-label="Open navigation">${icon('menu')}</button>
         ${brandCompact()}
-        ${toolIcons('tool-icons--topbar')}
+        ${toolIcons('tool-icons--topbar', owner)}
       </header>
       <aside class="sidebar" id="sidebar">
         ${brand()}
@@ -207,6 +211,10 @@ function renderShell() {
         <button type="button" class="printer-btn printer-btn--drawer" data-tool="drawer">
           ${icon('box')}<span class="printer-btn__text">Cash drawer</span>
         </button>
+        ${owner ? `
+        <button type="button" class="printer-btn printer-btn--drawer" data-tool="gcash-qr">
+          ${icon('qr')}<span class="printer-btn__text">GCash QR</span>
+        </button>` : ''}
         <div class="user-chip">
           <span class="avatar" aria-hidden="true">${esc(initials(u.name))}</span>
           <span class="user-chip__text">
@@ -229,6 +237,7 @@ function renderShell() {
     setNav(false);
     if (tool === 'printer') printerDialog();
     else if (tool === 'drawer') cashDrawerDialog();
+    else if (tool === 'gcash-qr') gcashQrDialog();
     else if (tool === 'refresh') location.reload();
   });
   printerCleanup?.();
