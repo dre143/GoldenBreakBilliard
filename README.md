@@ -407,9 +407,10 @@ For **Set Hours** (booked) tables, every signed-in screen speaks a **5-minutes-l
 no voices). **Expiry** — the booked time itself running out — rings the real bell recording instead (the same one
 used for the *Hour-mark alert*), since that's also the instant **auto-stop** (see *Open Time vs Set Hours*) ends the
 session. Each alert fires once per game, tracked by the session's own start time rather than the table, so a **Transfer Table** move carries the
-already-fired state with it instead of re-alerting. Open Time tables have no end time, so neither applies to them —
-they still get the plain hourly chime below. Browsers only allow sound after the screen has been tapped once, so tap
-anywhere after opening the app.
+already-fired state with it instead of re-alerting. **Open Time has no booking, so none of this applies to it at all** —
+no 5-minutes-left warning, no expiry bell — it's left as a plain running table with no time-based sound of its own (it
+still gets the separate *hour-mark alert* below, which is about a whole hour of play passing, not a booking running out).
+Browsers only allow sound after the screen has been tapped once, so tap anywhere after opening the app.
 
 ### Tablet app (full screen, direct Bluetooth)
 

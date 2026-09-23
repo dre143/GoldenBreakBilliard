@@ -8,9 +8,8 @@
 //               unaffected and keeps its own overtime pricing past the first hour.
 // Each alert fires once per game on this device (remembered for the browser session, so a page reload
 // doesn't repeat it — and tracked by the session's start time, not the table id, so a Transfer Table move
-// carries this state with it rather than re-firing). Open Time tables have no booked length, so neither
-// alert applies to them — though every table still chimes at each ₱ step once it's in overtime (see
-// checkThresholds()).
+// carries this state with it rather than re-firing). Open Time has no booking to warn about or expire, so
+// none of this module's sounds apply to it at all — it only ever gets the (separate) hour-mark bell.
 // Runs on every screen while someone is signed in.
 import { state, on } from './state.js';
 import {
@@ -84,22 +83,14 @@ export function startTimeAlerts() {
     }).join('');
   }
 
-  // Chime once when a table goes into overtime (the card turns red) and once at each ₱ step after that.
-  // "Just" matters, so a tablet opened mid-overtime doesn't chime for a moment that passed long ago.
-  // Uses the same billingStatus() as the card, so the sound, the colour and the bill share one clock.
-  //
-  // EXPIRY: for a Set Hours table, overtimeStartMs is exactly the booked length (js/billing.js), so its
-  // 'overtime' moment is the instant the customer's paid-for time actually runs out — that's the real
-  // bell. Every later ₱ step stays the plain tone.
-  //
-  // An Open Time table's own 'overtime' moment is always its first hour of play — the same instant
-  // hour-alerts.js already rings the bell for (it does that for every running table, booked or not). A
-  // booking whose length happens to be a whole number of hours (a 1h/2h/3h preset) hits that same
-  // collision. Either way, skip this module's own sound there so it isn't doubled with that bell.
+  // EXPIRY, Set Hours only: chime once when the booking's time runs out (overtimeStartMs is exactly the
+  // booked length, js/billing.js) and once at each ₱ step after that, in case auto-stop hasn't caught up
+  // yet. "Just" matters, so a tablet opened mid-way through doesn't chime for a moment that passed long
+  // ago. Open Time has no booking, so it never reaches this loop at all — see the module header.
   function checkThresholds() {
     for (const t of state.tables) {
       const s = t.session;
-      if (!s) continue;
+      if (!s || !isTimed(s)) continue;
       const elapsed = elapsedMs(t);
       const b = billingStatus(s, elapsed);
       if (b.state !== 'reached') continue;
@@ -112,7 +103,7 @@ export function startTimeAlerts() {
         fired.add(id);
         saveFired(fired);
         if (kind === 'overtime' && at % HOUR_MS === 0) continue; // hour-alerts.js already rings for this instant
-        if (kind === 'overtime' && isTimed(s)) playHourBell();
+        if (kind === 'overtime') playHourBell();
         else playUrgentChime();
       }
     }
