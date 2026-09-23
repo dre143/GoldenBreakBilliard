@@ -10,7 +10,7 @@ import { updateTableTimers } from './shared.js';
 import { poolCard } from './pool-card.js';
 import {
   esc, icon, peso, fmtDuration, fmtCountdown, fmtTime, fmtBooking, statusBadge, thumb, pageHeader,
-  loadingBlock, emptyBlock, preserveFocus, busy, toast, openDialog, METHOD_LABEL, gcashRefField, wireGcashRef,
+  loadingBlock, emptyBlock, preserveFocus, busy, toast, openDialog, METHOD_LABEL, gcashRefField, gcashQrBlock, wireGcashRef,
 } from '../ui.js';
 
 export function mount(el, ctx) {
@@ -418,7 +418,14 @@ function mountBill(el, ctx, tableId) {
     }
   });
 
-  const offs = [on('tables', render), on('products', () => { const t = table(); if (built && t?.session) renderItems(t); }), on('tick', tick)];
+  const offs = [
+    on('tables', render),
+    on('products', () => { const t = table(); if (built && t?.session) renderItems(t); }),
+    on('tick', tick),
+    // The GCash QR loads via its own settings listener, which can resolve after this screen already
+    // built its static HTML — refresh just that region rather than relying on a one-time render.
+    on('settings', () => { const q = $('[data-region=gcash-qr]'); if (q) q.innerHTML = gcashQrBlock(); }),
+  ];
   render();
   return () => offs.forEach((off) => off());
 }

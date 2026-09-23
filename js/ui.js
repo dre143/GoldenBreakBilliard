@@ -76,17 +76,24 @@ export const METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', split: 'Split', card
 /* ---------- small components ---------- */
 
 /**
- * GCash payment: the hall's own "Scan to Pay" QR (if the owner has uploaded one, via the GCash QR tool
- * in the sidebar) so the customer can scan and pay right here, plus the reference input (last 5 digits)
- * for the audit trail — shown for GCash and Split payments on Checkout, Quick Sale and Cue Sticks.
+ * The hall's "Scan to Pay" QR, or nothing if the owner hasn't uploaded one yet. A separate function
+ * (not just inlined in gcashRefField() below) because the settings listener that loads it can resolve
+ * *after* a screen has already rendered — callers re-run this into the `[data-region=gcash-qr]` node
+ * on('settings', ...) fires, instead of baking a possibly-still-empty result in once at mount.
+ */
+export const gcashQrBlock = () => (state.settings.gcashQr ? `
+  <div class="gcash-qr">
+    <img class="gcash-qr__img" src="${esc(state.settings.gcashQr)}" alt="GCash QR code">
+    <p class="gcash-qr__hint">Have the customer scan this to pay, then enter the reference number below.</p>
+  </div>` : '');
+
+/**
+ * GCash payment: the QR block above plus the reference input (last 5 digits) for the audit trail —
+ * shown for GCash and Split payments on Checkout, Quick Sale and Cue Sticks.
  */
 export const gcashRefField = () => `
   <div class="cash" data-region="gcash-ref" hidden>
-    ${state.settings.gcashQr ? `
-    <div class="gcash-qr">
-      <img class="gcash-qr__img" src="${esc(state.settings.gcashQr)}" alt="GCash QR code">
-      <p class="gcash-qr__hint">Have the customer scan this to pay, then enter the reference number below.</p>
-    </div>` : ''}
+    <div data-region="gcash-qr">${gcashQrBlock()}</div>
     <div class="field">
       <label for="gcash-ref">GCash ref no. <span class="muted">(last 5 digits)</span></label>
       <input id="gcash-ref" type="text" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="e.g. 48213">

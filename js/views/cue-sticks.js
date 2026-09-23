@@ -8,7 +8,7 @@ import { receiptDialog, manageCueSticksDialog, cueThumb } from '../dialogs.js';
 import * as printer from '../printer.js';
 import {
   esc, icon, peso, pageHeader, emptyBlock, busy, toast, METHOD_LABEL, preserveFocus,
-  gcashRefField, wireGcashRef,
+  gcashRefField, gcashQrBlock, wireGcashRef,
 } from '../ui.js';
 import { isOwnerLevel } from '../roles.js';
 
@@ -240,7 +240,12 @@ export function mount(el, ctx) {
   $('#split-cash').addEventListener('input', tick);
   wireGcashRef(el);
 
-  const offs = [on('cueSticks', render)];
+  const offs = [
+    on('cueSticks', render),
+    // The GCash QR loads via its own settings listener, which can resolve after this screen already
+    // built its static HTML — refresh just that region rather than relying on a one-time render.
+    on('settings', () => { const q = $('[data-region=gcash-qr]'); if (q) q.innerHTML = gcashQrBlock(); }),
+  ];
   render();
   return () => offs.forEach((off) => off());
 }
