@@ -132,37 +132,23 @@ One rate for every table (`PRICING` in `js/billing.js`):
 | 2:06:00 and every 15 minutes after | + ₱50 each (₱450, ₱500, ₱550, …) |
 
 The grace period exists so a customer who says "end na ko" at 1:00 isn't charged another ₱50 because the cashier was busy.
-It is **not** free time: the clock keeps counting the real elapsed time (an Open Time table card shows e.g. `Overtime
-+00:04:30` next to `Bill ₱200.00`, then `+00:06:00` next to `₱250.00`), and it is not transferable. One customer is one
-session is one transaction; a new session always pays its own first hour. **A Set Hours booking never actually lingers in
-this window** — see *Auto-stop* below — so the grace period and the fee steps past it are, in practice, an Open Time thing.
+It is **not** free time: the clock keeps counting the real elapsed time — an Open Time table card's second line switches
+from "Rate" to "Extra time" once the first hour is used up, and keeps climbing (`+00:04:30`, then `+00:06:00`) right next
+to the bill as it steps up — and it is not transferable. One customer is one session is one transaction; a new session
+always pays its own first hour. **A Set Hours booking never actually lingers in this window** — see *Auto-stop* below —
+so the grace period and the fee steps past it are, in practice, an Open Time thing.
 
-### Overtime colour on the table card
-
-The card shows overtime by its look (no text banner, so every card keeps the same size). The colour follows the time that was
-**booked**; the 5-minute grace period only affects the bill, never the colour:
-
-| Table state | Card look | Bill |
-|---|---|---|
-| more than 5 min before the booked time ends (Open Time: before 0:55:00) | normal | ₱200 |
-| last 5 min before it ends (a 1h booking: 0:55:00 - 1:00:00) | yellow border, soft pulse | ₱200 |
-| overtime, from 1:00:01 on a 1h booking | **red** border and rail, red pulse, bill in a red pill, one chime | ₱200 until 1:05:59 (grace), ₱250 at 1:06:00, ₱300 at 1:21:00, ... |
-
-On an **Open Time** table, once red it stays red until checkout; the fee steps (1:06, 1:21, 1:36, ...) don't change the
-colour, but each plays one chime. Open Time counts overtime from the end of the first hour.
-On a **Set Hours** table this red state is only ever momentary: *Auto-stop* (below) ends the session the instant the booked
-time is reached, so the card flips straight to "Clock Stopped" rather than sitting in overtime.
-`billingStatus()` in `js/billing.js` uses the same elapsed time as the bill, so colour, animation, chime and amount can't
-disagree. Screen readers hear "Approaching overtime" / "Overtime". A stopped or cancelled clock shows nothing.
+The card carries no colour or alarm state for this — past the first hour (or the booking) it looks exactly like any other
+running table, just with "Extra time" and a bill that keeps climbing. The only things that ever change a card's look are
+the **hour-mark alert** (amber/red rail before each whole hour, see below) and a table actually stopping.
 
 ### Open Time vs Set Hours
 
-- **Open Time:** the clock runs until the cashier stops it. Billed on the time actually played. Can run into overtime
-  (see above) for as long as the table is left running.
+- **Open Time:** the clock runs until the cashier stops it, billed on the time actually played, for as long as the table
+  is left running — the card just keeps counting up ("Extra time") and the bill keeps climbing per the rate table.
 - **Set Hours:** the customer books a length, e.g. 1h, 2h, 3h, or a custom length in 15-minute steps. The card counts down
-  "Time left", turns amber in the last 5 minutes, and **auto-stops** — ends the session itself, exactly like the cashier
-  tapping End Session — the instant the booking runs out. There is no overtime to walk into: the table just stops, waiting
-  for payment.
+  "Time left", and **auto-stops** — ends the session itself, exactly like the cashier tapping End Session — the instant
+  the booking runs out.
   - **Auto-stop:** `checkAutoStop()` in `js/time-alerts.js` runs on the same one-second tick as everything else; whichever
     signed-in device notices the booked time has been reached calls the same `endSession()` the End Session button uses.
     That function only ends a session that isn't already ended, inside one Firestore transaction, so two devices noticing
@@ -210,7 +196,7 @@ receipt and freeing the table, so two terminals can't oversell stock or bill a t
 
 ## Screens: what lives where
 
-- **Tables grid.** Each card is a small top-down pool table, built so you can scan the floor and act in one tap. Navy cloth with a green LED means In Use; pale cloth with an unlit display means Available. The cards show no buttons: tap a table to open its actions. A free table offers **Open Time** or **Set Hours**; a running table offers **Stop & Bill**, which opens Checkout (on the Checkout screen, tapping a running table goes straight to its bill), and **Transfer Table** to move the game to another table (see below). Booked tables show time left, or overtime in amber. A running table also warns before each whole hour (see *Hour-mark alert*).
+- **Tables grid.** Each card is a small top-down pool table, built so you can scan the floor and act in one tap. Navy cloth with a green LED means In Use; pale cloth with an unlit display means Available. The cards show no buttons: tap a table to open its actions. A free table offers **Open Time** or **Set Hours**; a running table offers **Stop & Bill**, which opens Checkout (on the Checkout screen, tapping a running table goes straight to its bill), and **Transfer Table** to move the game to another table (see below). Booked tables count down time left, then show extra time once it runs out. A running table also warns before each whole hour (see *Hour-mark alert*).
 - **Checkout** (one table). This is where you manage a running table: **Add time** / **Set hours**, End Session, **Add Item**, cancel a game in its first 5 minutes, and payment.
 - **Top bar (phones and tablets).** Phones and tablets, in either orientation, get a top bar with **refresh**, the **thermal printer** and the **cash drawer**; the sidebar becomes a slide-out menu. On a desktop with a mouse the sidebar keeps labeled printer and cash drawer buttons.
 - The navy "device display" look is used only for live table equipment (the table cards and the checkout timer). The rest of the app stays ivory and felt green, so a dark card always means a running table.
@@ -326,9 +312,9 @@ behind the counter or near the tables, not a screen staff use day to day.
   (sold ones drop out) — photo, name, brand/weight, price. Auto-advances every 7 seconds, with a small
   dot indicator. A cue with no photo yet falls back to a plain cue icon rather than leaving a gap.
 - **Table Status is the real thing, not a summary:** it's `poolCard()` (`js/views/pool-card.js`), the
-  exact same card the Tables screen itself uses — timer, bill, rate, the hour-mark warning and overtime
-  red, all of it — kept ticking live once a second by the same `updateTableTimers()` helper the Tables
-  screen uses. If it's on the floor grid, it's on the TV.
+  exact same card the Tables screen itself uses — timer, bill, rate, the hour-mark warning, all of it —
+  kept ticking live once a second by the same `updateTableTimers()` helper the Tables screen uses. If
+  it's on the floor grid, it's on the TV.
 - **Live, not a slideshow file:** it reads the same `state.tables`/`state.cueSticks` as the rest of the
   app, so a table freeing up, a new cue, or one selling out updates the loop on its own — nothing here is
   ever exported or re-uploaded by hand.

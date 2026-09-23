@@ -1,5 +1,5 @@
 import {
-  elapsedMs, currentBill, PRICING, isTimed, remainingMs, overtimeMs, billingStatus,
+  elapsedMs, currentBill, PRICING, isTimed, remainingMs, overtimeMs,
 } from '../billing.js';
 import { esc, icon, peso, fmtDuration, fmtBooking } from '../ui.js';
 import { visibleHourLevel } from '../hour-alerts.js';
@@ -13,41 +13,24 @@ const POCKETS = ['tl', 'tr', 'ml', 'mr', 'bl', 'br']
   .map((p) => `<span class="pocket pocket--${p}" aria-hidden="true"></span>`).join('');
 
 /**
- * The card's second readout. A booked table counts down "Time left", then shows "Overtime" past the booking.
- * An Open Time table shows its rate until the first hour is used up, then "Overtime" too (time past 1:00:00).
- * Overtime is only what the customer has played beyond that point; the bill next to it comes from
- * calculateBilliardBill, so during the 5-minute grace it reads e.g. "Overtime +00:04:30 / Bill ₱200.00".
+ * The card's second readout. A booked table counts down "Time left", then shows "Extra time" once the
+ * booking runs out. An Open Time table shows its rate for the first hour, then "Extra time" for as long
+ * as it keeps running. This is purely informational — the bill next to it comes from
+ * calculateBilliardBill on the actual elapsed time either way; there's no separate colour or state tied
+ * to it, just the running total.
  */
 export function bookingStatus(t, elapsed) {
   if (isTimed(t.session)) {
     const over = overtimeMs(t.session, elapsed);
     return over > 0
-      ? { label: 'Overtime', value: `+${fmtDuration(over)}`, over: true }
-      : { label: 'Time left', value: fmtDuration(remainingMs(t.session, elapsed)), over: false };
+      ? { label: 'Extra time', value: `+${fmtDuration(over)}` }
+      : { label: 'Time left', value: fmtDuration(remainingMs(t.session, elapsed)) };
   }
   const over = elapsed - PRICING.baseMinutes * 60000;
   return over > 0
-    ? { label: 'Overtime', value: `+${fmtDuration(over)}`, over: true }
-    : { label: 'Rate', value: `₱${PRICING.basePrice} / 1st hr`, over: false };
+    ? { label: 'Extra time', value: `+${fmtDuration(over)}` }
+    : { label: 'Rate', value: `₱${PRICING.basePrice} / 1st hr` };
 }
-
-/**
- * The billing status as text for screen readers (no visible banner: the card's yellow/red look, the highlighted bill
- * and the Overtime readout carry it). The state comes from billingStatus() (js/billing.js), the same calculation
- * that produces the bill.
- */
-export const BILLING_ALERT_TEXT = {
-  approaching: ['APPROACHING', 'OVERTIME'],
-  reached: ['OVERTIME'],
-};
-
-export function billingAlertInner(state) {
-  const text = BILLING_ALERT_TEXT[state];
-  return text ? text.join(' ') : '';
-}
-
-/** Card modifier for a billing state ('' when normal). */
-export const billingClass = (state) => (state === 'approaching' ? 'pool--approaching' : state === 'reached' ? 'pool--threshold' : '');
 
 /**
  * Top-down pool table card for the floor grid. One glance: dark navy cloth with a lit LED = In Use,
@@ -59,12 +42,11 @@ export function poolCard(t, { picker = false } = {}) {
   const live = t.status === 'in_use' && Boolean(t.session);
   const stopped = live && t.session.ended;
   const timed = live && isTimed(t.session);
-  const now = serverNow(); // one instant for the timer, the bill and the billing status, so they can't disagree
+  const now = serverNow(); // one instant for the timer and the bill, so they can't disagree
   const elapsed = live ? elapsedMs(t, now) : 0;
   const booking = live ? bookingStatus(t, elapsed) : null;
   // Hour-mark alert (5 min / 1 min before each whole hour): a state layered on a running card, see hour-alerts.js.
   const hourLevel = live && !stopped ? visibleHourLevel(t) : null;
-  const billing = live ? billingStatus(t.session, elapsed) : null;
   const id = esc(t.id);
   // Stopped tables are still In Use (unpaid); the navy cloth says so visually, the sr-only prefix says it aloud.
   const status = !live ? 'Available'
@@ -72,13 +54,12 @@ export function poolCard(t, { picker = false } = {}) {
       : `<span class="sr-only">In Use, </span>${timed ? `Booked ${esc(fmtBooking(t.session.plannedMs))}` : 'Open Time'}`;
 
   return `
-    <article class="pool ${live ? 'pool--live' : 'pool--idle'}${stopped ? ' pool--stopped' : ''}${booking?.over && !stopped ? ' pool--overtime' : ''}${hourLevel ? ` pool--hour-${hourLevel}` : ''}${billing && billingClass(billing.state) ? ` ${billingClass(billing.state)}` : ''}" aria-labelledby="pool-${id}" data-pool="${id}">
+    <article class="pool ${live ? 'pool--live' : 'pool--idle'}${stopped ? ' pool--stopped' : ''}${hourLevel ? ` pool--hour-${hourLevel}` : ''}" aria-labelledby="pool-${id}" data-pool="${id}">
       <h2 class="pool__plate" id="pool-${id}">${esc(t.name)}</h2>
       <div class="pool__table">
         ${POCKETS}
         <div class="pool__cloth">
           <p class="pool__status">${live ? NINE_BALL : '<span class="pool__lamp" aria-hidden="true"></span>'}${status}</p>
-          ${live ? `<div class="pool__alert pool__alert--${billing.state}" data-alert="${id}" data-alert-state="${billing.state}" role="status" aria-live="polite"${billing.state === 'normal' ? ' hidden' : ''}>${billingAlertInner(billing.state)}</div>` : ''}
           <div class="led">
             ${live
               ? `<span class="led__digits num" data-elapsed="${id}">${fmtDuration(elapsed)}</span>`

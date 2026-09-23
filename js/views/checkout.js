@@ -246,8 +246,7 @@ function mountBill(el, ctx, tableId) {
     setText('fee', peso(fee));
     if (isTimed(s)) {
       const over = overtimeMs(s, ms);
-      setText('booking', over > 0 ? `Overtime +${fmtDuration(over)}${bill.inGrace ? ' · grace period, no extra charge yet' : ''}` : `Time left ${fmtDuration(remainingMs(s, ms))}`);
-      $('[data-live=booking]')?.classList.toggle('is-over', over > 0);
+      setText('booking', over > 0 ? `Extra time +${fmtDuration(over)}${bill.inGrace ? ' · grace period, no extra charge yet' : ''}` : `Time left ${fmtDuration(remainingMs(s, ms))}`);
     }
     // Tell staff when the fee next goes up, counted on the time actually played.
     const nextAt = bill.nextIncreaseAtMs;
