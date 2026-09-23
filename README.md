@@ -322,10 +322,13 @@ behind the counter or near the tables, not a screen staff use day to day.
 - **Where it lives:** `#/showcase` (`js/views/showcase.js`), reached from the **Open Showcase** link on
   the Cue Sticks page, or as the forced landing screen for a **Display** account (below). It's a real
   route but deliberately left out of the sidebar, since nobody needs it in their daily nav.
-- **What it shows, on a loop:** one **Table Status** slide (every table's name and Available/In Use, no
-  bill, no timer — just whether a customer can walk up to it), then one slide per *available* cue stick
+- **What it shows, on a loop:** one **Table Status** slide, then one slide per *available* cue stick
   (sold ones drop out) — photo, name, brand/weight, price. Auto-advances every 7 seconds, with a small
   dot indicator. A cue with no photo yet falls back to a plain cue icon rather than leaving a gap.
+- **Table Status is the real thing, not a summary:** it's `poolCard()` (`js/views/pool-card.js`), the
+  exact same card the Tables screen itself uses — timer, bill, rate, the hour-mark warning and overtime
+  red, all of it — kept ticking live once a second by the same `updateTableTimers()` helper the Tables
+  screen uses. If it's on the floor grid, it's on the TV.
 - **Live, not a slideshow file:** it reads the same `state.tables`/`state.cueSticks` as the rest of the
   app, so a table freeing up, a new cue, or one selling out updates the loop on its own — nothing here is
   ever exported or re-uploaded by hand.

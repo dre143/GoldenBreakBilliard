@@ -12,27 +12,21 @@ import * as svc from '../services.js';
 import { auth } from '../db.js';
 import { esc, peso, icon } from '../ui.js';
 import { isDisplay } from '../roles.js';
+import { poolCard } from './pool-card.js';
+import { updateTableTimers } from './shared.js';
 
 const SLIDE_MS = 7000;
 
+// The exact same card the Tables screen uses — same timer, bill, rate, hour-mark and overtime states —
+// so the TV shows the real thing, not a simplified summary. updateTableTimers() (below) keeps it ticking
+// live once a second, the same way the Tables screen's own grid does.
 function tablesSlide() {
   const tables = [...state.tables].sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
   return `
     <div class="showcase__tables">
       <p class="showcase__eyebrow">Golden Break Billiard Hall</p>
       <h1 class="showcase__tables-title">Table Status</h1>
-      ${tables.length ? `
-      <div class="showcase__table-grid">
-        ${tables.map((t) => {
-          const occupied = t.status === 'in_use';
-          return `
-          <div class="showcase__table-card ${occupied ? 'is-occupied' : 'is-open'}">
-            <span class="showcase__table-dot" aria-hidden="true"></span>
-            <span class="showcase__table-name">${esc(t.name)}</span>
-            <span class="showcase__table-status">${occupied ? 'In Use' : 'Available'}</span>
-          </div>`;
-        }).join('')}
-      </div>` : '<p class="showcase__meta">No tables yet.</p>'}
+      ${tables.length ? `<div class="pool-grid showcase__pool-grid">${tables.map((t) => poolCard(t)).join('')}</div>` : '<p class="showcase__meta">No tables yet.</p>'}
     </div>`;
 }
 
@@ -108,6 +102,7 @@ export function mount(el) {
   const offs = [
     on('cueSticks', () => { if (index >= slides().length) index = 0; render(); }),
     on('tables', render),
+    on('tick', () => { if (slides()[index]?.type === 'tables') updateTableTimers(stage); }),
   ];
   render();
   restart();
