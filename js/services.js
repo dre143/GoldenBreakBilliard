@@ -147,14 +147,14 @@ export function changeItem(tableId, productId, delta) {
 export const PAYMENT_METHODS = ['cash', 'gcash', 'split'];
 
 /**
- * GCash reference: the cashier types the last 5 digits of the customer's GCash reference number for
- * any payment with a GCash part (GCash or Split), so the owner can match it to the GCash history.
- * Returns the 5 digits, or null when nothing was paid by GCash.
+ * QRPH reference: the cashier types the last 5 digits of the customer's QRPH reference number for
+ * any payment with a QRPH part (QRPH or Split), so the owner can match it to the QRPH history.
+ * Returns the 5 digits, or null when nothing was paid by QRPH.
  */
 export function gcashRefFor(method, ref) {
   if (method !== 'gcash' && method !== 'split') return null;
   const digits = String(ref ?? '').replace(/\D/g, '');
-  if (digits.length !== 5) throw new Error('Enter the last 5 digits of the GCash reference number.');
+  if (digits.length !== 5) throw new Error('Enter the last 5 digits of the QRPH reference number.');
   return digits;
 }
 
@@ -172,7 +172,7 @@ export class TotalChangedError extends Error {
  * Close the bill.
  * 1. If the clock is still running, stop it (server-stamped end time).
  * 2. In a transaction, re-read the session and bill exactly: fee from the stored start/end stamps.
- * method: 'cash' (optional tendered → change), 'gcash', or 'split' (cashPart in cash, rest GCash).
+ * method: 'cash' (optional tendered → change), 'gcash', or 'split' (cashPart in cash, rest QRPH).
  * expectedTotal: the total the cashier saw; if the final total differs, nothing is saved and
  * TotalChangedError tells the UI to show the final amount (the clock stays stopped).
  */
@@ -365,10 +365,10 @@ export const setTwoShifts = (on) =>
   db.set('settings', 'shifts', { twoShifts: !!on, updatedAt: SERVER_TIME }, { merge: true }).then(() => !!on);
 
 /**
- * The hall's own GCash "Scan to Pay" QR code, shown at checkout whenever GCash or Split is chosen. It's
- * a static merchant QR (no amount encoded), the same as a printed one taped at the counter — the
- * customer still enters the total in their own GCash app, and the cashier still records the last 5
- * digits of the reference number for the audit trail.
+ * The hall's own QRPH "Scan to Pay" code, shown at checkout whenever QRPH or Split is chosen. It's
+ * a static merchant QR (no amount encoded), the same as a printed one taped at the counter — any
+ * QRPH-compatible banking or e-wallet app can scan it, the customer still enters the total themselves,
+ * and the cashier still records the last 5 digits of the reference number for the audit trail.
  */
 export const setGcashQr = (qrImage) =>
   db.set('settings', 'gcash', { qrImage, updatedAt: SERVER_TIME }, { merge: true });

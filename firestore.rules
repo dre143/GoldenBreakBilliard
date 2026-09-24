@@ -358,7 +358,7 @@ service cloud.firestore {
         && request.resource.data.cashierId == request.auth.uid
         && (request.resource.data.method in ['cash', 'gcash', 'split']
             || (request.resource.data.method == 'none' && request.resource.data.total == 0))
-        // Any GCash part needs the last 5 digits of the GCash reference number.
+        // Any QRPH part needs the last 5 digits of the QRPH reference number.
         && (!(request.resource.data.method in ['gcash', 'split'])
             || (request.resource.data.get('gcashRef', null) is string
                 && request.resource.data.gcashRef.matches('^[0-9]{5}$')))

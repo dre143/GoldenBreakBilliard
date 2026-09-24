@@ -71,7 +71,7 @@ export const initials = (name) =>
 export const isOnline = (u) => !!u.online && (u.demoPresence || serverNow() - (u.lastSeen || 0) < 3 * 60000);
 
 // 'card' is kept only so older transactions still display a label; it's no longer offered.
-export const METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', split: 'Split', card: 'Card', none: 'No charge' };
+export const METHOD_LABEL = { cash: 'Cash', gcash: 'QRPH', split: 'Split', card: 'Card', none: 'No charge' };
 
 /* ---------- small components ---------- */
 
@@ -83,24 +83,24 @@ export const METHOD_LABEL = { cash: 'Cash', gcash: 'GCash', split: 'Split', card
  */
 export const gcashQrBlock = () => (state.settings.gcashQr ? `
   <div class="gcash-qr">
-    <img class="gcash-qr__img" src="${esc(state.settings.gcashQr)}" alt="GCash QR code">
+    <img class="gcash-qr__img" src="${esc(state.settings.gcashQr)}" alt="QRPH code">
     <p class="gcash-qr__hint">Have the customer scan this to pay, then enter the reference number below.</p>
   </div>` : '');
 
 /**
- * GCash payment: the QR block above plus the reference input (last 5 digits) for the audit trail —
- * shown for GCash and Split payments on Checkout, Quick Sale and Cue Sticks.
+ * QRPH payment: the QR block above plus the reference input (last 5 digits) for the audit trail —
+ * shown for QRPH and Split payments on Checkout, Quick Sale and Cue Sticks.
  */
 export const gcashRefField = () => `
   <div class="cash" data-region="gcash-ref" hidden>
     <div data-region="gcash-qr">${gcashQrBlock()}</div>
     <div class="field">
-      <label for="gcash-ref">GCash ref no. <span class="muted">(last 5 digits)</span></label>
+      <label for="gcash-ref">QRPH ref no. <span class="muted">(last 5 digits)</span></label>
       <input id="gcash-ref" type="text" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="e.g. 48213">
     </div>
   </div>`;
 
-/** Keep only digits in the GCash reference input while typing. */
+/** Keep only digits in the QRPH reference input while typing. */
 export function wireGcashRef(root) {
   const input = root.querySelector('#gcash-ref');
   input?.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, 5); });
@@ -128,7 +128,7 @@ export const toolIcons = (cls = '', owner = false) => `
     <button type="button" class="tool-btn" data-tool="refresh" aria-label="Refresh" title="Refresh">${icon('refresh')}</button>
     <button type="button" class="tool-btn" data-tool="printer" aria-label="Thermal printer" title="Thermal printer">${icon('print')}<span class="tool-dot" aria-hidden="true"></span></button>
     <button type="button" class="tool-btn" data-tool="drawer" aria-label="Cash drawer" title="Cash drawer">${icon('box')}</button>
-    ${owner ? `<button type="button" class="tool-btn" data-tool="gcash-qr" aria-label="GCash QR" title="GCash QR">${icon('qr')}</button>` : ''}
+    ${owner ? `<button type="button" class="tool-btn" data-tool="gcash-qr" aria-label="QRPH code" title="QRPH code">${icon('qr')}</button>` : ''}
   </div>`;
 
 export const pageHeader = ({ title, subtitle = '', actions = '' }) => `

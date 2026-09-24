@@ -472,7 +472,7 @@ export function receiptDialog(tx, { fresh = false } = {}) {
         <div class="void-banner" role="note">
           <span class="badge badge--danger">Table fee voided</span>
           <span>${esc(tx.voidReason)}${tx.voidNote ? ` · “${esc(tx.voidNote)}”` : ''}<br>
-            <span class="muted small">By ${esc(tx.tableFeeVoidedByName)} at ${fmtDateTime(tx.tableFeeVoidedAt)}. ${peso(tx.refundAmount)} refunded via ${tx.refundMethod === 'gcash' ? 'GCash' : 'Cash'}.</span></span>
+            <span class="muted small">By ${esc(tx.tableFeeVoidedByName)} at ${fmtDateTime(tx.tableFeeVoidedAt)}. ${peso(tx.refundAmount)} refunded via ${tx.refundMethod === 'gcash' ? 'QRPH' : 'Cash'}.</span></span>
         </div>` : ''}
         <div class="receipt__head">
           <p class="receipt__table">${tx.tableId ? esc(tx.tableName) : tx.saleType === 'cue-stick' ? 'Cue Stick Sale' : 'Walk-in sale'}</p>
@@ -499,10 +499,10 @@ export function receiptDialog(tx, { fresh = false } = {}) {
         </div>
         <dl class="sum-lines">
           <div class="sum-row"><dt>Paid via</dt><dd>${METHOD_LABEL[tx.method] || esc(tx.method)}</dd></div>
-          ${tx.gcashRef ? `<div class="sum-row"><dt>GCash ref no. (last 5)</dt><dd class="num">${esc(tx.gcashRef)}</dd></div>` : ''}
+          ${tx.gcashRef ? `<div class="sum-row"><dt>QRPH ref no. (last 5)</dt><dd class="num">${esc(tx.gcashRef)}</dd></div>` : ''}
           ${tx.method === 'split' && tx.payments ? `
           <div class="sum-row"><dt>Cash</dt><dd class="num">${peso(tx.payments.cash)}</dd></div>
-          <div class="sum-row"><dt>GCash</dt><dd class="num">${peso(tx.payments.gcash)}</dd></div>` : ''}
+          <div class="sum-row"><dt>QRPH</dt><dd class="num">${peso(tx.payments.gcash)}</dd></div>` : ''}
           ${tx.tendered != null ? `
           <div class="sum-row"><dt>Cash tendered</dt><dd class="num">${peso(tx.tendered)}</dd></div>
           <div class="sum-row sum-row--strong"><dt>Change</dt><dd class="num">${peso(tx.change)}</dd></div>` : ''}
@@ -815,7 +815,7 @@ export function cashDrawerDialog() {
         <div>
           <p class="drawer-row__title">On cash pay</p>
           <p class="muted small">${onCash
-            ? 'The drawer opens when a customer pays cash (or the cash part of a split). GCash leaves it closed.'
+            ? 'The drawer opens when a customer pays cash (or the cash part of a split). QRPH leaves it closed.'
             : 'The drawer stays closed during sales. Use Open drawer when you need it.'}</p>
         </div>
         <button type="button" class="btn ${onCash ? 'btn--primary' : 'btn--neutral'} btn--sm" data-d="toggle" aria-pressed="${onCash}">${onCash ? 'On' : 'Off'}</button>
@@ -864,8 +864,8 @@ export function cashDrawerDialog() {
 }
 
 /**
- * The hall's GCash "Scan to Pay" QR code (owner-only): upload once, and it's shown automatically at
- * checkout whenever GCash or Split is chosen (gcashRefField() in js/ui.js), so the customer can scan
+ * The hall's QRPH "Scan to Pay" code (owner-only): upload once, and it's shown automatically at
+ * checkout whenever QRPH or Split is chosen (gcashRefField() in js/ui.js), so the customer can scan
  * and pay right there instead of needing a separate printed code at the counter. It's the hall's own
  * merchant code — it carries no amount, so the customer still enters the total themselves, and the
  * cashier still records the last 5 digits of the reference number afterward.
@@ -874,7 +874,7 @@ export function gcashQrDialog() {
   let qr = state.settings.gcashQr || null;
   let off = () => {};
   const { dlg } = openDialog({
-    title: 'GCash QR code',
+    title: 'QRPH code',
     cancelLabel: 'Close',
     body: '<div data-region="qr"></div>',
     onClose: () => off(),
@@ -883,9 +883,9 @@ export function gcashQrDialog() {
 
   const render = () => {
     region.innerHTML = `
-      <p class="muted small">Shown to the customer at checkout whenever GCash or Split is picked, so they can scan and
-        pay. This is your hall's own "Scan to Pay" code from the GCash app — it doesn't carry an amount, so the
-        customer still enters the total themselves.</p>
+      <p class="muted small">Shown to the customer at checkout whenever QRPH or Split is picked, so they can scan and
+        pay. This is your hall's own "Scan to Pay" QRPH code — any QRPH-compatible banking or e-wallet app can scan
+        it. It doesn't carry an amount, so the customer still enters the total themselves.</p>
       <div class="photo-pick photo-pick--lg">
         <span class="photo-pick__preview" aria-hidden="true">${qr ? `<img src="${esc(qr)}" alt="">` : icon('qr')}</span>
         <div class="photo-pick__actions">
@@ -900,12 +900,12 @@ export function gcashQrDialog() {
       try {
         const compressed = await compressImage(file, 640, undefined, 'png');
         await svc.setGcashQr(compressed);
-        toast('GCash QR saved.');
+        toast('QRPH code saved.');
       } catch (err) { toast(err.message, 'error'); }
     });
     region.querySelector('[data-action=remove-qr]')?.addEventListener('click', async () => {
       await svc.removeGcashQr();
-      toast('GCash QR removed.');
+      toast('QRPH code removed.');
     });
   };
 

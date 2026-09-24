@@ -233,7 +233,7 @@ test('quick sale: backdated sale time is rejected, same as a table sale', async 
   await assertFails(quickSale(as('joy'), { createdAt: ts(Date.now() - 60 * MIN) }));
 });
 
-test('GCash and split payments need the last 5 digits of the GCash reference number', async () => {
+test('QRPH and split payments need the last 5 digits of the QRPH reference number', async () => {
   const joy = as('joy');
   const gcash = (gcashRef, txId) => quickSale(joy, { txId, extra: { method: 'gcash', payments: { cash: 0, gcash: 170 }, tendered: null, change: null, ...(gcashRef === undefined ? {} : { gcashRef }) } });
   const split = (gcashRef, txId) => quickSale(joy, { txId, extra: { method: 'split', payments: { cash: 70, gcash: 100 }, tendered: null, change: null, gcashRef } });

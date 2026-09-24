@@ -72,7 +72,7 @@ export function mount(el, ctx) {
               <input id="split-cash" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Amount paid in cash">
             </div>
             <div class="cash__change">
-              <span>GCash portion (balance)</span>
+              <span>QRPH portion (balance)</span>
               <span class="num" data-live="split-gcash">—</span>
             </div>
           </div>
@@ -231,7 +231,7 @@ export function mount(el, ctx) {
     const cashPart = method === 'split' ? Number(splitRaw) : null;
     const gcashRef = $('#gcash-ref').value;
     if ((method === 'gcash' || method === 'split') && gcashRef.length !== 5) {
-      toast('Enter the last 5 digits of the GCash reference number.', 'error');
+      toast('Enter the last 5 digits of the QRPH reference number.', 'error');
       $('#gcash-ref').focus();
       return;
     }
@@ -275,7 +275,7 @@ export function mount(el, ctx) {
 
   const offs = [
     on('products', render),
-    // The GCash QR loads via its own settings listener, which can resolve after this screen already
+    // The QRPH code loads via its own settings listener, which can resolve after this screen already
     // built its static HTML — refresh just that region rather than relying on a one-time render.
     on('settings', () => { const q = $('[data-region=gcash-qr]'); if (q) q.innerHTML = gcashQrBlock(); }),
   ];

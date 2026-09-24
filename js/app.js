@@ -220,7 +220,7 @@ function renderShell() {
         </button>
         ${owner ? `
         <button type="button" class="printer-btn printer-btn--drawer" data-tool="gcash-qr">
-          ${icon('qr')}<span class="printer-btn__text">GCash QR</span>
+          ${icon('qr')}<span class="printer-btn__text">QRPH code</span>
         </button>` : ''}
         <div class="user-chip">
           <span class="avatar" aria-hidden="true">${esc(initials(u.name))}</span>

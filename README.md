@@ -89,7 +89,7 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
 - `products/{id}` — `name, category, price, stock, reorderLevel, lastRestockedAt`
 - `restocks/{id}` — restock log (feeds "Restocked this week")
 - `cueSticks/{id}` — `name, brand, weight, price, photo, status (available|sold), soldAt, soldTxId, soldByName` — see **Cue Sticks** below
-- `transactions/{id}` — `tableId`/`tableName`, `startedAt`/`endedAt`/`durationMs` copied from the session, `mode` (open | timed), `plannedMs`, `billedMs`, `pricing` used, table fee, rounds, line items, totals, `method` (cash | gcash | split, or none for a ₱0 cancelled game), `payments {cash, gcash}`, cashier, `createdAt` (server time); a cancelled game also carries `gameCancelled`, `cancelReason`, `cancelNote`, `cancelledById`, `cancelledByName` (older sales may carry the retired `tableFeeVoided…` fields). While a game is open, a cancel is stored as `session.cancelled = { reason, note, byId, byName, at }`. A **Quick Sale** (walk-in) has `tableId: null` and no table-session fields — see below. A **Cue Sticks** sale instead carries `saleType: 'cue-stick'` and `cueStickTotal` (kept apart from `productTotal` so it reports separately).
+- `transactions/{id}` — `tableId`/`tableName`, `startedAt`/`endedAt`/`durationMs` copied from the session, `mode` (open | timed), `plannedMs`, `billedMs`, `pricing` used, table fee, rounds, line items, totals, `method` (cash | gcash | split, or none for a ₱0 cancelled game), `payments {cash, gcash}`, cashier, `createdAt` (server time); a cancelled game also carries `gameCancelled`, `cancelReason`, `cancelNote`, `cancelledById`, `cancelledByName` (older sales may carry the retired `tableFeeVoided…` fields). While a game is open, a cancel is stored as `session.cancelled = { reason, note, byId, byName, at }`. A **Quick Sale** (walk-in) has `tableId: null` and no table-session fields — see below. A **Cue Sticks** sale instead carries `saleType: 'cue-stick'` and `cueStickTotal` (kept apart from `productTotal` so it reports separately). The stored field/value is still literally `gcash` (kept as the internal identifier so old records keep reading correctly) — everywhere the app displays it, the label is **QRPH**.
 - `users/{uid}` — `name, email, role, active, online, lastSeen`
 - `expenses/{id}` — `description, amount, cashierId, cashierName, createdAt` (server time). Cash taken from the drawer. Nobody edits one; only the owner can delete one.
 - `settings/shifts` — `twoShifts` (owner-only). Off by default: one shift per business day.
@@ -102,7 +102,7 @@ Laid out like the Marimar Inn reports. Every tab has the same shape: pickers on 
 one row of number cards, then plain tables.
 
 - **Daily** (everyone; cashiers see only this tab): the paper-style **Daily Sales Report** for one business day
-  (6:00 AM to 6:00 AM). It has one row per sale, the expenses, a cash/GCash line, the **Overall Sale** (sales minus
+  (6:00 AM to 6:00 AM). It has one row per sale, the expenses, a cash/QRPH line, the **Overall Sale** (sales minus
   expenses) and signature lines. Below it: **End of shift**, where cash to count = cash collected − expenses.
   The cashier on duty logs expenses (cash taken from the drawer) at the top of this tab.
 - **Custom range** (owner): totals, sales by day, sales/expenses/net per day, every expense, and cancelled games.
@@ -363,25 +363,26 @@ Timing rules are `hourAlert()` in `js/billing.js` (unit-tested); the on-screen s
 
 ## Payments
 
-Checkout takes **Cash** (optional cash tendered → change), **GCash**, or **Split**. For Split the cashier enters the cash
-portion and the rest of the total goes on GCash. For **GCash and Split** the cashier must enter the **last 5 digits of the
-GCash reference number** (`gcashRef`, required by `firestore.rules`). It shows on the receipt, in the Transactions list
+Checkout takes **Cash** (optional cash tendered → change), **QRPH**, or **Split**. For Split the cashier enters the cash
+portion and the rest of the total goes on QRPH. For **QRPH and Split** the cashier must enter the **last 5 digits of the
+QRPH reference number** (`gcashRef`, required by `firestore.rules`). It shows on the receipt, in the Transactions list
 (and search), and on the Daily sales report and its CSV. Every transaction stores `payments.cash` and `payments.gcash`, so
 reports can add up money by type whatever the method was. (Older `card` records still show up, as "Other".)
 
-### GCash QR code
+### QRPH code
 
-GCash payment is always the customer scanning a QR in their own app — there's no way to push money without a real GCash
-merchant API integration, which this app doesn't have. So instead: the owner uploads the hall's own **"Scan to Pay"** QR
-code once, and it's shown automatically whenever GCash or Split is chosen, on Checkout, Quick Sale and Cue Sticks alike.
+QRPH (the Philippines' unified national QR payment standard) is always the customer scanning a QR in their own banking
+or e-wallet app — there's no way to push money without a real merchant API integration, which this app doesn't have.
+So instead: the owner uploads the hall's own **"Scan to Pay"** QRPH code once, and it's shown automatically whenever
+QRPH or Split is chosen, on Checkout, Quick Sale and Cue Sticks alike.
 
-- **Setting it up:** the **GCash QR** button (owner-only; sidebar on desktop, the top bar's icon group on
+- **Setting it up:** the **QRPH code** button (owner-only; sidebar on desktop, the top bar's icon group on
   phones/tablets) opens a small dialog to upload, replace or remove it. The image is resized and saved as a **lossless
   PNG** (not JPEG — compression artifacts can blur a QR's fine modules enough that a phone camera won't read it), stored
   directly on `settings/gcash` (`qrImage`), the same "small image straight on the document" approach as a cue stick's photo.
 - **What it doesn't do:** this is the hall's own static merchant code, the same one that might otherwise be printed and
-  taped to the counter — it carries no amount, so the customer still types the total into their own GCash app, and the
-  cashier still records the last 5 digits of the reference number afterward, exactly as before.
+  taped to the counter — it carries no amount, so the customer still types the total into whichever QRPH-compatible app
+  they used to scan it, and the cashier still records the last 5 digits of the reference number afterward, exactly as before.
 - Built once, in `gcashRefField()` (`js/ui.js`), so all three sale screens (Checkout, Quick Sale, Cue Sticks) show it
   the same way without their own copy of the logic.
 
@@ -427,7 +428,7 @@ Also from Marimar Inn. The drawer plugs into the printer's drawer (RJ11) port an
 thermal printer must be connected. **Cash drawer** in the sidebar:
 
 - **On cash pay** (on by default, per device): the drawer opens after a sale that took cash, including the cash part
-  of a split. GCash leaves it closed.
+  of a split. QRPH leaves it closed.
 - **Open drawer**: the owner opens it directly; a cashier needs the **drawer PIN**. It's also on the Daily report's
   End of shift card, for counting cash.
 - **Drawer PIN** (owner only): stored as a SHA-256 hash in `settings/cashDrawer`, never as the digits.

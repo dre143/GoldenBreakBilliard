@@ -790,7 +790,7 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .cash__change { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; font-weight: 600; color: var(--ink-soft); }
 .cash__change .num { font-size: 20px; color: var(--felt); }
 
-/* GCash QR shown at checkout (gcashRefField() in js/ui.js) — the hall's own "Scan to Pay" code. */
+/* QRPH code shown at checkout (gcashRefField() in js/ui.js) — the hall's own "Scan to Pay" code. */
 .gcash-qr { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px; background: var(--ground); border-radius: var(--radius-md); text-align: center; }
 .gcash-qr__img { width: 176px; height: 176px; object-fit: contain; background: var(--surface); border-radius: var(--radius-sm); padding: 10px; }
 .gcash-qr__hint { font-size: 13px; color: var(--ink-soft); }
@@ -825,7 +825,7 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .photo-pick__preview img { width: 100%; height: 100%; object-fit: cover; }
 .photo-pick__preview .ico { width: 28px; height: 28px; color: var(--ink-soft); }
 .photo-pick__actions { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
-/* Bigger, uncropped preview — used for the GCash QR (a QR must never be cropped to stay scannable). */
+/* Bigger, uncropped preview — used for the QRPH code (a QR must never be cropped to stay scannable). */
 .photo-pick--lg .photo-pick__preview { width: 140px; height: 140px; }
 .photo-pick--lg .photo-pick__preview img { object-fit: contain; padding: 8px; }
 

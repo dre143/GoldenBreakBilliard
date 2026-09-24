@@ -436,13 +436,13 @@ function saleReceipt(tx) {
   e.newline().line(twoColumn('TOTAL', money(tx.total), width));
   if (tx.method === 'split' && tx.payments) {
     e.line(twoColumn('Paid (Cash)', money(tx.payments.cash), width))
-      .line(twoColumn('Paid (GCash)', money(tx.payments.gcash), width));
+      .line(twoColumn('Paid (QRPH)', money(tx.payments.gcash), width));
   } else if (tx.method === 'none') {
     e.line(twoColumn('Paid', 'No charge', width));
   } else {
-    e.line(twoColumn(`Paid (${tx.method === 'gcash' ? 'GCash' : 'Cash'})`, money(tx.tendered ?? tx.total), width));
+    e.line(twoColumn(`Paid (${tx.method === 'gcash' ? 'QRPH' : 'Cash'})`, money(tx.tendered ?? tx.total), width));
   }
-  if (tx.gcashRef) e.line(twoColumn('GCash ref (last 5)', tx.gcashRef, width));
+  if (tx.gcashRef) e.line(twoColumn('QRPH ref (last 5)', tx.gcashRef, width));
   if (tx.change > 0) e.line(twoColumn('Change', money(tx.change), width));
 
   e.newline().align('center')
@@ -513,9 +513,9 @@ function dailySalesReceipt({ dateLabel, timeLabel, shiftLabel, txs, expenses, to
         e.line(twoColumn(`  Table ${played(x.durationMs)}`, x.gameCancelled ? 'cancelled' : money(x.tableFee), width));
       }
       if (x.productTotal) e.line(twoColumn('  Items', money(x.productTotal), width));
-      const method = x.method === 'split' ? 'Split' : x.method === 'gcash' ? 'GCash' : x.method === 'none' ? 'No charge' : 'Cash';
+      const method = x.method === 'split' ? 'Split' : x.method === 'gcash' ? 'QRPH' : x.method === 'none' ? 'No charge' : 'Cash';
       e.line(twoColumn(`  Paid (${method})`, money(x.total), width));
-      if (x.gcashRef) e.line(clampLine(`    GCash ref: ${x.gcashRef}`, width));
+      if (x.gcashRef) e.line(clampLine(`    QRPH ref: ${x.gcashRef}`, width));
       e.line(clampLine(`    ${firstName(x.cashierName)}`, width));
     }
     e.line(rule);
@@ -537,7 +537,7 @@ function dailySalesReceipt({ dateLabel, timeLabel, shiftLabel, txs, expenses, to
       .line(twoColumn('Net cash', money(t.cashToCount), width));
   }
 
-  e.line(twoColumn('GCash collected', money(t.gcash), width))
+  e.line(twoColumn('QRPH collected', money(t.gcash), width))
     .line(twoColumn('Total collected', money(t.total), width));
   if (t.expenses > 0) e.line(twoColumn('Net (less exp.)', money(t.net), width));
 
@@ -591,7 +591,7 @@ export async function openCashDrawer() {
 
 /**
  * After a sale: open the drawer only when cash changed hands (a cash or split payment), the printer is
- * connected, and "On cash pay" is on. GCash-only payments leave it closed. Never throws; returns an
+ * connected, and "On cash pay" is on. QRPH-only payments leave it closed. Never throws; returns an
  * error message for the caller to show, or null.
  */
 export async function kickDrawerForCash(cashAmount) {

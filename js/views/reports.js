@@ -91,7 +91,7 @@ const longDate = (key) => rep.keyLabel(key, { weekday: 'long', month: 'long', da
 function paymentLabel(tx) {
   const p = rep.paymentsOf(tx);
   const ref = tx.gcashRef ? ` (Ref ${esc(tx.gcashRef)})` : '';
-  if (p.cash > 0 && p.gcash > 0) return `Cash ${peso(p.cash)} + GCash ${peso(p.gcash)}${ref}`;
+  if (p.cash > 0 && p.gcash > 0) return `Cash ${peso(p.cash)} + QRPH ${peso(p.gcash)}${ref}`;
   return `${METHOD_LABEL[tx.method] || esc(tx.method)}${ref}`;
 }
 
@@ -137,13 +137,13 @@ const reportHead = (title, meta) => `
     <p class="report-head__meta">${meta.map((m) => `<span>${m}</span>`).join('')}</p>
   </header>`;
 
-/** Cash / GCash / net line under a report (Marimar's payment breakdown strip). */
+/** Cash / QRPH / net line under a report (Marimar's payment breakdown strip). */
 const payStrip = (t) => `
   <dl class="pay-strip">
     <div><dt>Cash collected</dt><dd class="num">${peso(t.cash)}</dd></div>
     <div><dt>Expenses</dt><dd class="num">${peso(t.expenses)}</dd></div>
     <div><dt>Net cash</dt><dd class="num">${peso(t.cashToCount)}</dd></div>
-    <div><dt>GCash collected</dt><dd class="num">${peso(t.gcash)}</dd></div>
+    <div><dt>QRPH collected</dt><dd class="num">${peso(t.gcash)}</dd></div>
     <div><dt>Total collected</dt><dd class="num">${peso(t.total)}</dd></div>
     <div><dt>Net after expenses</dt><dd class="num">${peso(t.net)}</dd></div>
   </dl>`;
@@ -463,7 +463,7 @@ function dailyTab(panel, ctx) {
     const withShift = twoShifts();
     downloadCsv(`golden-break-daily-${key}${shift === 'full' ? '' : `-${shift}`}.csv`, [
       [HALL], ['Daily Sales Report'], [`Date: ${longDate(key)}`, `Time: ${timeText()}`, shiftName()], [],
-      ['Table', 'Ref #', 'Start', 'End', 'Booked', 'Played (min)', 'Table fee', 'Products', 'Paid', 'Payment', 'Cash', 'GCash', 'GCash ref (last 5)', 'Staff', 'Remarks'],
+      ['Table', 'Ref #', 'Start', 'End', 'Booked', 'Played (min)', 'Table fee', 'Products', 'Paid', 'Payment', 'Cash', 'QRPH', 'QRPH ref (last 5)', 'Staff', 'Remarks'],
       ...txs.map((x) => {
         const p = rep.paymentsOf(x);
         return [
@@ -480,7 +480,7 @@ function dailyTab(panel, ctx) {
       ['Total expenses', ...(withShift ? [''] : []), '', '', t.expenses],
       [], ['Summary'],
       ['Cash collected', t.cash], ['Expenses', t.expenses], ['Net cash (cash to count)', t.cashToCount],
-      ['GCash collected', t.gcash], ['Total collected', t.total], ['Net after expenses', t.net],
+      ['QRPH collected', t.gcash], ['Total collected', t.total], ['Net after expenses', t.net],
       ['Overall Sale', t.net],
     ]);
   }
@@ -738,7 +738,7 @@ function rangeTab(panel, ctx) {
     const t = rep.totals(txs, expenses);
     downloadCsv(`golden-break-range-${fromKey}_to_${toKey}.csv`, [
       [HALL], ['Sales Report'], [rangeLabel()], [],
-      ['Date', 'Table revenue', 'Product sales', 'Cue stick sales', 'Sales', 'Cash', 'GCash', 'Expenses', 'Net'],
+      ['Date', 'Table revenue', 'Product sales', 'Cue stick sales', 'Sales', 'Cash', 'QRPH', 'Expenses', 'Net'],
       ...rep.byDay(txs, fromKey, toKey, expenses).map((d) => [d.key, d.tableFee, d.productTotal, d.cueStickTotal, d.total, d.cash, d.gcash, d.expenses, d.net]),
       ['Total', t.tableFee, t.productTotal, t.cueStickTotal, t.total, t.cash, t.gcash, t.expenses, t.net],
       [], ['Expenses'], ['Date', 'Time', 'What for', 'Staff', 'Amount'],

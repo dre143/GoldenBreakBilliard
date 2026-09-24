@@ -30,7 +30,7 @@ export function mount(el, ctx) {
     })}
     <div class="report-controls">
       <div class="report-controls__fields">
-        ${searchField('tx-search', 'Search transactions', 'Table, cashier, item, or GCash ref')}
+        ${searchField('tx-search', 'Search transactions', 'Table, cashier, item, or QRPH ref')}
         <div class="field report-controls__shift">
           <label for="tx-range" class="sr-only">Date range</label>
           <select id="tx-range">

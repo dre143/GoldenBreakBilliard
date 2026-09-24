@@ -114,7 +114,7 @@ function mountBill(el, ctx, tableId) {
                 <input id="split-cash" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Amount paid in cash">
               </div>
               <div class="cash__change">
-                <span>GCash portion (balance)</span>
+                <span>QRPH portion (balance)</span>
                 <span class="num" data-live="split-gcash">—</span>
               </div>
             </div>
@@ -257,7 +257,7 @@ function mountBill(el, ctx, tableId) {
     setText('change', raw === '' || Number.isNaN(tendered) ? '—' : tendered >= total ? peso(tendered - total) : `Short ${peso(total - tendered)}`);
     $('[data-live=change]')?.classList.toggle('is-short', raw !== '' && tendered < total);
 
-    // Split: GCash covers whatever the cash portion doesn't (recomputed live as the table fee grows).
+    // Split: QRPH covers whatever the cash portion doesn't (recomputed live as the table fee grows).
     const splitRaw = $('#split-cash').value;
     const cashPart = Number(splitRaw);
     const splitValid = splitRaw !== '' && cashPart > 0 && cashPart < total;
@@ -353,7 +353,7 @@ function mountBill(el, ctx, tableId) {
     const gcashRef = $('#gcash-ref').value;
     const total = round2(sessionFee(t.session, elapsedMs(t)) + itemsTotal(t.session.items));
     if ((method === 'gcash' || method === 'split') && total > 0 && gcashRef.length !== 5) {
-      toast('Enter the last 5 digits of the GCash reference number.', 'error');
+      toast('Enter the last 5 digits of the QRPH reference number.', 'error');
       $('#gcash-ref').focus();
       return;
     }
@@ -421,7 +421,7 @@ function mountBill(el, ctx, tableId) {
     on('tables', render),
     on('products', () => { const t = table(); if (built && t?.session) renderItems(t); }),
     on('tick', tick),
-    // The GCash QR loads via its own settings listener, which can resolve after this screen already
+    // The QRPH code loads via its own settings listener, which can resolve after this screen already
     // built its static HTML — refresh just that region rather than relying on a one-time render.
     on('settings', () => { const q = $('[data-region=gcash-qr]'); if (q) q.innerHTML = gcashQrBlock(); }),
   ];
