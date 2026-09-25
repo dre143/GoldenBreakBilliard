@@ -26,14 +26,14 @@ const cases = [
   [60, 0, 200],   // exactly 1:00:00: the hour is used up but not yet exceeded
   [60, 1, 200],   // past the hour, grace period still keeps the bill at ₱200
   [64, 30, 200],
-  [65, 59, 200],
-  [66, 0, 250],
+  [64, 59, 200],
+  [65, 0, 250],
   [76, 0, 250],
-  [80, 59, 250],
-  [81, 0, 300],
+  [79, 59, 250],
+  [80, 0, 300],
   [91, 0, 300],
-  [95, 59, 300],
-  [96, 0, 350],
+  [94, 59, 300],
+  [95, 0, 350],
 ];
 
 for (const session of [{}, { plannedMs: 60 * MIN }]) {

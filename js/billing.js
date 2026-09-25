@@ -8,11 +8,11 @@ const MINUTE = 60 * 1000;
 /**
  * The hall's official table rate (same for every table):
  *   first 60 minutes ............ ₱200 (flat, even for a shorter session)
- *   after the hour, ₱50 more at 1:06:00, then every 15 minutes: 1:21:00, 1:36:00, 1:51:00, ...
+ *   after the hour, ₱50 more at 1:05:00, then every 15 minutes: 1:20:00, 1:35:00, 1:50:00, ...
  *
- * 5-MINUTE GRACE: from 1:00:00 through 1:05:59 the bill is still ₱200. A customer who has said "end na
+ * 5-MINUTE GRACE: from 1:00:00 through 1:04:59 the bill is still ₱200. A customer who has said "end na
  * ko" shouldn't pay another ₱50 just because the cashier was busy at the counter. The first ₱50 lands
- * exactly at 1:06:00 (firstExtraAtMinutes = 66), and each following ₱50 is 15 minutes after the last.
+ * exactly at 1:05:00 (firstExtraAtMinutes = 65), and each following ₱50 is 15 minutes after the last.
  * The timer itself is never held back: elapsed time and billable amount are separate things.
  *
  * These numbers are mirrored in firestore.rules (feeOk), which re-checks every sale's fee.
@@ -24,10 +24,10 @@ export const PRICING = Object.freeze({
   basePrice: 200,
   bracketMinutes: 15,
   bracketPrice: 50,
-  firstExtraAtMinutes: 66,
+  firstExtraAtMinutes: 65,
 });
 
-/** "1:06:00" style clock for a number of minutes (used in labels). */
+/** "1:05:00" style clock for a number of minutes (used in labels). */
 const clockLabel = (minutes) => `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}:00`;
 
 export const PRICING_LABEL = `₱${PRICING.basePrice} first hour · ₱${PRICING.bracketPrice} every ${PRICING.bracketMinutes} min from ${clockLabel(PRICING.firstExtraAtMinutes)} (5-min grace)`;
@@ -39,8 +39,8 @@ export const PRICING_LABEL = `₱${PRICING.basePrice} first hour · ₱${PRICING
  *
  * elapsedMs: the time the customer actually consumed (real elapsed time, never the booked time).
  * Returns { fee, extraBrackets, inGrace, graceEndsAtMs, nextIncreaseAtMs }:
- *   fee              ₱200 until 1:05:59, ₱250 from 1:06:00, ₱300 from 1:21:00, ...
- *   inGrace          true from 1:00:00 up to (not including) 1:06:00: the hour is over but no charge yet
+ *   fee              ₱200 until 1:04:59, ₱250 from 1:05:00, ₱300 from 1:20:00, ...
+ *   inGrace          true from 1:00:00 up to (not including) 1:05:00: the hour is over but no charge yet
  *   nextIncreaseAtMs the elapsed time at which the fee next goes up\n *   lastIncreaseAtMs the elapsed time at which it last went up (null while still on the first-hour fee)
  */
 export function calculateBilliardBill(elapsedMs, pricing = PRICING) {
@@ -63,7 +63,7 @@ export function calculateBilliardBill(elapsedMs, pricing = PRICING) {
   }
 
   const firstExtraAtMs = pricing.firstExtraAtMinutes * MINUTE;
-  // Thresholds are reached inclusively: at exactly 1:06:00 the first ₱50 is already due.
+  // Thresholds are reached inclusively: at exactly 1:05:00 the first ₱50 is already due.
   const brackets = ms >= firstExtraAtMs ? 1 + Math.floor((ms - firstExtraAtMs) / bracketMs) : 0;
   return {
     fee: pricing.basePrice + brackets * pricing.bracketPrice,
@@ -86,7 +86,7 @@ export const extraBrackets = (ms, pricing = PRICING) => calculateBilliardBill(ms
 /** Elapsed time at which the fee next goes up (so staff can tell customers). */
 export const nextIncreaseAt = (ms, pricing = PRICING) => calculateBilliardBill(ms, pricing).nextIncreaseAtMs;
 
-/** Human breakdown, e.g. "₱200 first hour + 2 × ₱50", or a grace-period note between 1:00:00 and 1:06:00. */
+/** Human breakdown, e.g. "₱200 first hour + 2 × ₱50", or a grace-period note between 1:00:00 and 1:05:00. */
 export function feeBreakdown(ms, pricing = PRICING) {
   const bill = calculateBilliardBill(ms, pricing);
   if (bill.inGrace) return `₱${pricing.basePrice} first hour · grace period, no extra charge yet`;
@@ -166,7 +166,7 @@ export function billSession(session, elapsed) {
  * The colour follows the time that was BOOKED, not the fee steps, and it is independent of the grace period:
  *   reached      red, from the moment the booked time is used up (Set Hours) or the first hour is (Open Time),
  *                and it stays red until checkout. The grace period changes only the bill, never the colour:
- *                a 1h booking is red from 1:00:00, while the bill stays ₱200 until 1:06:00.
+ *                a 1h booking is red from 1:00:00, while the bill stays ₱200 until 1:05:00.
  *   approaching  yellow, in the last BILLING_WARNING_MS (5 min) before that moment.
  * It is computed from the same elapsed value as the bill (billSession), so the colour, animation, chime and amount
  * can never disagree about the time. A stopped or cancelled clock is 'normal'.

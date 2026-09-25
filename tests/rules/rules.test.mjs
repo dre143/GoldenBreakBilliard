@@ -145,16 +145,16 @@ const cases = [
   ['30 minutes (first hour is flat)', 30 * MIN, 200],
   ['1 hour', 60 * MIN, 200],
   ['1 hour + 1 ms (inside the grace period)', 60 * MIN + 1, 200],
-  ['1:05:59.999 (last moment of the grace period)', 66 * MIN - 1, 200],
-  ['1:06:00 (grace over, first ₱50)', 66 * MIN, 250],
-  ['1:20:59.999', 81 * MIN - 1, 250],
-  ['1:21:00', 81 * MIN, 300],
-  ['1:35:59.999', 96 * MIN - 1, 300],
-  ['1:36:00', 96 * MIN, 350],
-  ['1:51:00', 111 * MIN, 400],
-  ['2:05:59.999', 126 * MIN - 1, 400],
-  ['2:06:00', 126 * MIN, 450],
-  ['2:36:00', 156 * MIN, 550],
+  ['1:04:59.999 (last moment of the grace period)', 65 * MIN - 1, 200],
+  ['1:05:00 (grace over, first ₱50)', 65 * MIN, 250],
+  ['1:19:59.999', 80 * MIN - 1, 250],
+  ['1:20:00', 80 * MIN, 300],
+  ['1:34:59.999', 95 * MIN - 1, 300],
+  ['1:35:00', 95 * MIN, 350],
+  ['1:50:00', 110 * MIN, 400],
+  ['2:04:59.999', 125 * MIN - 1, 400],
+  ['2:05:00', 125 * MIN, 450],
+  ['2:35:00', 155 * MIN, 550],
 ];
 for (const [label, durationMs, fee] of cases) {
   test(`checkout ${label}: ₱${fee} accepted, anything else rejected`, async () => {
@@ -275,22 +275,22 @@ test('booked 1h15, ended after 59 seconds: ₱200 (the booked ₱250 is rejected
   await assertSucceeds(checkout(joy, { durationMs: 59 * 1000, startedMs, endedMs, fee: 200, plannedMs: 75 * MIN }));
 });
 
-test('booked 2h, played 2h 6min: overtime billed → ₱450; ₱400 rejected', async () => {
-  const startedMs = Date.now() - 135 * MIN;
-  const endedMs = startedMs + 126 * MIN;
-  await seed({ 'tables/t1': endedTable(startedMs, endedMs, 120 * MIN) });
-  const joy = as('joy');
-  await assertFails(checkout(joy, { durationMs: 126 * MIN, startedMs, endedMs, fee: 400, plannedMs: 120 * MIN, billedMs: 120 * MIN }));
-  await assertSucceeds(checkout(joy, { durationMs: 126 * MIN, startedMs, endedMs, fee: 450, plannedMs: 120 * MIN }));
-});
-
-test('booked 2h, played 2h 5min: still inside the grace period → ₱400; the old ₱450 is rejected', async () => {
+test('booked 2h, played 2h 5min: overtime billed → ₱450; ₱400 rejected', async () => {
   const startedMs = Date.now() - 135 * MIN;
   const endedMs = startedMs + 125 * MIN;
   await seed({ 'tables/t1': endedTable(startedMs, endedMs, 120 * MIN) });
   const joy = as('joy');
-  await assertFails(checkout(joy, { durationMs: 125 * MIN, startedMs, endedMs, fee: 450, plannedMs: 120 * MIN }));
-  await assertSucceeds(checkout(joy, { durationMs: 125 * MIN, startedMs, endedMs, fee: 400, plannedMs: 120 * MIN }));
+  await assertFails(checkout(joy, { durationMs: 125 * MIN, startedMs, endedMs, fee: 400, plannedMs: 120 * MIN, billedMs: 120 * MIN }));
+  await assertSucceeds(checkout(joy, { durationMs: 125 * MIN, startedMs, endedMs, fee: 450, plannedMs: 120 * MIN }));
+});
+
+test('booked 2h, played 2h 4min: still inside the grace period → ₱400; the old ₱450 is rejected', async () => {
+  const startedMs = Date.now() - 135 * MIN;
+  const endedMs = startedMs + 124 * MIN;
+  await seed({ 'tables/t1': endedTable(startedMs, endedMs, 120 * MIN) });
+  const joy = as('joy');
+  await assertFails(checkout(joy, { durationMs: 124 * MIN, startedMs, endedMs, fee: 450, plannedMs: 120 * MIN }));
+  await assertSucceeds(checkout(joy, { durationMs: 124 * MIN, startedMs, endedMs, fee: 400, plannedMs: 120 * MIN }));
 });
 
 test('expired unpaid booking can continue only with a future booking end and unchanged start', async () => {

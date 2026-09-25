@@ -124,16 +124,16 @@ One rate for every table (`PRICING` in `js/billing.js`):
 
 | Played | Table fee |
 |---|---|
-| 0:00:00 – 1:05:59 | ₱200 (first hour, plus a **5-minute grace period**) |
-| 1:06:00 – 1:20:59 | ₱250 |
-| 1:21:00 – 1:35:59 | ₱300 |
-| 1:36:00 – 1:50:59 | ₱350 |
-| 1:51:00 – 2:05:59 | ₱400 |
-| 2:06:00 and every 15 minutes after | + ₱50 each (₱450, ₱500, ₱550, …) |
+| 0:00:00 – 1:04:59 | ₱200 (first hour, plus a **5-minute grace period**) |
+| 1:05:00 – 1:19:59 | ₱250 |
+| 1:20:00 – 1:34:59 | ₱300 |
+| 1:35:00 – 1:49:59 | ₱350 |
+| 1:50:00 – 2:04:59 | ₱400 |
+| 2:05:00 and every 15 minutes after | + ₱50 each (₱450, ₱500, ₱550, …) |
 
 The grace period exists so a customer who says "end na ko" at 1:00 isn't charged another ₱50 because the cashier was busy.
 It is **not** free time: the clock keeps counting the real elapsed time, and the bill keeps climbing with it (₱200, then
-₱250 at 1:06:00, ₱300 at 1:21:00, ...) — it is not transferable. One customer is one session is one transaction; a new
+₱250 at 1:05:00, ₱300 at 1:20:00, ...) — it is not transferable. One customer is one session is one transaction; a new
 session always pays its own first hour. **A Set Hours booking never actually lingers in this window** — see *Auto-stop*
 below — so the grace period and the fee steps past it are, in practice, an Open Time thing.
 
@@ -156,14 +156,14 @@ rail before each whole hour, see below) and a table actually stopping.
     device has the app open — a booking that runs out while every device is closed auto-stops as soon as one reopens.
   - **Booked time is not the bill.** Three separate things: the *booked* length (what the customer chose), the *actual elapsed*
     time (end stamp − start stamp) and the *billable amount*, which is calculated from the actual elapsed time only. Stopping a
-    1h15 booking after 59 seconds costs ₱200, and reaching 1:06:00+ of a longer booking bills the matching bracket exactly —
+    1h15 booking after 59 seconds costs ₱200, and reaching 1:05:00+ of a longer booking bills the matching bracket exactly —
     unused booked time is never charged, and none of it can run over into the next bracket by accident. The booking sets the
     "Time left" countdown, the alerts, and when auto-stop fires, and it is kept on the sale for reference.
   - **Add time** (at checkout) extends a booking before it runs out, so the customer keeps playing past what they first
     booked. Open Time checkout does not offer Set hours or Add time. The rules allow a booking to grow, never shrink —
     so the only way to keep a Set Hours table running past "Time left: 0:00" is to add time before it gets there.
 
-Formula, on exact milliseconds: `< 1:06:00 → ₱200`, otherwise `₱200 + (1 + floor((elapsed − 1:06:00) / 15 min)) × ₱50`.
+Formula, on exact milliseconds: `< 1:05:00 → ₱200`, otherwise `₱200 + (1 + floor((elapsed − 1:05:00) / 15 min)) × ₱50`.
 It lives in **one** function, `calculateBilliardBill()` in `js/billing.js`. Open Time, Set Hours, the table card, checkout,
 the booking preview and the sale that is saved all call it (through `billSession()`); reports, history, the dashboard and
 receipts only read the fee stored on each sale. Old sales keep their old amounts: each sale stores a pricing snapshot, and one
