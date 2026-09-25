@@ -85,7 +85,7 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
   - `transfers` (optional) is the table-move history for **Transfer Table** — see below; the timer, items and bill never reset when a session moves
   - `startedAt` and `endedAt` are **server timestamps**. Elapsed time = `endedAt − startedAt` once ended, otherwise
     server-synced now − `startedAt`.
-  - Sessions can't be paused. **End Session** (or Complete Transaction) stops the clock once, and that is final.
+  - Sessions can't be paused. Expired unpaid **Set Hours** sessions show **Session ended** and **Checkout**. Checkout offers **Add time** to extend the original booking and continue the same session, keeping its start time and items. Time between expiry and extension counts toward elapsed time; the new booking end must be in the future. Early-stopped, cancelled, and paid sessions cannot restart.
 - `products/{id}` — `name, category, price, stock, reorderLevel, lastRestockedAt`
 - `restocks/{id}` — restock log (feeds "Restocked this week")
 - `cueSticks/{id}` — `name, brand, weight, price, photo, status (available|sold), soldAt, soldTxId, soldByName` — see **Cue Sticks** below
@@ -184,7 +184,7 @@ so change both together, and **deploy the rules together with this change** (`np
   - it is written in the same step that frees the table.
 
   A table can't be freed without a matching sale.
-- **Locked session times:** start and end times can never be edited, and an ended clock can't restart. A completed sale can never be changed,
+- **Locked session times:** start times cannot change. Only expired unpaid bookings can restart by adding booked time. A completed sale can never be changed,
   so there's no "reopen" path for old stamps to leak back onto a table.
 - **Server-synced timers:** on-screen timers use the server's clock, measured when you sign in, every 10 minutes and when the app returns to
   the foreground. A device whose clock is more than a minute off gets a warning.

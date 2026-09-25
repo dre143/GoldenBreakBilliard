@@ -20,6 +20,7 @@ const POCKETS = ['tl', 'tr', 'ml', 'mr', 'bl', 'br']
  */
 export function bookingStatus(t, elapsed) {
   if (isTimed(t.session)) {
+    if (t.session.ended) return { label: 'Time left', value: fmtDuration(remainingMs(t.session, elapsed)) };
     const over = overtimeMs(t.session, elapsed);
     return over > 0
       ? { label: 'Extra time', value: `+${fmtDuration(over)}` }
@@ -46,7 +47,7 @@ export function poolCard(t, { picker = false } = {}) {
   const id = esc(t.id);
   // Stopped tables are still In Use (unpaid); the navy cloth says so visually, the sr-only prefix says it aloud.
   const status = !live ? 'Available'
-    : stopped ? '<span class="sr-only">In Use, </span>Clock Stopped'
+    : stopped ? '<span class="sr-only">In Use, </span>Session ended'
       : `<span class="sr-only">In Use, </span>${timed ? `Booked ${esc(fmtBooking(t.session.plannedMs))}` : 'Open Time'}`;
 
   return `

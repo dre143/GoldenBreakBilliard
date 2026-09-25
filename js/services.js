@@ -7,7 +7,7 @@
 import { db, auth } from './db.js';
 import {
   elapsedMs, round2, itemsTotal, CANCEL_REASONS, CANCEL_WINDOW_MS, PRICING,
-  billSession, plannedMs, BOOKING_STEP_MS,
+  billSession, plannedMs, BOOKING_STEP_MS, canExtendEndedSession,
 } from './billing.js';
 import { SERVER_TIME, serverNow } from './clock.js';
 
@@ -43,19 +43,29 @@ export function extendSession(tableId, addMs) {
   return db.transaction(async (tx) => {
     const t = await tx.get('tables', tableId);
     if (!t?.session) throw new Error('This table has no open session.');
-    if (t.session.ended) throw new Error('This session has already been stopped.');
+    if (t.session.ended && !canExtendEndedSession(t.session)) throw new Error('This session has already been stopped.');
     const planned = plannedMs(t.session) + addMs;
-    tx.update('tables', tableId, { 'session.plannedMs': planned, updatedAt: SERVER_TIME });
+    if (t.session.ended && t.session.startedAt + planned <= serverNow()) {
+      throw new Error('Add enough time to extend the booking beyond the current time.');
+    }
+    tx.update('tables', tableId, {
+      'session.plannedMs': planned,
+      ...(t.session.ended ? { 'session.ended': false, 'session.endedAt': null } : {}),
+      updatedAt: SERVER_TIME,
+    });
     return planned;
   });
 }
 
 /** Stop the clock for billing: the server stamps the end time. Final: a session can't be resumed. */
-export function endSession(tableId) {
+export function endSession(tableId, { expiredBooking = null, startedAt = null } = {}) {
   return db.transaction(async (tx) => {
     const t = await tx.get('tables', tableId);
     if (!t?.session) throw new Error('This table has no open session.');
     if (t.session.ended) return;
+    // A delayed auto-stop must not stop a booking another terminal extended or replaced.
+    if (expiredBooking != null && (t.session.startedAt !== startedAt
+      || plannedMs(t.session) !== expiredBooking || elapsedMs(t) < expiredBooking)) return;
     tx.update('tables', tableId, { 'session.ended': true, 'session.endedAt': SERVER_TIME, updatedAt: SERVER_TIME });
   });
 }

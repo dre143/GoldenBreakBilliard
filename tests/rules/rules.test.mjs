@@ -293,6 +293,26 @@ test('booked 2h, played 2h 5min: still inside the grace period → ₱400; the o
   await assertSucceeds(checkout(joy, { durationMs: 125 * MIN, startedMs, endedMs, fee: 400, plannedMs: 120 * MIN }));
 });
 
+test('expired unpaid booking can continue only with a future booking end and unchanged start', async () => {
+  const started = Date.now() - 61 * MIN;
+  await seed({ 'tables/t1': endedTable(started, started + 60 * MIN, 60 * MIN) });
+  const ref = doc(as('joy'), 'tables/t1');
+  const patch = { 'session.ended': false, 'session.endedAt': null, 'session.plannedMs': 90 * MIN, updatedAt: serverTimestamp() };
+  await assertFails(updateDoc(ref, { ...patch, 'session.startedAt': serverTimestamp() }));
+  await assertFails(updateDoc(ref, { ...patch, 'session.plannedMs': 60 * MIN }));
+  await assertSucceeds(updateDoc(ref, patch));
+});
+
+test('early stopped or cancelled bookings cannot continue', async () => {
+  const started = Date.now() - 61 * MIN;
+  const early = endedTable(started, started + 30 * MIN, 60 * MIN);
+  const expired = endedTable(started, started + 60 * MIN, 60 * MIN);
+  await seed({ 'tables/t1': early, 'tables/t2': { ...expired, session: { ...expired.session, cancelled: { reason: 'Other' } } } });
+  const patch = { 'session.ended': false, 'session.endedAt': null, 'session.plannedMs': 90 * MIN, updatedAt: serverTimestamp() };
+  await assertFails(updateDoc(doc(as('joy'), 'tables/t1'), patch));
+  await assertFails(updateDoc(doc(as('joy'), 'tables/t2'), patch));
+});
+
 test('booked time can be extended but never cut', async () => {
   await seed({ 'tables/t1': runningTable(Date.now() - 30 * MIN, 120 * MIN) });
   const joy = as('joy');

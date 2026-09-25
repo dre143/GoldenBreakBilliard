@@ -96,7 +96,7 @@ service cloud.firestore {
     //   transfer → a live session moves to a different table, start time and all, in the same batch as
     //              that table freeing (see receivesTransfer/freesForTransfer)
     //   close    → in_use (ended) → available, only together with a matching new sale
-    // There is no "reopen", and a completed sale can never be changed, so a table freed at checkout stays freed.
+    // Only an expired unpaid booking can continue with added time; completed sales stay final.
 
     function startsSession() {
       let before = resource.data;
@@ -121,6 +121,23 @@ service cloud.firestore {
         && after.session.diff(before.session).affectedKeys().hasOnly(['ended', 'endedAt'])
         && after.session.ended == true
         && after.session.endedAt == request.time;
+    }
+
+    // Extend an unpaid booking after it expired. Preserve its start, items and history.
+    function extendsExpiredSession() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let s = before.session;
+      return onlyChanges(['session', 'updatedAt'])
+        && before.status == 'in_use' && after.status == 'in_use'
+        && s.ended == true && s.get('cancelled', null) == null
+        && s.plannedMs > 0
+        && s.endedAt.toMillis() - s.startedAt.toMillis() >= s.plannedMs
+        && after.session.diff(s).affectedKeys().hasOnly(['plannedMs', 'ended', 'endedAt'])
+        && bookingOk(after.session.plannedMs)
+        && after.session.plannedMs > s.plannedMs
+        && s.startedAt.toMillis() + after.session.plannedMs > request.time.toMillis()
+        && after.session.ended == false && after.session.endedAt == null;
     }
 
     function editsSession() {
@@ -251,6 +268,7 @@ service cloud.firestore {
             || onlyChanges(['light', 'updatedAt'])
             || startsSession()
             || endsSession()
+            || extendsExpiredSession()
             || cancelsGame()
             || editsSession()
             || closesWithSale(tableId)

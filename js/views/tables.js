@@ -60,9 +60,9 @@ export function mount(el, ctx) {
       title: esc(name),
       cancelLabel: 'Close',
       body: live
-        ? `<p class="muted">${table.session.ended ? 'Clock stopped, waiting for payment.' : isTimed(table.session) ? `Booked ${esc(fmtBooking(table.session.plannedMs))}, in use.` : 'Open time, in use.'}</p>
+        ? `<p class="muted">${table.session.ended ? 'Session ended, waiting for payment.' : isTimed(table.session) ? `Booked ${esc(fmtBooking(table.session.plannedMs))}, in use.` : 'Open time, in use.'}</p>
            <div class="table-actions">
-             <a class="btn btn--amber btn--lg" href="#/checkout/${encodeURIComponent(table.id)}" data-close-dialog>${icon('stop')}Stop &amp; Bill</a>
+             <a class="btn btn--amber btn--lg" href="#/checkout/${encodeURIComponent(table.id)}" data-close-dialog>${icon(table.session.ended ? 'receipt' : 'stop')}${table.session.ended ? 'Checkout' : 'Stop &amp; Bill'}</a>
              ${!table.session.ended ? `<button type="button" class="btn btn--neutral btn--lg" data-action="transfer">${icon('transfer')}Transfer Table</button>` : ''}
            </div>`
         : `<p class="muted">Available. Start a session on this table.</p>

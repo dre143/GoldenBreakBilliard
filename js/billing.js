@@ -107,6 +107,11 @@ export function feeBreakdown(ms, pricing = PRICING) {
 export const plannedMs = (session) => Math.max(0, Number(session?.plannedMs) || 0);
 export const isTimed = (session) => plannedMs(session) > 0;
 
+/** An unpaid timed session that reached its booking end can be extended. */
+export const canExtendEndedSession = (session) => Boolean(session?.ended && !session.cancelled
+  && isTimed(session) && session.startedAt != null && session.endedAt != null
+  && session.endedAt - session.startedAt >= plannedMs(session));
+
 /** Time left on a booked session (null for open time), and time played past it. */
 export const remainingMs = (session, elapsed) => (isTimed(session) ? Math.max(0, plannedMs(session) - elapsed) : null);
 export const overtimeMs = (session, elapsed) => (isTimed(session) ? Math.max(0, elapsed - plannedMs(session)) : 0);

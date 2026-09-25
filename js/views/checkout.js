@@ -2,7 +2,7 @@ import { state, on } from '../state.js';
 import * as svc from '../services.js';
 import {
   elapsedMs, tableFee, sessionFee, billSession, itemsTotal, itemsCount, round2, feeBreakdown, PRICING, PRICING_LABEL,
-  isTimed, plannedMs, remainingMs, overtimeMs, canCancelGame, cancelTimeLeft,
+  isTimed, plannedMs, remainingMs, overtimeMs, canCancelGame, cancelTimeLeft, canExtendEndedSession,
 } from '../billing.js';
 import { receiptDialog, bookingDialog, cancelGameDialog } from '../dialogs.js';
 import * as printer from '../printer.js';
@@ -161,11 +161,12 @@ function mountBill(el, ctx, tableId) {
         <p class="timer-panel__meta">${isTimed(s) ? `<strong>Booked ${fmtBooking(plannedMs(s))}</strong>` : '<strong>Open time</strong>'} · Started ${fmtTime(s.startedAt)}${s.ended && s.endedAt ? ` · ended ${fmtTime(s.endedAt)}` : isTimed(s) ? ` · ends ${fmtTime(s.startedAt + plannedMs(s))}` : ''} · ${PRICING_LABEL}</p>
         ${isTimed(s) ? '<p class="timer-panel__booking" data-live="booking" aria-live="off"></p>' : ''}
         ${s.ended ? '' : '<p class="timer-panel__next" data-live="next" aria-live="off"></p>'}
-        ${s.ended ? '' : `
+        ${s.ended && !canExtendEndedSession(s) ? '' : `
         <div class="timer-panel__controls">
           <button type="button" class="btn btn--light" data-action="extend" data-fk="extend">${icon('clock')}${isTimed(s) ? 'Add time' : 'Set hours'}</button>
+          ${s.ended ? '<span class="timer-panel__hint">Add time to continue this booking from its original start time.</span>' : `
           <button type="button" class="btn btn--end" data-action="end" data-fk="end">${icon('stop')}End Session</button>
-          <span class="timer-panel__hint">Ending stops the clock for billing. This can’t be undone.</span>
+          <span class="timer-panel__hint">Ending stops the clock for billing.</span>`}
         </div>`}`;
     });
   }
@@ -388,7 +389,7 @@ function mountBill(el, ctx, tableId) {
         const t = table();
         if (!t?.session) return undefined;
         const booked = plannedMs(t.session);
-        const played = elapsedMs(t);
+        const played = elapsedMs({ ...t, session: { ...t.session, ended: false } });
         return bookingDialog({
           title: booked ? `Add time · ${esc(t.name)}` : `Set hours · ${esc(t.name)}`,
           submitLabel: booked ? 'Add time' : 'Set hours',

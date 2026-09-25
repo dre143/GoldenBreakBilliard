@@ -23,9 +23,9 @@ import { esc, fmtCountdown } from './ui.js';
 // (location, localStorage) at module load — fine in the app, fatal if this file is imported by the
 // Node test runner (see tests/unit/time-alerts.test.mjs, which only exercises alertFor()).
 let endSessionFn = null;
-async function autoEndSession(tableId) {
+async function autoEndSession(tableId, session) {
   if (!endSessionFn) ({ endSession: endSessionFn } = await import('./services.js'));
-  return endSessionFn(tableId);
+  return endSessionFn(tableId, { expiredBooking: plannedMs(session), startedAt: session.startedAt });
 }
 
 const MIN = 60 * 1000;
@@ -119,7 +119,7 @@ export function startTimeAlerts() {
       if (!s || s.ended || s.cancelled || !isTimed(s) || stopping.has(t.id)) continue;
       if (elapsedMs(t) < plannedMs(s)) continue;
       stopping.add(t.id);
-      autoEndSession(t.id).catch((err) => console.error('Auto-stop failed', err)).finally(() => stopping.delete(t.id));
+      autoEndSession(t.id, s).catch((err) => console.error('Auto-stop failed', err)).finally(() => stopping.delete(t.id));
     }
   }
 
@@ -132,10 +132,10 @@ export function startTimeAlerts() {
       if (!s || s.ended || s.cancelled || !isTimed(s)) continue;
       const alert = alertFor(plannedMs(s) - elapsedMs(t));
       if (!alert) continue;
-      const id = `${s.startedAt}:${alert.key}`; // by session, not table id, so a Transfer Table move carries this state
+      const id = `${s.startedAt}:${plannedMs(s)}:${alert.key}`; // transfers keep the alert; added time re-arms it
       if (fired.has(id)) continue;
       // Mark this alert and every wider one as done, so a 5-minute alert is never followed by a 15-minute one.
-      for (const a of TIME_ALERTS) if (a.ms >= alert.ms) fired.add(`${s.startedAt}:${a.key}`);
+      for (const a of TIME_ALERTS) if (a.ms >= alert.ms) fired.add(`${s.startedAt}:${plannedMs(s)}:${a.key}`);
       saveFired(fired);
       open.set(t.id, { id, alert });
       alert.sound(t.name);
