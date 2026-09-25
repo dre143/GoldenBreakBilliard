@@ -1051,7 +1051,13 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .report-head__meta { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 24px; margin-top: 4px; font-size: 13px; color: var(--ink-soft); }
 .print-only { display: none; }
 
-.report-sheet { display: flex; flex-direction: column; gap: 12px; }
+.report-sheet {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 22px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
 .sheet-caption { font-size: 13px; font-weight: 700; }
 .sheet { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--surface); }
 .sheet th, .sheet td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
@@ -1513,6 +1519,7 @@ html.compact-nav .scrim[hidden] { display: none; }
   .table-wrap { overflow: visible; }
   .report-range input { border: 0; padding: 0; }
   .print-only, .report-head__logo, .report-head__hall { display: block !important; }
+  .report-sheet { padding: 0; border: 0; border-radius: 0; }
   .sheet { font-size: 9px; }
   .sheet th, .sheet td { padding: 3px 4px; }
   .overall, .pay-strip { break-inside: avoid; }
