@@ -160,7 +160,7 @@ rail before each whole hour, see below) and a table actually stopping.
     unused booked time is never charged, and none of it can run over into the next bracket by accident. The booking sets the
     "Time left" countdown, the alerts, and when auto-stop fires, and it is kept on the sale for reference.
   - **Add time** (at checkout) extends a booking before it runs out, so the customer keeps playing past what they first
-    booked. An Open Time table can also be switched to a booking there. The rules allow a booking to grow, never shrink —
+    booked. Open Time checkout does not offer Set hours or Add time. The rules allow a booking to grow, never shrink —
     so the only way to keep a Set Hours table running past "Time left: 0:00" is to add time before it gets there.
 
 Formula, on exact milliseconds: `< 1:06:00 → ₱200`, otherwise `₱200 + (1 + floor((elapsed − 1:06:00) / 15 min)) × ₱50`.
@@ -197,7 +197,7 @@ receipt and freeing the table, so two terminals can't oversell stock or bill a t
 ## Screens: what lives where
 
 - **Tables grid.** Each card is a small top-down pool table, built so you can scan the floor and act in one tap. Navy cloth with a green LED means In Use; pale cloth with an unlit display means Available. The cards show no buttons: tap a table to open its actions. A free table offers **Open Time** or **Set Hours**; a running table offers **Stop & Bill**, which opens Checkout (on the Checkout screen, tapping a running table goes straight to its bill), and **Transfer Table** to move the game to another table (see below). Booked tables count down time left, then show extra time once it runs out. A running table also warns before each whole hour (see *Hour-mark alert*).
-- **Checkout** (one table). This is where you manage a running table: **Add time** / **Set hours**, End Session, **Add Item**, cancel a game in its first 5 minutes, and payment.
+- **Checkout** (one table). This is where you manage a running table: **Add time** for Set Hours bookings, End Session, **Add Item**, cancel a game in its first 5 minutes, and payment.
 - **Top bar (phones and tablets).** Phones and tablets, in either orientation, get a top bar with **refresh**, the **thermal printer** and the **cash drawer**; the sidebar becomes a slide-out menu. On a desktop with a mouse the sidebar keeps labeled printer and cash drawer buttons.
 - The navy "device display" look is used only for live table equipment (the table cards and the checkout timer). The rest of the app stays ivory and felt green, so a dark card always means a running table.
 

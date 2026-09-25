@@ -163,7 +163,7 @@ function mountBill(el, ctx, tableId) {
         ${s.ended ? '' : '<p class="timer-panel__next" data-live="next" aria-live="off"></p>'}
         ${s.ended && !canExtendEndedSession(s) ? '' : `
         <div class="timer-panel__controls">
-          <button type="button" class="btn btn--light" data-action="extend" data-fk="extend">${icon('clock')}${isTimed(s) ? 'Add time' : 'Set hours'}</button>
+          ${isTimed(s) ? `<button type="button" class="btn btn--light" data-action="extend" data-fk="extend">${icon('clock')}Add time</button>` : ''}
           ${s.ended ? '<span class="timer-panel__hint">Added time starts now. Time spent waiting is not charged.</span>' : `
           <button type="button" class="btn btn--end" data-action="end" data-fk="end">${icon('stop')}End Session</button>
           <span class="timer-panel__hint">Ending stops the clock for billing.</span>`}
@@ -387,13 +387,12 @@ function mountBill(el, ctx, tableId) {
     switch (btn.dataset.action) {
       case 'extend': {
         const t = table();
-        if (!t?.session) return undefined;
+        if (!t?.session || !isTimed(t.session)) return undefined;
         const booked = plannedMs(t.session);
         const played = elapsedMs(t);
         return bookingDialog({
-          title: booked ? `Add time · ${esc(t.name)}` : `Set hours · ${esc(t.name)}`,
-          submitLabel: booked ? 'Add time' : 'Set hours',
-          // An open-time table switched to a booking counts the time already played.
+          title: `Add time · ${esc(t.name)}`,
+          submitLabel: 'Add time',
           baseMs: booked,
           elapsedNow: played,
           onPick: async (ms) => {
