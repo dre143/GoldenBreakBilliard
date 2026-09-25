@@ -70,7 +70,6 @@ export function mount(el, ctx) {
 
   function renderStats() {
     const stats = $('[data-region=stats]');
-    const active = state.tables.filter((t) => t.status !== 'available').length;
     if (!txs) {
       stats.innerHTML = loadingBlock('Loading sales…');
       return;
@@ -90,7 +89,8 @@ export function mount(el, ctx) {
       const up = pct >= 0;
       delta = `<span class="delta ${up ? 'delta--up' : 'delta--down'}"><span aria-hidden="true">${up ? '▲' : '▼'}</span> ${Math.abs(pct).toFixed(1)}% <span class="delta__ctx">vs this time yesterday</span></span>`;
     }
-    const itemsSold = today.reduce((n, x) => n + (x.items || []).reduce((m, i) => m + i.qty, 0), 0);
+    const itemsSold = today.filter((x) => x.saleType !== 'cue-stick').reduce((n, x) => n + (x.items || []).reduce((m, i) => m + i.qty, 0), 0);
+    const cueSticksSold = today.filter((x) => x.saleType === 'cue-stick').reduce((n, x) => n + (x.items || []).length, 0);
     stats.innerHTML = `
       <article class="stat stat--dark">
         <p class="stat__label">Total sales today</p>
@@ -108,9 +108,9 @@ export function mount(el, ctx) {
         <p class="stat__sub">${itemsSold} item${itemsSold === 1 ? '' : 's'} sold</p>
       </article>
       <article class="stat">
-        <p class="stat__label">Active tables</p>
-        <p class="stat__value num">${active}<span class="stat__of">/${state.tables.length}</span></p>
-        <p class="stat__sub">${state.tables.length - active} available</p>
+        <p class="stat__label">Cue stick sales</p>
+        <p class="stat__value num">${peso(sum(today, 'cueStickTotal'))}</p>
+        <p class="stat__sub">${cueSticksSold} cue stick${cueSticksSold === 1 ? '' : 's'} sold</p>
       </article>`;
   }
 
@@ -227,7 +227,6 @@ export function mount(el, ctx) {
   });
 
   const offs = [
-    on('tables', renderStats),
     on('products', renderLowStock),
     on('users', renderStaff),
     db.listen('transactions', (rows) => {
