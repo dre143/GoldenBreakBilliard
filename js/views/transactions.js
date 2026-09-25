@@ -28,21 +28,24 @@ export function mount(el, ctx) {
       title: 'Transactions',
       subtitle: 'Find a sale and reprint its receipt. For totals and cash to count, see Reports.',
     })}
-    <div class="report-controls">
-      <div class="report-controls__fields">
-        ${searchField('tx-search', 'Search transactions', 'Table, cashier, item, or QRPH ref')}
-        <div class="field report-controls__shift">
-          <label for="tx-range" class="sr-only">Date range</label>
-          <select id="tx-range">
-            ${RANGES.map((r) => `<option value="${r.key}" ${r.key === range ? 'selected' : ''}>${r.label}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      <p class="muted small" data-region="count"></p>
-    </div>
     <p class="tx-rule">To cancel a game with no table fee, open the table and use <strong>Cancel game</strong> in its first
       ${CANCEL_MINUTES} minutes, before paying. After ${CANCEL_MINUTES} minutes there is no cancel, and a paid sale can't be changed.</p>
-    <section class="card" aria-label="Transactions">
+    <section class="card card--flush" aria-labelledby="tx-title">
+      <div class="toolbar">
+        <div>
+          <h2 class="card-title" id="tx-title">Sales</h2>
+          <p class="card-sub" data-region="count"></p>
+        </div>
+        <div class="toolbar__controls">
+          ${searchField('tx-search', 'Search transactions', 'Table, cashier, item, or QRPH ref')}
+          <div class="field report-controls__shift">
+            <label for="tx-range" class="sr-only">Date range</label>
+            <select id="tx-range">
+              ${RANGES.map((r) => `<option value="${r.key}" ${r.key === range ? 'selected' : ''}>${r.label}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
       <div class="table-wrap" data-region="table"></div>
     </section>`;
 
@@ -65,7 +68,7 @@ export function mount(el, ctx) {
     }
     const showDate = range !== 'today';
     wrap.innerHTML = `
-      <table class="plain-table">
+      <table class="data-table">
         <thead><tr>
           <th scope="col">${showDate ? 'Date & time' : 'Time'}</th>
           <th scope="col">Table</th>
