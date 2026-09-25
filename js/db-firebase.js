@@ -23,7 +23,7 @@ const fa = getAuth(app);
  *   read:  Timestamp → milliseconds (pending server times use the local estimate)
  */
 const TIME_FIELDS = new Set([
-  'createdAt', 'updatedAt', 'startedAt', 'endedAt', 'voidedAt', 'lastSeen', 'lastRestockedAt', 't', 'at',
+  'createdAt', 'updatedAt', 'startedAt', 'endedAt', 'resumedAt', 'voidedAt', 'lastSeen', 'lastRestockedAt', 't', 'at',
 ]);
 const leaf = (key) => String(key).split('.').pop();
 

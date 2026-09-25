@@ -113,7 +113,13 @@ export const BOOKING_END_TOLERANCE_MS = 2000;
 /** An unpaid timed session that reached its booking end can be extended. */
 export const canExtendEndedSession = (session) => Boolean(session?.ended && !session.cancelled
   && isTimed(session) && session.startedAt != null && session.endedAt != null
-  && session.endedAt - session.startedAt >= plannedMs(session) - BOOKING_END_TOLERANCE_MS);
+  && sessionElapsed(session, session.endedAt) >= plannedMs(session) - BOOKING_END_TOLERANCE_MS);
+
+export const sessionElapsed = (session, end) => Math.max(0,
+  (session.elapsedBeforeResume || 0) + end - (session.resumedAt ?? session.startedAt));
+
+export const bookingEndsAt = (session) => (session.resumedAt ?? session.startedAt)
+  + plannedMs(session) - (session.elapsedBeforeResume || 0);
 
 /** Time left on a booked session (null for open time), and time played past it. */
 export const remainingMs = (session, elapsed) => (isTimed(session) ? Math.max(0, plannedMs(session) - elapsed) : null);
@@ -124,14 +130,17 @@ export const BOOKING_STEP_MS = 15 * MINUTE;
 export const BOOKING_PRESETS = [1, 2, 3].map((h) => h * 60 * MINUTE);
 
 /**
- * Elapsed play time. Sessions can't be paused: time runs from the server-stamped start until the
- * server-stamped end (once ended), otherwise until "now" (server-synced, for display only).
+ * Elapsed play time, excluding waits between an expired booking and its extension.
+ * Resumed sessions carry prior play time plus time since their server-stamped resume.
  */
 export function elapsedMs(table, now = serverNow()) {
   const s = table?.session;
   if (!s || s.startedAt == null) return 0;
   const end = s.ended && s.endedAt != null ? s.endedAt : now;
-  return Math.max(0, end - s.startedAt);
+  const elapsed = sessionElapsed(s, end);
+  // Normalize legacy auto-stops that landed a fraction of a second before expiry.
+  return s.ended && isTimed(s) && Math.abs(elapsed - plannedMs(s)) <= BOOKING_END_TOLERANCE_MS
+    ? plannedMs(s) : elapsed;
 }
 
 export const itemsTotal = (items) =>

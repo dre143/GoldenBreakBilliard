@@ -85,7 +85,7 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
   - `transfers` (optional) is the table-move history for **Transfer Table** — see below; the timer, items and bill never reset when a session moves
   - `startedAt` and `endedAt` are **server timestamps**. Elapsed time = `endedAt − startedAt` once ended, otherwise
     server-synced now − `startedAt`.
-  - Sessions can't be paused. Expired unpaid **Set Hours** sessions show **Session ended** and **Checkout**. Checkout offers **Add time** to extend the original booking and continue the same session, keeping its start time and items. Time between expiry and extension counts toward elapsed time; the new booking end must be in the future. Early-stopped, cancelled, and paid sessions cannot restart.
+  - Sessions can't be paused. Expired unpaid **Set Hours** sessions show **Session ended** and **Checkout**. Checkout offers **Add time** to extend the original booking and continue the same session, keeping its start time and items. Added time starts when confirmed. The waiting gap is excluded from elapsed time and billing; automatic expiry records the exact booked duration (for example, 1:00:00). Early-stopped, cancelled, and paid sessions cannot restart.
 - `products/{id}` — `name, category, price, stock, reorderLevel, lastRestockedAt`
 - `restocks/{id}` — restock log (feeds "Restocked this week")
 - `cueSticks/{id}` — `name, brand, weight, price, photo, status (available|sold), soldAt, soldTxId, soldByName` — see **Cue Sticks** below

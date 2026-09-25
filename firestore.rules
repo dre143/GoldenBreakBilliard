@@ -112,6 +112,16 @@ service cloud.firestore {
         && after.session.openedBy == request.auth.uid;
     }
 
+    function elapsedAt(s, end) {
+      return s.get('elapsedBeforeResume', 0) + end.toMillis()
+        - s.get('resumedAt', s.startedAt).toMillis();
+    }
+
+    function endedDuration(s) {
+      let elapsed = elapsedAt(s, s.endedAt);
+      return s.plannedMs > 0 && math.abs(elapsed - s.plannedMs) <= 2000 ? s.plannedMs : elapsed;
+    }
+
     function endsSession() {
       let before = resource.data;
       let after = request.resource.data;
@@ -120,7 +130,10 @@ service cloud.firestore {
         && before.session.ended == false
         && after.session.diff(before.session).affectedKeys().hasOnly(['ended', 'endedAt'])
         && after.session.ended == true
-        && after.session.endedAt == request.time;
+        && (after.session.endedAt == request.time
+          || (before.session.plannedMs > 0
+            && elapsedAt(before.session, request.time) >= before.session.plannedMs
+            && elapsedAt(before.session, after.session.endedAt) == before.session.plannedMs));
     }
 
     // Extend an unpaid booking after it expired. Preserve its start, items and history.
@@ -133,11 +146,12 @@ service cloud.firestore {
         && s.ended == true && s.get('cancelled', null) == null
         && s.plannedMs > 0
         // Allow the same 2-second clock-sync tolerance as canExtendEndedSession().
-        && s.endedAt.toMillis() - s.startedAt.toMillis() >= s.plannedMs - 2000
-        && after.session.diff(s).affectedKeys().hasOnly(['plannedMs', 'ended', 'endedAt'])
+        && elapsedAt(s, s.endedAt) >= s.plannedMs - 2000
+        && after.session.diff(s).affectedKeys().hasOnly(['plannedMs', 'ended', 'endedAt', 'resumedAt', 'elapsedBeforeResume'])
         && bookingOk(after.session.plannedMs)
         && after.session.plannedMs > s.plannedMs
-        && s.startedAt.toMillis() + after.session.plannedMs > request.time.toMillis()
+        && after.session.resumedAt == request.time
+        && after.session.elapsedBeforeResume == endedDuration(s)
         && after.session.ended == false && after.session.endedAt == null;
     }
 
@@ -221,6 +235,8 @@ service cloud.firestore {
         && after.session.startedAt.toMillis() == s.startedAt.toMillis()
         && after.session.ended == false && after.session.endedAt == null
         && after.session.plannedMs == s.plannedMs
+        && after.session.get('resumedAt', null) == s.get('resumedAt', null)
+        && after.session.get('elapsedBeforeResume', 0) == s.get('elapsedBeforeResume', 0)
         && after.session.items == s.items
         && after.session.rounds == s.rounds
         && after.session.openedBy == s.openedBy && after.session.openedByName == s.openedByName
@@ -353,7 +369,7 @@ service cloud.firestore {
         && before.session.ended == true && before.session.endedAt is timestamp
         && sale.startedAt.toMillis() == before.session.startedAt.toMillis()
         && sale.endedAt.toMillis() == before.session.endedAt.toMillis()
-        && sale.durationMs == before.session.endedAt.toMillis() - before.session.startedAt.toMillis()
+        && sale.durationMs == endedDuration(before.session)
         && sale.plannedMs == before.session.plannedMs
         // A normal sale is billed at the rate; a game cancelled within 5 minutes has no table fee.
         && ((before.session.get('cancelled', null) == null

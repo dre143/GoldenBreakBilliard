@@ -297,7 +297,7 @@ test('expired unpaid booking can continue only with a future booking end and unc
   const started = Date.now() - 61 * MIN;
   await seed({ 'tables/t1': endedTable(started, started + 60 * MIN, 60 * MIN) });
   const ref = doc(as('joy'), 'tables/t1');
-  const patch = { 'session.ended': false, 'session.endedAt': null, 'session.plannedMs': 90 * MIN, updatedAt: serverTimestamp() };
+  const patch = { 'session.ended': false, 'session.endedAt': null, 'session.plannedMs': 90 * MIN, 'session.resumedAt': serverTimestamp(), 'session.elapsedBeforeResume': 60 * MIN, updatedAt: serverTimestamp() };
   await assertFails(updateDoc(ref, { ...patch, 'session.startedAt': serverTimestamp() }));
   await assertFails(updateDoc(ref, { ...patch, 'session.plannedMs': 60 * MIN }));
   await assertSucceeds(updateDoc(ref, patch));
@@ -310,10 +310,36 @@ test('auto-stop clock skew allows continuation up to two seconds before expiry',
     'tables/t2': endedTable(started, started + 60 * MIN - 2000, 60 * MIN),
     'tables/t3': endedTable(started, started + 60 * MIN - 2001, 60 * MIN),
   });
-  const patch = { 'session.ended': false, 'session.endedAt': null, 'session.plannedMs': 90 * MIN, updatedAt: serverTimestamp() };
+  const patch = { 'session.ended': false, 'session.endedAt': null, 'session.plannedMs': 90 * MIN, 'session.resumedAt': serverTimestamp(), 'session.elapsedBeforeResume': 60 * MIN, updatedAt: serverTimestamp() };
   await assertSucceeds(updateDoc(doc(as('joy'), 'tables/t1'), patch));
   await assertSucceeds(updateDoc(doc(as('joy'), 'tables/t2'), patch));
   await assertFails(updateDoc(doc(as('joy'), 'tables/t3'), patch));
+});
+
+test('expired booking can restart after a long wait but cannot forge carried time or resume timestamp', async () => {
+  const started = Date.now() - 12 * 60 * MIN;
+  await seed({ 'tables/t1': endedTable(started, started + 60 * MIN, 60 * MIN) });
+  const ref = doc(as('joy'), 'tables/t1');
+  const patch = { 'session.ended': false, 'session.endedAt': null, 'session.plannedMs': 90 * MIN,
+    'session.resumedAt': serverTimestamp(), 'session.elapsedBeforeResume': 60 * MIN, updatedAt: serverTimestamp() };
+  await assertFails(updateDoc(ref, { ...patch, 'session.elapsedBeforeResume': 0 }));
+  await assertFails(updateDoc(ref, { ...patch, 'session.resumedAt': ts(Date.now() - MIN) }));
+  await assertSucceeds(updateDoc(ref, patch));
+});
+
+test('auto-stop records the exact booking deadline, including after a resume', async () => {
+  const started = Date.now() - 12 * 60 * MIN;
+  const resumed = Date.now() - 31 * MIN;
+  const t = runningTable(started, 90 * MIN);
+  t.session.resumedAt = ts(resumed);
+  t.session.elapsedBeforeResume = 60 * MIN;
+  await seed({ 'tables/t1': t });
+  const ref = doc(as('joy'), 'tables/t1');
+  const patch = { 'session.ended': true, 'session.endedAt': ts(resumed + 30 * MIN), updatedAt: serverTimestamp() };
+  await assertFails(updateDoc(ref, { ...patch, 'session.endedAt': ts(resumed + 29 * MIN) }));
+  await assertSucceeds(updateDoc(ref, patch));
+  await assertSucceeds(checkout(as('joy'), { durationMs: 90 * MIN, startedMs: started,
+    endedMs: resumed + 30 * MIN, fee: tableFee(90 * MIN), plannedMs: 90 * MIN }));
 });
 
 test('early stopped or cancelled bookings cannot continue', async () => {
@@ -321,7 +347,7 @@ test('early stopped or cancelled bookings cannot continue', async () => {
   const early = endedTable(started, started + 30 * MIN, 60 * MIN);
   const expired = endedTable(started, started + 60 * MIN, 60 * MIN);
   await seed({ 'tables/t1': early, 'tables/t2': { ...expired, session: { ...expired.session, cancelled: { reason: 'Other' } } } });
-  const patch = { 'session.ended': false, 'session.endedAt': null, 'session.plannedMs': 90 * MIN, updatedAt: serverTimestamp() };
+  const patch = { 'session.ended': false, 'session.endedAt': null, 'session.plannedMs': 90 * MIN, 'session.resumedAt': serverTimestamp(), 'session.elapsedBeforeResume': 60 * MIN, updatedAt: serverTimestamp() };
   await assertFails(updateDoc(doc(as('joy'), 'tables/t1'), patch));
   await assertFails(updateDoc(doc(as('joy'), 'tables/t2'), patch));
 });

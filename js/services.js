@@ -7,7 +7,7 @@
 import { db, auth } from './db.js';
 import {
   elapsedMs, round2, itemsTotal, CANCEL_REASONS, CANCEL_WINDOW_MS, PRICING,
-  billSession, plannedMs, BOOKING_STEP_MS, canExtendEndedSession,
+  billSession, plannedMs, BOOKING_STEP_MS, canExtendEndedSession, bookingEndsAt,
 } from './billing.js';
 import { SERVER_TIME, serverNow } from './clock.js';
 
@@ -45,19 +45,19 @@ export function extendSession(tableId, addMs) {
     if (!t?.session) throw new Error('This table has no open session.');
     if (t.session.ended && !canExtendEndedSession(t.session)) throw new Error('This session has already been stopped.');
     const planned = plannedMs(t.session) + addMs;
-    if (t.session.ended && t.session.startedAt + planned <= serverNow()) {
-      throw new Error('Add enough time to extend the booking beyond the current time.');
-    }
     tx.update('tables', tableId, {
       'session.plannedMs': planned,
-      ...(t.session.ended ? { 'session.ended': false, 'session.endedAt': null } : {}),
+      ...(t.session.ended ? {
+        'session.ended': false, 'session.endedAt': null,
+        'session.resumedAt': SERVER_TIME, 'session.elapsedBeforeResume': elapsedMs(t),
+      } : {}),
       updatedAt: SERVER_TIME,
     });
     return planned;
   });
 }
 
-/** Stop the clock for billing: the server stamps the end time. Final: a session can't be resumed. */
+/** Stop manually at server time, or automatically at the verified booking deadline. */
 export function endSession(tableId, { expiredBooking = null, startedAt = null } = {}) {
   return db.transaction(async (tx) => {
     const t = await tx.get('tables', tableId);
@@ -66,7 +66,11 @@ export function endSession(tableId, { expiredBooking = null, startedAt = null } 
     // A delayed auto-stop must not stop a booking another terminal extended or replaced.
     if (expiredBooking != null && (t.session.startedAt !== startedAt
       || plannedMs(t.session) !== expiredBooking || elapsedMs(t) < expiredBooking)) return;
-    tx.update('tables', tableId, { 'session.ended': true, 'session.endedAt': SERVER_TIME, updatedAt: SERVER_TIME });
+    tx.update('tables', tableId, {
+      'session.ended': true,
+      'session.endedAt': expiredBooking != null ? bookingEndsAt(t.session) : SERVER_TIME,
+      updatedAt: SERVER_TIME,
+    });
   });
 }
 
@@ -204,7 +208,7 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, gc
       if (p.stock < i.qty) throw new Error(`Not enough ${i.name} in stock (${p.stock} left).`);
     });
 
-    const durationMs = s.endedAt - s.startedAt;
+    const durationMs = elapsedMs(t);
     const cancelled = s.cancelled || null;
     // Billed on the time actually played (booked time never adds to it); a cancelled game has no table fee.
     const { billedMs, tableFee: fee } = billSession(s, durationMs); // the one authoritative bill calculation
