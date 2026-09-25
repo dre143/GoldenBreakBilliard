@@ -98,6 +98,13 @@ auth.onChange((authUser) => {
     }
     state.user = { ...profile, uid: authUser.uid };
     const key = `${profile.role}|${profile.name}`;
+    // #/showcase has no owner guard (a staff account can open it deliberately via the Cue Sticks page),
+    // so a hash left over from whoever last used this device — a Display account, or someone testing —
+    // would otherwise carry straight into a brand new sign-in. Only strip it at the moment an identity
+    // is newly established, not on every route() call, so a deliberate visit mid-session is untouched.
+    if (!isDisplay(state.user) && location.hash.replace(/^#\/?/, '').split('/')[0] === 'showcase') {
+      history.replaceState(null, '', '#/tables');
+    }
     if (shellKey === null) {
       shellKey = key;
       startData();
