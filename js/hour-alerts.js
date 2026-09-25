@@ -1,4 +1,5 @@
-// Hour-mark proximity alert on the table cards: "warn" in the last 5 minutes before each whole hour of
+// Table-card warnings: booking time left takes priority, then the whole-hour reminder.
+// "warn" in the last 5 minutes before booking expiry or each whole hour of
 // play, "crit" in the last minute. The level is derived from elapsed time on every tick, so it clears the
 // instant the hour passes (or the session is stopped) and re-arms for the next hour on its own.
 //
@@ -65,10 +66,19 @@ function checkHourCrossings(now) {
 export function hourAlertFor(table, now = serverNow()) {
   const s = table?.session;
   if (!s || s.ended || s.cancelled || table.status !== 'in_use' || !isTimed(s)) return null;
+  const left = plannedMs(s) - elapsedMs(table, now);
+  if (left <= 0) return null;
+  // Booking expiry takes priority over whole-hour reminders, including 15/30/90-minute
+  // bookings and extensions. Each urgency level can be dismissed independently.
+  if (left <= 5 * MIN) {
+    const level = left <= MIN ? 'crit' : 'warn';
+    const key = `${s.startedAt}:booking:${plannedMs(s)}:${level}`;
+    return { level, key, kind: 'booking', msToMark: left, dismissed: memory.dismissed.has(key) };
+  }
   const a = hourAlert(elapsedMs(table, now));
   if (!a.level) return null;
   const key = `${s.startedAt}:${a.boundary}`;
-  return { ...a, key, dismissed: memory.dismissed.has(key) };
+  return { ...a, key, kind: 'hour', dismissed: memory.dismissed.has(key) };
 }
 
 /** Level to show on a card ('warn' | 'crit'), or null when there's nothing to show. */
@@ -78,8 +88,8 @@ export function visibleHourLevel(table, now = serverNow()) {
 }
 
 const SR_TEXT = {
-  warn: 'Hour mark in under 5 minutes.',
-  crit: 'Hour mark in under 1 minute.',
+  warn: 'Time warning: 5 minutes or less remaining.',
+  crit: 'Urgent time warning: 1 minute or less remaining.',
 };
 
 /** Put the alert state on every table card under root (called every second, and after any change). */

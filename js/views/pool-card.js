@@ -72,7 +72,7 @@ export function poolCard(t, { picker = false } = {}) {
       </div>
       ${live && !stopped ? `<span class="pool__bell" aria-hidden="true">${icon('bell')}</span>
       <button type="button" class="pool__dismiss" data-hour-dismiss="${id}" data-fk="dismiss-${id}" aria-label="Dismiss hour-mark alert for ${esc(t.name)}">${icon('x')}</button>
-      <span class="sr-only" role="status" data-hour-sr="${id}" data-level="${hourLevel || ''}">${hourLevel === 'crit' ? 'Hour mark in under 1 minute.' : hourLevel === 'warn' ? 'Hour mark in under 5 minutes.' : ''}</span>` : ''}
+      <span class="sr-only" role="status" data-hour-sr="${id}" data-level="${hourLevel || ''}">${hourLevel === 'crit' ? 'Urgent time warning: 1 minute or less remaining.' : hourLevel === 'warn' ? 'Time warning: 5 minutes or less remaining.' : ''}</span>` : ''}
       ${picker
         ? `<a class="pool__hit" href="#/checkout/${encodeURIComponent(t.id)}" data-fk="bill-${id}" aria-label="Bill ${esc(t.name)}"></a>`
         : `<button type="button" class="pool__hit" data-action="open-table" data-id="${id}" data-fk="pool-${id}" aria-label="${esc(t.name)}, ${live ? 'in use' : 'available'}. Show actions"></button>`}

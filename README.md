@@ -344,6 +344,11 @@ so that screen never needs to borrow a real staff member's login (and everything
 
 ## Hour-mark alert (table cards)
 
+Set Hours cards also warn based on the **booking countdown**, including 15-, 30-, and 90-minute bookings
+and added time: amber in the last five minutes, red in the last minute. Booking warnings take priority
+over whole-hour reminders. Dismissing amber does not hide the later red warning. The TV display updates
+these effects every second; stopped, cancelled, and Open Time sessions do not show booking warnings.
+
 A **Set Hours** table warns the cashier as it nears each whole hour of play (1:00, 2:00, ...), so they can tell the
 customer before the next rate step. It is a state layered on the card and changes nothing about billing.
 **Open Time never gets this** — no rail glow, no bell badge, no chime, no hour-crossing bell — it has no warning or
