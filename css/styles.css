@@ -171,6 +171,17 @@ input:focus-visible, select:focus-visible { outline-offset: 0; }
   font-weight: 700;
 }
 .nav__link[aria-current="page"] .ico { color: var(--amber); }
+.nav__link span:not(.nav-badge) { flex: 1; }
+.nav-badge {
+  display: none; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(246, 243, 236, .14);
+  color: var(--ivory);
+  font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.nav-badge:not(:empty) { display: inline-flex; }
+.nav-badge--warn { background: var(--amber); color: var(--felt-deep); }
 
 .demo-note__btn {
   display: flex; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 10px; width: 100%;

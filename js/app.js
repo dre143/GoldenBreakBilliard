@@ -1,6 +1,7 @@
 import { db, auth, mode } from './db.js';
-import { state, set, emit, reset } from './state.js';
+import { state, set, on, emit, reset } from './state.js';
 import { icon, esc, initials, toast, addDays, toolIcons } from './ui.js';
+import { isLowStock } from './billing.js';
 import { setServerOffset } from './clock.js';
 import * as svc from './services.js';
 import { renderAuth, renderPending } from './views/auth.js';
@@ -52,6 +53,7 @@ const ROUTES = {
 let sessionCleanups = [];
 let viewCleanup = null;
 let printerCleanup = null;
+let navBadgeCleanup = null;
 let heartbeat = null;
 
 setInterval(() => emit('tick'), 1000);
@@ -204,7 +206,9 @@ function renderShell() {
   const owner = isOwnerLevel(u);
   const link = (key) => {
     const r = ROUTES[key];
-    return `<a class="nav__link" href="#/${key}" data-route="${key}">${icon(r.icon)}<span>${r.label}</span></a>`;
+    const badge = key === 'tables' || key === 'inventory'
+      ? `<span class="nav-badge" data-nav-badge="${key}" aria-hidden="true"></span>` : '';
+    return `<a class="nav__link" href="#/${key}" data-route="${key}">${icon(r.icon)}<span>${r.label}</span>${badge}</a>`;
   };
   root.innerHTML = `
     <a class="skip-link" href="#main">Skip to content</a>
@@ -268,6 +272,24 @@ function renderShell() {
     dot.classList.toggle('is-on', Boolean(s.kind));
     root.querySelector('[data-region=printer-state]').textContent = s.kind ? `, connected: ${s.name}` : ', not connected';
   });
+  navBadgeCleanup?.();
+  const updateNavBadges = () => {
+    const tablesBadge = root.querySelector('[data-nav-badge=tables]');
+    if (tablesBadge) {
+      const inUse = state.tables.filter((t) => t.status === 'in_use').length;
+      tablesBadge.textContent = inUse ? String(inUse) : '';
+    }
+    const inventoryBadge = root.querySelector('[data-nav-badge=inventory]');
+    if (inventoryBadge) {
+      const low = state.products.filter(isLowStock).length;
+      inventoryBadge.textContent = low ? String(low) : '';
+      inventoryBadge.classList.toggle('nav-badge--warn', low > 0);
+    }
+  };
+  navBadgeCleanup = () => { offTables(); offProducts(); };
+  const offTables = on('tables', updateNavBadges);
+  const offProducts = on('products', updateNavBadges);
+  updateNavBadges();
   root.querySelector('[data-action=clear-demo]')?.addEventListener('click', () => {
     if (!confirm('Clear all demo sales, expenses and open tables (and unsell every cue stick)? Staff, tables, products and cue sticks stay.')) return;
     auth.clearDemoSales();
