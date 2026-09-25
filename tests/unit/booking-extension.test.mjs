@@ -7,8 +7,13 @@ const session = { startedAt: 1000, endedAt: 3601000, plannedMs: 3600000, ended: 
 test('only expired, non-cancelled timed sessions can continue', () => {
   assert.equal(canExtendEndedSession(session), true);
   for (const s of [null, { ...session, ended: false }, { ...session, plannedMs: 0 },
-    { ...session, endedAt: 3600999 }, { ...session, cancelled: {} }]) {
+    { ...session, endedAt: 3598999 }, { ...session, cancelled: {} }]) {
     assert.equal(canExtendEndedSession(s), false);
+  }
+});
+test('auto-stop just before the booking boundary still offers Add time', () => {
+  for (const earlyMs of [1, 1000, 1999, 2000]) {
+    assert.equal(canExtendEndedSession({ ...session, endedAt: session.endedAt - earlyMs }), true);
   }
 });
 test('expired table card says Session ended', () => {

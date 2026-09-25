@@ -107,10 +107,13 @@ export function feeBreakdown(ms, pricing = PRICING) {
 export const plannedMs = (session) => Math.max(0, Number(session?.plannedMs) || 0);
 export const isTimed = (session) => plannedMs(session) > 0;
 
+// Auto-stop uses the device's server-clock estimate; its server timestamp can land
+// just before the booking boundary. Keep this tolerance aligned with firestore.rules.
+export const BOOKING_END_TOLERANCE_MS = 2000;
 /** An unpaid timed session that reached its booking end can be extended. */
 export const canExtendEndedSession = (session) => Boolean(session?.ended && !session.cancelled
   && isTimed(session) && session.startedAt != null && session.endedAt != null
-  && session.endedAt - session.startedAt >= plannedMs(session));
+  && session.endedAt - session.startedAt >= plannedMs(session) - BOOKING_END_TOLERANCE_MS);
 
 /** Time left on a booked session (null for open time), and time played past it. */
 export const remainingMs = (session, elapsed) => (isTimed(session) ? Math.max(0, plannedMs(session) - elapsed) : null);

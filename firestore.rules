@@ -132,7 +132,8 @@ service cloud.firestore {
         && before.status == 'in_use' && after.status == 'in_use'
         && s.ended == true && s.get('cancelled', null) == null
         && s.plannedMs > 0
-        && s.endedAt.toMillis() - s.startedAt.toMillis() >= s.plannedMs
+        // Allow the same 2-second clock-sync tolerance as canExtendEndedSession().
+        && s.endedAt.toMillis() - s.startedAt.toMillis() >= s.plannedMs - 2000
         && after.session.diff(s).affectedKeys().hasOnly(['plannedMs', 'ended', 'endedAt'])
         && bookingOk(after.session.plannedMs)
         && after.session.plannedMs > s.plannedMs

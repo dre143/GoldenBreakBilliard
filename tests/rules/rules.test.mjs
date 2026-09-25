@@ -303,6 +303,19 @@ test('expired unpaid booking can continue only with a future booking end and unc
   await assertSucceeds(updateDoc(ref, patch));
 });
 
+test('auto-stop clock skew allows continuation up to two seconds before expiry', async () => {
+  const started = Date.now() - 61 * MIN;
+  await seed({
+    'tables/t1': endedTable(started, started + 60 * MIN - 1000, 60 * MIN),
+    'tables/t2': endedTable(started, started + 60 * MIN - 2000, 60 * MIN),
+    'tables/t3': endedTable(started, started + 60 * MIN - 2001, 60 * MIN),
+  });
+  const patch = { 'session.ended': false, 'session.endedAt': null, 'session.plannedMs': 90 * MIN, updatedAt: serverTimestamp() };
+  await assertSucceeds(updateDoc(doc(as('joy'), 'tables/t1'), patch));
+  await assertSucceeds(updateDoc(doc(as('joy'), 'tables/t2'), patch));
+  await assertFails(updateDoc(doc(as('joy'), 'tables/t3'), patch));
+});
+
 test('early stopped or cancelled bookings cannot continue', async () => {
   const started = Date.now() - 61 * MIN;
   const early = endedTable(started, started + 30 * MIN, 60 * MIN);
