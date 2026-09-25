@@ -100,18 +100,24 @@ auth.onChange((authUser) => {
     const key = `${profile.role}|${profile.name}`;
     // #/showcase has no owner guard (a staff account can open it deliberately via the Cue Sticks page),
     // so a hash left over from whoever last used this device — a Display account, or someone testing —
-    // would otherwise carry straight into a brand new sign-in. Only strip it at the moment an identity
-    // is newly established, not on every route() call, so a deliberate visit mid-session is untouched.
-    if (!isDisplay(state.user) && location.hash.replace(/^#\/?/, '').split('/')[0] === 'showcase') {
-      history.replaceState(null, '', '#/tables');
-    }
+    // would otherwise carry straight into a brand new sign-in. Only strip it at the moment an identity is
+    // newly established (inside the two branches below, not out here): this callback also re-fires on
+    // routine presence-heartbeat writes to the same profile doc, and resetting the hash on every one of
+    // those would silently knock a staff member's deliberate, ongoing Showcase visit back to Tables.
+    const clearStaleShowcaseHash = () => {
+      if (!isDisplay(state.user) && location.hash.replace(/^#\/?/, '').split('/')[0] === 'showcase') {
+        history.replaceState(null, '', '#/tables');
+      }
+    };
     if (shellKey === null) {
       shellKey = key;
+      clearStaleShowcaseHash();
       startData();
       renderShell();
       route();
     } else if (key !== shellKey) {
       shellKey = key;
+      clearStaleShowcaseHash();
       renderShell();
       route();
     }

@@ -836,6 +836,12 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 16px;
 }
+/* Below ~375px there's only room for one 170px column, turning each card into a near-empty full-width
+   square. Force two smaller ones instead — still plenty big enough to tap. */
+@media (max-width: 480px) {
+  .cue-showcase { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .cue-card { padding: 10px; }
+}
 .cue-card {
   display: flex; flex-direction: column; gap: 8px;
   padding: 14px;
@@ -879,7 +885,7 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   opacity: 0; transition: opacity .2s;
 }
 .showcase:hover .showcase__back, .showcase__back:focus-visible { opacity: 1; }
-.showcase__stage { width: min(1400px, 92vw); }
+.showcase__stage { width: min(1700px, 94vw); }
 .showcase__card {
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: clamp(24px, 5vw, 72px);
   animation: showcase-in .6s ease both;
@@ -898,16 +904,16 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .showcase__photo .ico { width: 25%; height: 25%; color: rgba(246, 243, 236, .3); }
 .showcase__info { min-width: 0; }
 .showcase__eyebrow {
-  font-size: clamp(14px, 1.6vw, 20px); font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+  font-size: clamp(14px, 1.6vw, 26px); font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
   color: var(--amber);
 }
 .showcase__name {
-  margin-top: 14px;
-  font: 700 clamp(36px, 5.5vw, 76px)/1.05 var(--font-display);
+  margin-top: 18px;
+  font: 700 clamp(36px, 5.5vw, 100px)/1.05 var(--font-display);
   overflow-wrap: break-word;
 }
-.showcase__meta { margin-top: 14px; font-size: clamp(16px, 2vw, 26px); color: rgba(246, 243, 236, .68); }
-.showcase__price { margin-top: 22px; font: 600 clamp(30px, 4.2vw, 56px)/1 var(--font-display); color: var(--ivory); }
+.showcase__meta { margin-top: 18px; font-size: clamp(16px, 2vw, 32px); color: rgba(246, 243, 236, .68); }
+.showcase__price { margin-top: 28px; font: 600 clamp(30px, 4.2vw, 72px)/1 var(--font-display); color: var(--ivory); }
 .showcase__dots {
   position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 2;
   display: flex; gap: 10px;
@@ -918,10 +924,14 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 /* Table-status slide, the showcase's first slide: the real Tables screen cards (poolCard(), see
    js/views/pool-card.js), so the TV shows the exact same timer, bill and rate details, not a summary. */
 .showcase__tables { width: 100%; text-align: center; animation: showcase-in .6s ease both; }
-.showcase__tables-title { margin-top: 10px; font: 700 clamp(28px, 4vw, 52px)/1.1 var(--font-display); }
+.showcase__tables-title { margin-top: 10px; font: 700 clamp(28px, 4vw, 64px)/1.1 var(--font-display); }
 .showcase__pool-grid {
-  margin: 36px auto 0; max-width: 1300px;
+  margin: 48px auto 0; max-width: min(1800px, 94vw);
   text-align: left; /* the cards themselves stay left-aligned; only the slide's heading is centered */
+  /* poolCard() (js/views/pool-card.js) sizes its own text for the normal floor-grid screen, which reads
+     small on an actual TV a few metres away — zoom blows up the whole reused card (not just this slide)
+     without touching that component's own CSS, so the ordinary Tables screen is completely unaffected. */
+  zoom: 1.45;
 }
 
 @media (max-width: 900px) {
