@@ -45,14 +45,14 @@ export function mount(el, ctx) {
         <section class="card" aria-labelledby="low-title">
           <div class="card-head">
             <h2 class="card-title" id="low-title">Low stock alerts</h2>
-            <span class="badge badge--danger" data-region="low-count"></span>
+            <span class="badge badge--neutral" data-region="low-count"></span>
           </div>
           <ul class="alert-list" data-region="low"></ul>
         </section>
         <section class="card" aria-labelledby="voids-title">
           <div class="card-head">
             <h2 class="card-title" id="voids-title">Cancelled games today</h2>
-            <span class="badge badge--danger" data-region="voids-count"></span>
+            <span class="badge badge--neutral" data-region="voids-count"></span>
           </div>
           <ul class="alert-list" data-region="voids"></ul>
         </section>
@@ -160,6 +160,8 @@ export function mount(el, ctx) {
     const t0 = startOfDay();
     const todays = cancelledGames(txs.filter((x) => x.createdAt >= t0));
     countEl.textContent = `${todays.length} game${todays.length === 1 ? '' : 's'}`;
+    countEl.classList.toggle('badge--danger', todays.length > 0);
+    countEl.classList.toggle('badge--neutral', todays.length === 0);
     list.innerHTML = todays.length ? todays.map((x) => {
       const c = cancelInfo(x);
       return `
@@ -177,7 +179,10 @@ export function mount(el, ctx) {
 
   function renderLowStock() {
     const low = state.products.filter(isLowStock).sort((a, b) => a.stock / (a.reorderLevel || 1) - b.stock / (b.reorderLevel || 1));
-    $('[data-region=low-count]').textContent = `${low.length} item${low.length === 1 ? '' : 's'}`;
+    const lowCountEl = $('[data-region=low-count]');
+    lowCountEl.textContent = `${low.length} item${low.length === 1 ? '' : 's'}`;
+    lowCountEl.classList.toggle('badge--danger', low.length > 0);
+    lowCountEl.classList.toggle('badge--neutral', low.length === 0);
     $('[data-region=low]').innerHTML = low.length ? low.map((p) => `
       <li class="alert-item">
         <span class="alert-item__icon" aria-hidden="true">${icon('alert')}</span>
