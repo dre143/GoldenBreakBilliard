@@ -170,6 +170,21 @@ export const balanceDue = (session, pricing = PRICING) =>
   (isTimed(session) ? round2(tableFee(plannedMs(session), pricing) - paidFee(session, pricing)) : 0);
 
 /**
+ * What paying right now actually charges for the table fee. Paying never ends a Set Hours session by
+ * itself (only auto-stop at the booked time, or the cashier's own End Session, does that) — so while
+ * the booking is still running, this is the balance on the BOOKED length (balanceDue), never on time
+ * actually played, exactly like the amount Set Hours charges once ended. Once the session has ended
+ * (or for Open Time, which has no booking to prepay), it's the plain schedule fee for the time actually
+ * played, exactly as billSession() has always computed — floored at whatever was already paid so it's
+ * never charged twice.
+ */
+export function dueTableFee(session, elapsed) {
+  if (session?.cancelled) return 0;
+  if (isTimed(session) && !session?.ended) return balanceDue(session);
+  return billSession(session, elapsed).tableFee;
+}
+
+/**
  * One session's bill, from its elapsed time. `elapsedMs` is the real time played and is never altered.
  * For an unpaid session the bill is the plain schedule fee for the time played, exactly as before.
  * For a prepaid session, the paid portion is never charged again and is never refunded for playing

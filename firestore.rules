@@ -179,9 +179,11 @@ service cloud.firestore {
         && after.session.plannedMs >= before.session.plannedMs;
     }
 
-    // Pays some or all of a running Set Hours booking's table fee (js/services.js payBooking, and
-    // extendSession's payNow) without stopping the session: status and ended are untouched, only
-    // session.prepaid (and, for "Add time → Pay now" in the same write, plannedMs) change.
+    // Pays some or all of a running Set Hours booking's table fee (js/services.js payBooking,
+    // completeCheckout's payRunningBooking, and extendSession's payNow) without stopping the session:
+    // status and ended are untouched, only session.prepaid (and, for "Add time → Pay now" or a combined
+    // fee+items payment in the same write, plannedMs / items) change. Paying never ends the session —
+    // only auto-stop reaching the booked time, or the cashier's own End Session, does that.
     function paysBooking() {
       let before = resource.data;
       let after = request.resource.data;
@@ -190,7 +192,10 @@ service cloud.firestore {
         && before.status == 'in_use' && after.status == 'in_use'
         && s.ended == false && s.get('cancelled', null) == null
         && s.plannedMs > 0
-        && after.session.diff(s).affectedKeys().hasOnly(['prepaid', 'plannedMs'])
+        && after.session.diff(s).affectedKeys().hasOnly(['prepaid', 'plannedMs', 'items'])
+        // Items are either left exactly as they were, or cleared to [] because this same payment also
+        // charged for them (payRunningBooking) — never rewritten to some other list.
+        && (after.session.get('items', []) == s.get('items', []) || after.session.get('items', []).size() == 0)
         && bookingOk(after.session.plannedMs) && after.session.plannedMs >= s.plannedMs
         && paymentAppliedOk(s, after.session);
     }
@@ -482,9 +487,12 @@ service cloud.firestore {
         && after.status == 'available' && after.session == null && after.lastTxId == id;
     }
 
-    // A payment on a running Set Hours booking (js/services.js payBooking / extendSession's payNow):
-    // no items, no clock stopped — just the fee for newly-paid booked time, from the same schedule as
-    // any other sale, cross-checked against the table's own before/after prepaid state.
+    // A payment on a running Set Hours booking, no clock stopped (js/services.js payBooking,
+    // completeCheckout's payRunningBooking, extendSession's payNow): the fee for newly-paid booked
+    // time, from the same schedule as any other sale, cross-checked against the table's own before/
+    // after prepaid state. It may also include items — completeCheckout's single "Complete Transaction"
+    // now settles the table-fee balance and whatever's on the bill together without ending the session
+    // — but only when the same write clears them from the table (never left to be double-charged later).
     function prepaySaleOk(sale, id) {
       let before = get(tablePath(sale.tableId)).data;
       let after = getAfter(tablePath(sale.tableId)).data;
@@ -494,10 +502,13 @@ service cloud.firestore {
         && s.plannedMs > 0
         && sale.startedAt.toMillis() == s.startedAt.toMillis()
         && sale.plannedMs == newPaidMs
-        && sale.items.size() == 0 && sale.productTotal == 0
+        && sale.items is list
+        && sale.productTotal is number && sale.productTotal >= 0
         && sale.tableFee == rawFee(newPaidMs) - prepaidFeeOf(s)
-        && sale.tableFee > 0
-        && math.abs(sale.total - sale.tableFee) < 0.005
+        && sale.tableFee >= 0
+        && math.abs(sale.total - (sale.tableFee + sale.productTotal)) < 0.005
+        && sale.total > 0
+        && (sale.items.size() == 0 || after.session.get('items', []).size() == 0)
         && after.status == 'in_use'
         && after.session.prepaid.paidMs == newPaidMs
         && after.session.prepaid.lastTxId == id;

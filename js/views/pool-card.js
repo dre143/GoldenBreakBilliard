@@ -33,7 +33,7 @@ export function bookingStatus(t, elapsed) {
  * Top-down pool table card for the floor grid. One glance: dark navy cloth with a lit LED = In Use,
  * pale cloth with an unlit display = Available. The card carries no visible buttons: the whole card is
  * the tap target (stretched-hit pattern). On the Tables screen it opens that table's actions
- * (Open Time / Set Hours, or Stop & Bill); on the Checkout picker (picker: true) it goes straight to the bill.
+ * (Open Time / Set Hours, or Checkout); on the Checkout picker (picker: true) it goes straight to the bill.
  */
 export function poolCard(t, { picker = false } = {}) {
   const live = t.status === 'in_use' && Boolean(t.session);

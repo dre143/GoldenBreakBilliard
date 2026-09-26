@@ -253,3 +253,77 @@ test('a cashier cannot mark a booking refunded without a matching refund transac
     updatedAt: serverTimestamp(),
   }));
 });
+
+/* ---------------- unified Complete Transaction: table fee + items together, session stays running ---------------- */
+
+// A running Set Hours session with items already on the bill.
+const bookedTableWithItems = (startedMs, plannedMs, items) => ({
+  name: 'Table 01', number: 1, status: 'in_use', light: false,
+  session: {
+    startedAt: ts(startedMs), ended: false, endedAt: null, plannedMs, items, rounds: 0,
+    openedBy: 'joy', openedByName: 'Joy',
+  },
+});
+
+function payBookingWithItems(fs, { tableId = 't1', startedMs, paidToMs, fee, productTotal, txId = 'p1', cashier = 'joy' }) {
+  const batch = writeBatch(fs);
+  batch.set(doc(fs, 'transactions', txId), {
+    tableId, tableName: 'Table 01', pricing: null, kind: 'prepay',
+    startedAt: ts(startedMs), endedAt: null, durationMs: null,
+    plannedMs: paidToMs, billedMs: null, mode: 'timed',
+    paidFromMs: 0, paidToMs, tableFee: fee,
+    items: [{ productId: 'water', name: 'Water', category: 'Beverages', price: 20, qty: 2, total: 40 }],
+    productTotal, total: fee + productTotal,
+    method: 'cash', payments: { cash: fee + productTotal, gcash: 0 }, tendered: fee + productTotal, change: 0,
+    cashierId: cashier, cashierName: 'Joy', createdAt: serverTimestamp(),
+  });
+  batch.update(doc(fs, 'tables', tableId), {
+    'session.prepaid': { paidMs: paidToMs, lastTxId: txId, refunded: false },
+    'session.items': [],
+    updatedAt: serverTimestamp(),
+  });
+  return batch.commit();
+}
+
+test('Complete Transaction on a running booking can settle the table fee and items together, clearing the bill, without ending', async () => {
+  const startedMs = Date.now() - 5 * MIN;
+  await seed({
+    'tables/t1': bookedTableWithItems(startedMs, 60 * MIN, [{ productId: 'water', name: 'Water', category: 'Beverages', price: 20, qty: 2 }]),
+  });
+  const joy = as('joy');
+  const fee = tableFee(60 * MIN);
+  await assertSucceeds(payBookingWithItems(joy, { startedMs, paidToMs: 60 * MIN, fee, productTotal: 40 }));
+  let data;
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    data = (await getDoc(doc(ctx.firestore(), 'tables/t1'))).data();
+  });
+  assert.equal(data.status, 'in_use');
+  assert.equal(data.session.ended, false);
+  assert.deepEqual(data.session.items, []); // settled and cleared, not carried forward
+});
+
+test('a payment that charges for items but leaves them on the table\'s bill is rejected (no double-charging later)', async () => {
+  const startedMs = Date.now() - 5 * MIN;
+  await seed({
+    'tables/t1': bookedTableWithItems(startedMs, 60 * MIN, [{ productId: 'water', name: 'Water', category: 'Beverages', price: 20, qty: 2 }]),
+  });
+  const joy = as('joy');
+  const fee = tableFee(60 * MIN);
+  const batch = writeBatch(joy);
+  batch.set(doc(joy, 'transactions/p1'), {
+    tableId: 't1', tableName: 'Table 01', pricing: null, kind: 'prepay',
+    startedAt: ts(startedMs), endedAt: null, durationMs: null,
+    plannedMs: 60 * MIN, billedMs: null, mode: 'timed',
+    paidFromMs: 0, paidToMs: 60 * MIN, tableFee: fee,
+    items: [{ productId: 'water', name: 'Water', category: 'Beverages', price: 20, qty: 2, total: 40 }],
+    productTotal: 40, total: fee + 40,
+    method: 'cash', payments: { cash: fee + 40, gcash: 0 }, tendered: fee + 40, change: 0,
+    cashierId: 'joy', cashierName: 'Joy', createdAt: serverTimestamp(),
+  });
+  // Items are charged for in the sale but NOT cleared from the table — this must be rejected.
+  batch.update(doc(joy, 'tables/t1'), {
+    'session.prepaid': { paidMs: 60 * MIN, lastTxId: 'p1', refunded: false },
+    updatedAt: serverTimestamp(),
+  });
+  await assertFails(batch.commit());
+});

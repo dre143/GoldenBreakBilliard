@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  elapsedMs, isPrepaid, paidMs, paidFee, balanceDue, tableFee,
+  elapsedMs, isPrepaid, paidMs, paidFee, balanceDue, tableFee, dueTableFee,
 } from '../../js/billing.js';
 
 // Exercise the real services against an isolated, in-memory demo backend (see booking-services.test.mjs).
@@ -11,7 +11,7 @@ globalThis.localStorage = { getItem: () => '{}', setItem() {} };
 globalThis.sessionStorage = { getItem: () => null, setItem() {} };
 const { db } = await import('../../js/db.js');
 const {
-  startSession, payBooking, extendSession, endSession, finishAutoStop, cancelGame, completeCheckout,
+  startSession, payBooking, extendSession, endSession, finishAutoStop, cancelGame, completeCheckout, changeItem,
 } = await import('../../js/services.js');
 
 const MIN = 60000;
@@ -263,4 +263,97 @@ test('Stop & Bill (completeCheckout) on Open Time still ends and frees the table
   const t = await db.get('tables', 't1');
   assert.equal(t.status, 'available'); // freed — this is Stop & Bill, the only way Open Time ever pays
   assert.equal(t.session, null);
+}));
+
+/* ---------------- unified Complete Transaction: one button, pays without ending Set Hours ----------------
+ * "Stop & Bill" as a name coupling payment with ending the session was the actual mistake (per the
+ * cashier's own report of Table 3 ending right after paying): there is no separate "Pay booking now"
+ * button any more. completeCheckout() itself now pays a still-running Set Hours booking without
+ * ending it; only auto-stop reaching the booked time, or explicit endSession(), ever ends one.
+ */
+
+test('completeCheckout on a running Set Hours booking pays without ending it — no separate button needed', () => withClock(1_700_000_000_000, async (advance) => {
+  await freshTable();
+  await startSession('t1', joy, { booking: 60 * MIN });
+  advance(9 * MIN); // Table 3's exact report: pay a few minutes into a 1h booking
+  const sale = await completeCheckout('t1', { method: 'cash' }, joy);
+  assert.equal(sale.tableFee, 200);
+  assert.equal(sale.total, 200);
+  assert.equal(sale.kind, 'prepay');
+  assert.equal(sale.endedAt, null); // nothing was stopped
+  const t = await db.get('tables', 't1');
+  assert.equal(t.status, 'in_use'); // still occupied
+  assert.equal(t.session.ended, false); // clock still running — this was the regression
+  assert.equal(paidFee(t.session), 200);
+  assert.equal(balanceDue(t.session), 0);
+}));
+
+test('completeCheckout on a running 2h booking charges the full booked length, not just the few seconds played — what is shown must match what is charged', () => withClock(1_700_000_000_000, async (advance) => {
+  await freshTable();
+  await startSession('t1', joy, { booking: 120 * MIN });
+  advance(13 * 1000); // paid 13 seconds in — the flat first-hour rate must not undercharge a 2h booking
+  const t0 = await db.get('tables', 't1');
+  // What the checkout screen displays must equal what paying actually charges (the bug this guards
+  // against: showing ₱200 — the elapsed-time rate — while a 2h booking should charge ₱400).
+  assert.equal(dueTableFee(t0.session, elapsedMs(t0)), 400);
+  const sale = await completeCheckout('t1', { method: 'cash' }, joy);
+  assert.equal(sale.tableFee, 400);
+  assert.equal(sale.total, 400);
+  const t = await db.get('tables', 't1');
+  assert.equal(t.status, 'in_use');
+  assert.equal(t.session.ended, false);
+}));
+
+test('completeCheckout on a running booking with items on the bill settles the balance and the items together, then clears the bill, still without ending', () => withClock(1_700_000_000_000, async () => {
+  await freshTable();
+  await db.set('products', 'water', { name: 'Water', category: 'Beverages', price: 20, stock: 5 });
+  await startSession('t1', joy, { booking: 60 * MIN });
+  await changeItem('t1', 'water', 2); // 2 waters, ₱40
+  const sale = await completeCheckout('t1', { method: 'cash' }, joy);
+  assert.equal(sale.tableFee, 200);
+  assert.equal(sale.productTotal, 40);
+  assert.equal(sale.total, 240);
+  assert.equal((await db.get('products', 'water')).stock, 3); // stock deducted
+  const t = await db.get('tables', 't1');
+  assert.equal(t.status, 'in_use');
+  assert.equal(t.session.ended, false);
+  assert.deepEqual(t.session.items, []); // items settled and cleared, not carried forward
+}));
+
+test('completeCheckout again once fully paid with nothing on the bill is a safe no-op — no duplicate charge, no receipt', () => withClock(1_700_000_000_000, async (advance) => {
+  await freshTable();
+  await startSession('t1', joy, { booking: 60 * MIN });
+  await completeCheckout('t1', { method: 'cash' }, joy); // pays ₱200
+  advance(5 * MIN);
+  const again = await completeCheckout('t1', { method: 'cash' }, joy);
+  assert.equal(again.id, null);
+  assert.equal(again.alreadyPaid, true);
+  const t = await db.get('tables', 't1');
+  assert.equal(t.status, 'in_use');
+  assert.equal(t.session.ended, false);
+  assert.equal(paidFee(t.session), 200); // unchanged — no second charge
+}));
+
+test('after paying via completeCheckout, auto-stop still closes the table once the booked time is up', () => withClock(1_700_000_000_000, async (advance) => {
+  await freshTable();
+  await startSession('t1', joy, { booking: 60 * MIN });
+  await completeCheckout('t1', { method: 'cash' }, joy); // paid in full, no items
+  const startedAt = (await db.get('tables', 't1')).session.startedAt;
+  advance(60 * MIN);
+  await finishAutoStop('t1', { expiredBooking: 60 * MIN, startedAt }, joy);
+  const t = await db.get('tables', 't1');
+  assert.equal(t.status, 'available'); // closes itself, exactly like the prior payBooking-based flow
+  assert.equal(t.session, null);
+}));
+
+test('End Session is still the only way to end a running Set Hours booking early — Complete Transaction never does', () => withClock(1_700_000_000_000, async (advance) => {
+  await freshTable();
+  await startSession('t1', joy, { booking: 60 * MIN });
+  await completeCheckout('t1', { method: 'cash' }, joy);
+  advance(3 * MIN);
+  let t = await db.get('tables', 't1');
+  assert.equal(t.session.ended, false); // paying alone never ended it
+  await endSession('t1');
+  t = await db.get('tables', 't1');
+  assert.equal(t.session.ended, true); // only the explicit End Session action does
 }));

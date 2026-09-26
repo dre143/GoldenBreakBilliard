@@ -318,10 +318,11 @@ export function gcashRefFor(method, ref) {
   return digits;
 }
 
-/** Thrown when stopping the clock changed the amount due from what the cashier was looking at. */
+/** Thrown when the bill changed from what the cashier was looking at (the clock stopped between
+ * checks, or someone else's payment/edit landed first). `durationMs` is null when nothing was stopped. */
 export class TotalChangedError extends Error {
-  constructor(total, durationMs) {
-    super('The clock has stopped and the final total changed. Check the amount and complete again.');
+  constructor(total, durationMs, message) {
+    super(message || 'The clock has stopped and the final total changed. Check the amount and complete again.');
     this.name = 'TotalChangedError';
     this.total = total;
     this.durationMs = durationMs;
@@ -329,16 +330,26 @@ export class TotalChangedError extends Error {
 }
 
 /**
- * Close the bill.
- * 1. If the clock is still running, stop it (server-stamped end time).
- * 2. In a transaction, re-read the session and bill exactly: fee from the stored start/end stamps.
+ * Pay the bill. Paying never ends a session by itself — only auto-stop reaching the booked time, or
+ * the cashier's own End Session, does that (see js/billing.js dueTableFee). So this only stops the
+ * clock when there's a reason to: Open Time (which must stop to know its final amount) or a Set Hours
+ * booking that has already ended. A Set Hours booking that's still running instead pays whatever is
+ * owed on the BOOKED length — the table fee balance, plus any items on the bill — and keeps going,
+ * exactly as if the cashier had just pressed "Pay balance" mid-session; the table stays In Use and the
+ * timer keeps counting down.
  * method: 'cash' (optional tendered → change), 'gcash', or 'split' (cashPart in cash, rest QRPH).
  * expectedTotal: the total the cashier saw; if the final total differs, nothing is saved and
- * TotalChangedError tells the UI to show the final amount (the clock stays stopped).
+ * TotalChangedError tells the UI to show the final amount.
  */
 export async function completeCheckout(tableId, { method, tendered, cashPart, gcashRef, expectedTotal = null }, user) {
   if (!PAYMENT_METHODS.includes(method) && method !== 'none') throw new Error('Choose a payment method.');
-  gcashRefFor(method, gcashRef); // check before the clock is stopped
+  gcashRefFor(method, gcashRef); // check up front, before anything is touched
+
+  const before = await db.get('tables', tableId);
+  if (before?.session && isTimed(before.session) && !before.session.ended && !before.session.cancelled) {
+    return payRunningBooking(tableId, { method, tendered, cashPart, gcashRef, expectedTotal }, user);
+  }
+
   await endSession(tableId);
 
   return db.transaction(async (tx) => {
@@ -406,6 +417,84 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, gc
     };
     tx.set('transactions', id, record);
     tx.update('tables', tableId, { status: 'available', session: null, lastTxId: id, updatedAt: SERVER_TIME });
+    return { id, ...record, createdAt: serverNow() };
+  });
+}
+
+/**
+ * completeCheckout()'s path for a Set Hours booking that's still running: pays the table-fee balance
+ * for the BOOKED length (never on time actually played — see js/billing.js balanceDue) plus any items
+ * on the bill, all in one write, without stopping the clock or freeing the table. Items are cleared
+ * from the bill once paid (their stock is deducted here, same as any other sale); the table fee simply
+ * advances session.prepaid.paidMs. Nothing here can charge the same booked minute twice: the fee is
+ * always the schedule amount for the full booking minus what's already been paid.
+ */
+async function payRunningBooking(tableId, { method, tendered, cashPart, gcashRef, expectedTotal }, user) {
+  return db.transaction(async (tx) => {
+    const t = await tx.get('tables', tableId);
+    const s = t?.session;
+    if (!s) throw new Error('This table has already been checked out.');
+    if (s.ended || s.cancelled || !isTimed(s)) {
+      throw new TotalChangedError(null, null, 'This table has changed — reload and try again.');
+    }
+    const items = s.items || [];
+    const products = await Promise.all(items.map((i) => tx.get('products', i.productId)));
+    items.forEach((i, k) => {
+      const p = products[k];
+      if (!p) throw new Error(`${i.name} no longer exists in inventory.`);
+      if (p.stock < i.qty) throw new Error(`Not enough ${i.name} in stock (${p.stock} left).`);
+    });
+
+    const already = paidMs(s);
+    const target = plannedMs(s);
+    const fee = round2(Math.max(0, tableFee(target) - paidFee(s)));
+    const lines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
+    const productTotal = itemsTotal(items);
+    const total = round2(fee + productTotal);
+    if (expectedTotal != null && round2(expectedTotal) !== total) {
+      throw new TotalChangedError(total, null, 'The bill changed. Check the amount and complete again.');
+    }
+
+    // Nothing owed at all (already fully paid, no items on the bill): nothing to record.
+    if (total === 0) return { id: null, total: 0, alreadyPaid: true };
+    if (method === 'none') throw new Error('Choose a payment method.');
+
+    let paid = null;
+    let payments;
+    if (method === 'cash') {
+      paid = tendered == null ? total : round2(tendered);
+      if (paid < total) throw new Error('Cash tendered is less than the total.');
+      payments = { cash: total, gcash: 0 };
+    } else if (method === 'gcash') {
+      payments = { cash: 0, gcash: total };
+    } else if (method === 'split') {
+      const cash = round2(Number(cashPart));
+      if (!(cash > 0) || cash >= total) {
+        throw new Error(`For a split payment, enter a cash amount between ₱0 and the ₱${total.toFixed(2)} total.`);
+      }
+      payments = { cash, gcash: round2(total - cash) };
+    } else {
+      throw new Error('Choose a payment method.');
+    }
+
+    items.forEach((i, k) => tx.update('products', i.productId, { stock: products[k].stock - i.qty, updatedAt: SERVER_TIME }));
+    const id = db.newId('transactions');
+    const record = {
+      tableId, tableName: t.name, pricing: { ...PRICING },
+      startedAt: s.startedAt, endedAt: null, durationMs: null,
+      plannedMs: target, billedMs: null, mode: 'timed', kind: 'prepay',
+      paidFromMs: already, paidToMs: target,
+      tableFee: fee, items: lines, productTotal, total, method, payments,
+      tendered: paid, change: paid == null ? null : round2(paid - total),
+      gcashRef: gcashRefFor(method, gcashRef),
+      cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
+    };
+    tx.set('transactions', id, record);
+    tx.update('tables', tableId, {
+      'session.prepaid': { paidMs: target, lastTxId: id, refunded: false },
+      'session.items': [],
+      updatedAt: SERVER_TIME,
+    });
     return { id, ...record, createdAt: serverNow() };
   });
 }

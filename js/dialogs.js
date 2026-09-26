@@ -167,15 +167,43 @@ export function bookingPaymentDialog({ title, due, onPay }) {
           <label for="bp-tendered">Cash tendered</label>
           <input id="bp-tendered" name="bp-tendered" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Exact amount">
         </div>
+        <div class="cash__change">
+          <span>Change</span>
+          <span class="num" data-live="bp-change">—</span>
+        </div>
       </div>
       <div class="cash" data-region="bp-split" hidden>
         <div class="field">
           <label for="bp-split-cash">Cash portion</label>
           <input id="bp-split-cash" name="bp-split-cash" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Amount paid in cash">
         </div>
+        <div class="cash__change">
+          <span>QRPH portion (balance)</span>
+          <span class="num" data-live="bp-split-gcash">—</span>
+        </div>
       </div>
       ${gcashRefField()}`,
     onOpen(dlg) {
+      const tenderedInput = dlg.querySelector('#bp-tendered');
+      const splitInput = dlg.querySelector('#bp-split-cash');
+      const changeEl = dlg.querySelector('[data-live=bp-change]');
+      const splitGcashEl = dlg.querySelector('[data-live=bp-split-gcash]');
+      const updateCash = () => {
+        const raw = tenderedInput.value;
+        const tendered = Number(raw);
+        changeEl.textContent = raw === '' || Number.isNaN(tendered) ? '—'
+          : tendered >= due ? peso(tendered - due) : `Short ${peso(due - tendered)}`;
+        changeEl.classList.toggle('is-short', raw !== '' && tendered < due);
+      };
+      const updateSplit = () => {
+        const raw = splitInput.value;
+        const cashPart = Number(raw);
+        const valid = raw !== '' && cashPart > 0 && cashPart < due;
+        splitGcashEl.textContent = raw === '' ? '—' : valid ? peso(due - cashPart) : `Cash must be under ${peso(due)}`;
+        splitGcashEl.classList.toggle('is-short', raw !== '' && !valid);
+      };
+      tenderedInput.addEventListener('input', updateCash);
+      splitInput.addEventListener('input', updateSplit);
       dlg.querySelectorAll('input[name=bp-method]').forEach((r) => r.addEventListener('change', () => {
         method = r.value;
         dlg.querySelector('[data-region=bp-cash]').hidden = method !== 'cash';
@@ -183,14 +211,19 @@ export function bookingPaymentDialog({ title, due, onPay }) {
         dlg.querySelector('[data-region=gcash-ref]').hidden = method === 'cash';
       }));
       wireGcashRef(dlg);
+      updateCash();
+      updateSplit();
     },
-    async onSubmit(fd) {
+    async onSubmit(fd, dlg) {
       const tenderedRaw = fd.get('bp-tendered');
       await onPay({
         method,
         tendered: method === 'cash' && tenderedRaw !== '' ? Number(tenderedRaw) : null,
         cashPart: method === 'split' ? Number(fd.get('bp-split-cash')) : null,
-        gcashRef: fd.get('gcash-ref'),
+        // #gcash-ref (from gcashRefField() in js/ui.js) has no name attribute — every other screen
+        // that uses it reads it straight off the DOM (checkout.js, quick-sale.js, cue-sticks.js) rather
+        // than through FormData, which would always read null here.
+        gcashRef: dlg.querySelector('#gcash-ref')?.value ?? '',
       });
     },
   });
