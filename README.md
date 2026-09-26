@@ -345,22 +345,31 @@ unique physical item (not counted stock), with its own photo so it can be shown 
 
 ### Showcase (TV display)
 
-A fullscreen, chrome-free slideshow — table status, then the cue stick catalog — meant for a screen
-behind the counter or near the tables, not a screen staff use day to day.
+A fullscreen, chrome-free digital-signage loop — built for a 36" 16:9 screen viewed from across the
+room — meant for a screen behind the counter or near the tables, not a screen staff use day to day.
 
 - **Where it lives:** `#/showcase` (`js/views/showcase.js`), reached from the **Open Showcase** link on
   the Cue Sticks page, or as the forced landing screen for a **Display** account (below). It's a real
   route but deliberately left out of the sidebar, since nobody needs it in their daily nav.
-- **What it shows, on a loop:** one **Table Status** slide, then one slide per *available* cue stick
-  (sold ones drop out) — photo, name, brand/weight, price. Auto-advances every 7 seconds, with a small
-  dot indicator. A cue with no photo yet falls back to a plain cue icon rather than leaving a gap.
-- **Table Status is the real thing, not a summary:** it's `poolCard()` (`js/views/pool-card.js`), the
-  exact same card the Tables screen itself uses — timer, bill, rate, the hour-mark warning, all of it —
-  kept ticking live once a second by the same `updateTableTimers()` helper the Tables screen uses. If
-  it's on the floor grid, it's on the TV.
-- **Live, not a slideshow file:** it reads the same `state.tables`/`state.cueSticks` as the rest of the
-  app, so a table freeing up, a new cue, or one selling out updates the loop on its own — nothing here is
-  ever exported or re-uploaded by hand.
+- **Four slide types rotate,** every ~9 seconds, with a smooth crossfade (two stacked layers whose
+  opacity swaps, not a hard cut) and a dot indicator:
+  - **Live Table Status** — always first, always real. It's `poolCard()` (`js/views/pool-card.js`), the
+    exact same card the Tables screen itself uses — timer, bill, rate, the hour-mark warning, all of it —
+    kept ticking live once a second by the same `updateTableTimers()` helper. A table nearing its time
+    limit gets an extra slow pulse here, purely for TV-distance legibility; the ordinary Tables screen is
+    untouched. **This slide is never edited** — it's always the live data, exactly as before.
+  - **Champion Spotlight, Featured Cue/Product, Promo/Announcement** — owner-set content; see below.
+- **Owner-controlled content:** Cue Sticks → **Customize Showcase** (owner-only; `js/dialogs.js`
+  `showcaseSettingsDialog`) edits Champion Spotlight, Featured Cue/Product and the Promo/Announcement
+  slide — photo, headline text, an on/off switch per slide — stored in `settings/showcase`. A slide only
+  joins the rotation once it's switched on and has something to show. **Featured** falls back to the
+  newest available cue stick when the owner hasn't set one, so that slot is never empty out of the box.
+- **Live, not a slideshow file:** it reads the same `state.tables`/`state.cueSticks`/`state.settings.showcase`
+  as the rest of the app, so a table freeing up, a new cue, or an owner edit updates the loop on its own —
+  nothing here is ever exported or re-uploaded by hand.
+- **A display account can read `settings/showcase`** (and nothing else under `settings/`) — the one
+  exception to the Display role's tables/cueSticks-only rules (see below), so the TV itself can show what
+  the owner set without needing broader access.
 - **How the fullscreen works:** the view adds a `showcase-mode` class to the app's `.shell` element,
   which is what actually hides the sidebar/top bar and lets the page fill the screen (see `css/styles.css`);
   the class comes off again when the view unmounts. A staff account sees a small "Back to app" link
@@ -381,9 +390,11 @@ so that screen never needs to borrow a real staff member's login (and everything
   else, even by typing a different URL.
 - **Enforced on the server, not just hidden on screen:** `firestore.rules`' `isWorkingStaff()` is
   `isStaff()` minus the Display role, and gates every collection except `tables` and `cueSticks` (which
-  stay on the broader `isStaff()`, since that's the whole point). A Display account's credentials, if
-  anyone ever got hold of them, can read table status and the cue stick catalog and nothing more — no
-  transactions, expenses, other staff's names, settings, or write access of any kind.
+  stay on the broader `isStaff()`, since that's the whole point) — plus one single document,
+  `settings/showcase`, so the TV can also show the owner's Champion/Featured/Promo content (see
+  *Showcase* above). A Display account's credentials, if anyone ever got hold of them, can read table
+  status, the cue stick catalog and that one settings document, and nothing more — no transactions,
+  expenses, other staff's names, other settings, or write access of any kind.
 
 ## Hour-mark alert (table cards)
 

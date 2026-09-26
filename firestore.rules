@@ -562,7 +562,10 @@ service cloud.firestore {
     }
     // Hall-wide settings (e.g. settings/shifts: whether the hall runs one shift or Day + Night).
     match /settings/{id} {
-      allow read: if isWorkingStaff();
+      // settings/showcase is the one exception a Display account (the TV itself) can read: the
+      // Champion/Featured/Promo content the owner sets for the Showcase slideshow. Everything else
+      // under settings/ (shifts, cashDrawer, gcash) stays isWorkingStaff()-only, unchanged.
+      allow read: if id == 'showcase' ? isStaff() : isWorkingStaff();
       allow write: if isOwner();
     }
 

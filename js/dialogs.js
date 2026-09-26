@@ -1051,3 +1051,158 @@ export function gcashQrDialog() {
   off = on('settings', () => { qr = state.settings.gcashQr || null; render(); });
   render();
 }
+
+/**
+ * Owner-only editor for the Showcase TV slideshow (js/views/showcase.js): Champion Spotlight, Featured
+ * Cue/Product and Promo/Announcement — the three slides the owner controls. The Live Table Status slide
+ * is never edited here; it's always the real, live table data, exactly as before. Each section has its
+ * own on/off switch, so turning one off keeps what was typed in it for next time.
+ */
+export function showcaseSettingsDialog() {
+  const saved = state.settings.showcase || {};
+  const champion = { enabled: false, photo: null, playerName: '', tournamentTitle: '', placement: 'Champion', achievement: '', ...saved.champion };
+  const featured = { enabled: false, photo: null, name: '', price: '', description: '', ...saved.featured };
+  const promo = { enabled: false, photo: null, headline: '', body: '', ...saved.promo };
+
+  const photoPick = (key, label, photo) => `
+    <div class="field">
+      <label for="sc-${key}-photo">${label}</label>
+      <div class="photo-pick" data-region="sc-${key}-photo-pick">
+        <span class="photo-pick__preview" aria-hidden="true">${photo ? `<img src="${esc(photo)}" alt="">` : icon('camera')}</span>
+        <div class="photo-pick__actions">
+          <input id="sc-${key}-photo" type="file" accept="image/*" class="sr-only">
+          <label for="sc-${key}-photo" class="btn btn--neutral btn--sm">${icon('camera')}${photo ? 'Change photo' : 'Add photo'}</label>
+          ${photo ? `<button type="button" class="link-btn link-btn--danger" data-remove-photo="${key}">Remove</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+
+  const { dlg } = openDialog({
+    title: 'Customize Showcase',
+    wide: true,
+    submitLabel: 'Save changes',
+    body: `
+      <p class="muted small">What the TV slideshow shows besides the live table status, which always stays the real
+        thing — nothing here ever changes how tables, timers or bills are read or billed.</p>
+
+      <fieldset class="showcase-edit-section">
+        <legend><label class="check"><input type="checkbox" name="champion-enabled" ${champion.enabled ? 'checked' : ''}><span>Champion Spotlight</span></label></legend>
+        <div class="showcase-edit-fields" data-region="champion-fields">
+          ${photoPick('champion', 'Champion photo', champion.photo)}
+          <div class="field-row">
+            <div class="field">
+              <label for="sc-champion-name">Player name</label>
+              <input id="sc-champion-name" name="champion-name" maxlength="60" value="${esc(champion.playerName)}">
+            </div>
+            <div class="field">
+              <label for="sc-champion-place">Placement</label>
+              <input id="sc-champion-place" name="champion-place" maxlength="30" placeholder="Champion, Runner-up…" value="${esc(champion.placement)}">
+            </div>
+          </div>
+          <div class="field">
+            <label for="sc-champion-title">Tournament title</label>
+            <input id="sc-champion-title" name="champion-title" maxlength="80" placeholder="e.g. Golden Break Summer Open 2026" value="${esc(champion.tournamentTitle)}">
+          </div>
+          <div class="field">
+            <label for="sc-champion-achievement">Achievement <span class="muted">(optional)</span></label>
+            <input id="sc-champion-achievement" name="champion-achievement" maxlength="120" placeholder="e.g. Undefeated, 12-0" value="${esc(champion.achievement)}">
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="showcase-edit-section">
+        <legend><label class="check"><input type="checkbox" name="featured-enabled" ${featured.enabled ? 'checked' : ''}><span>Featured Cue / Product</span></label></legend>
+        <div class="showcase-edit-fields" data-region="featured-fields">
+          ${photoPick('featured', 'Product photo', featured.photo)}
+          <div class="field-row">
+            <div class="field">
+              <label for="sc-featured-name">Product name</label>
+              <input id="sc-featured-name" name="featured-name" maxlength="60" value="${esc(featured.name)}">
+            </div>
+            <div class="field">
+              <label for="sc-featured-price">Price (₱) <span class="muted">(optional)</span></label>
+              <input id="sc-featured-price" name="featured-price" type="number" inputmode="decimal" min="0" step="0.01" value="${featured.price ?? ''}">
+            </div>
+          </div>
+          <div class="field">
+            <label for="sc-featured-desc">Short description</label>
+            <input id="sc-featured-desc" name="featured-desc" maxlength="140" placeholder="What makes it worth a look" value="${esc(featured.description)}">
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset class="showcase-edit-section">
+        <legend><label class="check"><input type="checkbox" name="promo-enabled" ${promo.enabled ? 'checked' : ''}><span>Promo / Announcement</span></label></legend>
+        <div class="showcase-edit-fields" data-region="promo-fields">
+          ${photoPick('promo', 'Photo (optional)', promo.photo)}
+          <div class="field">
+            <label for="sc-promo-headline">Headline</label>
+            <input id="sc-promo-headline" name="promo-headline" maxlength="60" placeholder="e.g. Happy Hour, 2-6 PM" value="${esc(promo.headline)}">
+          </div>
+          <div class="field">
+            <label for="sc-promo-body">Details</label>
+            <input id="sc-promo-body" name="promo-body" maxlength="140" placeholder="What's on, and until when" value="${esc(promo.body)}">
+          </div>
+        </div>
+      </fieldset>`,
+    onOpen(d) {
+      const photos = { champion: champion.photo, featured: featured.photo, promo: promo.photo };
+      const toggleFields = (key) => {
+        const enabled = d.querySelector(`[name=${key}-enabled]`).checked;
+        d.querySelector(`[data-region=${key}-fields]`).classList.toggle('is-disabled', !enabled);
+      };
+      ['champion', 'featured', 'promo'].forEach((key) => {
+        toggleFields(key);
+        d.querySelector(`[name=${key}-enabled]`).addEventListener('change', () => toggleFields(key));
+        const renderPhoto = () => {
+          const pick = d.querySelector(`[data-region=sc-${key}-photo-pick]`);
+          const photo = photos[key];
+          pick.innerHTML = `
+            <span class="photo-pick__preview" aria-hidden="true">${photo ? `<img src="${esc(photo)}" alt="">` : icon('camera')}</span>
+            <div class="photo-pick__actions">
+              <input id="sc-${key}-photo" type="file" accept="image/*" class="sr-only">
+              <label for="sc-${key}-photo" class="btn btn--neutral btn--sm">${icon('camera')}${photo ? 'Change photo' : 'Add photo'}</label>
+              ${photo ? `<button type="button" class="link-btn link-btn--danger" data-remove-photo="${key}">Remove</button>` : ''}
+            </div>`;
+          pick.querySelector(`#sc-${key}-photo`).addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try { photos[key] = await compressImage(file); renderPhoto(); } catch (err) { toast(err.message, 'error'); }
+          });
+          pick.querySelector(`[data-remove-photo=${key}]`)?.addEventListener('click', () => { photos[key] = null; renderPhoto(); });
+        };
+        renderPhoto(); // wire the initial (static) markup's listeners too, not just later re-renders
+      });
+      d.getShowcasePhotos = () => photos;
+    },
+    async onSubmit(fd, d) {
+      const photos = d.getShowcasePhotos();
+      const priceRaw = fd.get('featured-price');
+      await svc.setShowcaseSettings({
+        champion: {
+          enabled: fd.get('champion-enabled') === 'on',
+          photo: photos.champion,
+          playerName: String(fd.get('champion-name') || '').trim(),
+          tournamentTitle: String(fd.get('champion-title') || '').trim(),
+          placement: String(fd.get('champion-place') || '').trim() || 'Champion',
+          achievement: String(fd.get('champion-achievement') || '').trim(),
+        },
+        featured: {
+          enabled: fd.get('featured-enabled') === 'on',
+          photo: photos.featured,
+          name: String(fd.get('featured-name') || '').trim(),
+          price: priceRaw === '' ? null : round2(Number(priceRaw)),
+          description: String(fd.get('featured-desc') || '').trim(),
+        },
+        promo: {
+          enabled: fd.get('promo-enabled') === 'on',
+          photo: photos.promo,
+          headline: String(fd.get('promo-headline') || '').trim(),
+          body: String(fd.get('promo-body') || '').trim(),
+        },
+      });
+      toast('Showcase updated.');
+    },
+  });
+  return dlg;
+}

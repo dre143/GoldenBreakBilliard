@@ -230,7 +230,7 @@ function seed() {
   };
 
   const tables = {};
-  for (let n = 1; n <= 8; n++) {
+  for (let n = 1; n <= 5; n++) {
     const id = `t-0${n}`;
     tables[id] = { number: n, name: `Table 0${n}`, status: 'available', session: null, light: false, updatedAt: now };
   }
@@ -254,7 +254,7 @@ function seed() {
   open('t-02', 72 * MIN + 14000, null, [item('p-smb', 3), item('p-nachos', 1)]);
   open('t-03', 22 * MIN + 41000, null, [item('p-water', 2)], ['u-bea', 'Bea Lim'], 2 * H); // booked 2 hours
   open('t-05', 51 * MIN, 4 * MIN, [item('p-coke', 2)]);
-  open('t-07', 125 * MIN + 3000, null, [item('p-rh', 4), item('p-wings', 1), item('p-chalk', 1)], ['u-bea', 'Bea Lim'], 2 * H); // booked 2h, now in overtime
+  open('t-04', 125 * MIN + 3000, null, [item('p-rh', 4), item('p-wings', 1), item('p-chalk', 1)], ['u-bea', 'Bea Lim'], 2 * H); // booked 2h, now in overtime
 
   const cueSticks = {
     'cs-1': { name: 'Predator Sport II', brand: 'Predator', weight: '19oz', price: 8500, photo: null, status: 'available', createdAt: now - 40 * D, updatedAt: now - 40 * D },
@@ -282,7 +282,7 @@ function seed() {
         ? dayStart + Math.floor(rnd() * Math.max(now - dayStart - 5 * MIN, H))
         : dayStart + 11 * H + Math.floor(rnd() * 12.5 * H);
       if (createdAt > now) continue;
-      const tn = 1 + Math.floor(rnd() * 8);
+      const tn = 1 + Math.floor(rnd() * 5);
       const durationMs = (30 + Math.floor(rnd() * 150)) * MIN + Math.floor(rnd() * 60) * 1000;
       const booked = rnd() < 0.35 ? (1 + Math.floor(rnd() * 3)) * H : 0; // some customers book hours
       const billedMs = durationMs; // billed on time actually played

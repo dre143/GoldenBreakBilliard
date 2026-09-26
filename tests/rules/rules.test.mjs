@@ -727,7 +727,18 @@ test('a display account can read tables and cue sticks, same as any staff', asyn
   await assertSucceeds(getDoc(doc(tv, 'cueSticks/c1')));
 });
 
-test('a display account cannot read products, transactions, expenses, settings or other staff', async () => {
+// settings/showcase is the one settings doc a display account (the TV running Showcase) can also
+// read — the owner's Champion/Featured/Promo content (js/dialogs.js showcaseSettingsDialog). It stays
+// owner-only to write, same as every other settings doc.
+test('a display account can read (but not write) settings/showcase — the Showcase slideshow content', async () => {
+  await seed({ 'settings/showcase': { champion: { enabled: true, playerName: 'Test Player' } } });
+  const tv = as('tv');
+  await assertSucceeds(getDoc(doc(tv, 'settings/showcase')));
+  await assertFails(updateDoc(doc(tv, 'settings/showcase'), { champion: { enabled: false } }));
+  await assertSucceeds(updateDoc(doc(as('owner'), 'settings/showcase'), { champion: { enabled: false } }));
+});
+
+test('a display account cannot read products, transactions, expenses, other settings or other staff', async () => {
   await seed({
     'transactions/x1': { tableId: null, tableFee: 0, productTotal: 0, total: 0, method: 'none', cashierId: 'joy', cashierName: 'Joy', createdAt: ts(Date.now()) },
     'expenses/e1': { description: 'Ice', amount: 50, cashierId: 'joy', cashierName: 'Joy', createdAt: ts(Date.now()) },

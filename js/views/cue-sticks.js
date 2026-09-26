@@ -4,7 +4,7 @@
 import { state, on } from '../state.js';
 import * as svc from '../services.js';
 import { round2 } from '../billing.js';
-import { receiptDialog, manageCueSticksDialog, cueThumb } from '../dialogs.js';
+import { receiptDialog, manageCueSticksDialog, cueThumb, showcaseSettingsDialog } from '../dialogs.js';
 import * as printer from '../printer.js';
 import {
   esc, icon, peso, pageHeader, emptyBlock, busy, toast, METHOD_LABEL, preserveFocus,
@@ -24,6 +24,7 @@ export function mount(el, ctx) {
       subtitle: 'The shop’s cue stick catalog — sell one straight from here.',
       actions: `
         <a class="btn btn--neutral" href="#/showcase">${icon('cue')}Open Showcase</a>
+        ${owner ? `<button type="button" class="btn btn--neutral" data-action="customize-showcase">${icon('bell')}Customize Showcase</button>` : ''}
         ${owner ? `<button type="button" class="btn btn--neutral" data-action="manage">${icon('edit')}Manage Cue Sticks</button>` : ''}`,
     })}
     <div class="checkout">
@@ -222,6 +223,7 @@ export function mount(el, ctx) {
 
   el.addEventListener('click', (e) => {
     if (e.target.closest('[data-action=manage]')) { manageCueSticksDialog(); return; }
+    if (e.target.closest('[data-action=customize-showcase]')) { showcaseSettingsDialog(); return; }
     const add = e.target.closest('[data-add]');
     if (add) { addToCart(add.dataset.add); return; }
     const remove = e.target.closest('[data-remove]');
