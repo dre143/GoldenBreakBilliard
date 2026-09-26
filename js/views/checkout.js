@@ -120,7 +120,8 @@ function mountBill(el, ctx, tableId) {
               </div>
             </div>
             ${gcashRefField()}
-            <button type="button" class="btn btn--amber btn--block btn--lg" data-action="complete">${icon('check')}Complete Transaction</button>
+            <p class="field__hint" data-region="complete-hint" hidden></p>
+            <button type="button" class="btn btn--amber btn--block btn--lg" data-action="complete">${icon('check')}<span data-region="complete-label">Complete Transaction</span></button>
           </section>
         </aside>
       </div>`;
@@ -255,6 +256,17 @@ function mountBill(el, ctx, tableId) {
     if (isTimed(s)) {
       const over = overtimeMs(s, ms);
       setText('booking', over > 0 ? `Extra time +${fmtDuration(over)}${bill.inGrace ? ' · grace period, no extra charge yet' : ''}` : `Time left ${fmtDuration(remainingMs(s, ms))}`);
+    }
+    // Complete Transaction always ends the session (Stop & Bill) — unambiguous for Open Time or a
+    // Set Hours booking that's already run its course, but on a Set Hours booking that's still running,
+    // it's easy to reach for by habit instead of "Pay booking now" above. Make it unmistakable there.
+    const stillRunning = isTimed(s) && !s.ended && remainingMs(s, ms) > 0;
+    const completeLabel = $('[data-region=complete-label]');
+    if (completeLabel) completeLabel.textContent = stillRunning ? 'Complete Transaction (ends session now)' : 'Complete Transaction';
+    const completeHint = $('[data-region=complete-hint]');
+    if (completeHint) {
+      completeHint.hidden = !stillRunning;
+      if (stillRunning) completeHint.textContent = 'This ends the session immediately, even though time is still booked. To take payment without ending it, use “Pay booking now” / “Pay balance” above instead.';
     }
     // Tell staff when the fee next goes up, counted on the time actually played.
     const nextAt = bill.nextIncreaseAtMs;
