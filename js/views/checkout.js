@@ -3,8 +3,9 @@ import * as svc from '../services.js';
 import {
   elapsedMs, tableFee, sessionFee, billSession, itemsTotal, itemsCount, round2, feeBreakdown, PRICING, PRICING_LABEL,
   isTimed, plannedMs, remainingMs, overtimeMs, canCancelGame, cancelTimeLeft, canExtendEndedSession, bookingEndsAt,
+  isPrepaid, paidMs, balanceDue, paidFee,
 } from '../billing.js';
-import { receiptDialog, bookingDialog, cancelGameDialog } from '../dialogs.js';
+import { receiptDialog, bookingDialog, cancelGameDialog, bookingPaymentDialog } from '../dialogs.js';
 import * as printer from '../printer.js';
 import { updateTableTimers } from './shared.js';
 import { poolCard } from './pool-card.js';
@@ -147,6 +148,9 @@ function mountBill(el, ctx, tableId) {
         <div class="timer-panel__top">
           <span class="eyebrow">Elapsed time · ${esc(t.name)}</span>
           ${s.cancelled ? '<span class="badge badge--danger">Game cancelled</span>' : s.ended ? '<span class="badge badge--ended">Session Ended</span>' : statusBadge(t.status)}
+          ${isTimed(s) && !s.cancelled && isPrepaid(s)
+            ? (balanceDue(s) > 0 ? `<span class="badge badge--in-use">Balance ${peso(balanceDue(s))}</span>` : '<span class="badge badge--available">Paid</span>')
+            : ''}
         </div>
         ${s.cancelled ? `
         <p class="cancel-note">Cancelled by ${esc(s.cancelled.byName)} (${esc(s.cancelled.reason)}). No table fee. Take payment for the items below.</p>` : ''}
@@ -164,9 +168,11 @@ function mountBill(el, ctx, tableId) {
         ${s.ended && !canExtendEndedSession(s) ? '' : `
         <div class="timer-panel__controls">
           ${isTimed(s) ? `<button type="button" class="btn btn--light" data-action="extend" data-fk="extend">${icon('clock')}Add time</button>` : ''}
+          ${isTimed(s) && !s.cancelled && (!isPrepaid(s) || balanceDue(s) > 0)
+            ? `<button type="button" class="btn btn--light" data-action="pay-booking" data-fk="pay-booking">${icon('check')}${isPrepaid(s) ? 'Pay balance' : 'Pay booking now'}</button>` : ''}
           ${s.ended ? '<span class="timer-panel__hint">Added time starts now. Time spent waiting is not charged.</span>' : `
           <button type="button" class="btn btn--end" data-action="end" data-fk="end">${icon('stop')}End Session</button>
-          <span class="timer-panel__hint">Ending stops the clock for billing.</span>`}
+          <span class="timer-panel__hint">${isPrepaid(s) ? 'Unused prepaid time is forfeited (no refund) once the first 5 minutes have passed.' : 'Ending stops the clock for billing.'}</span>`}
         </div>`}`;
     });
   }
@@ -243,7 +249,8 @@ function mountBill(el, ctx, tableId) {
     setText('elapsed', fmtDuration(ms));
     setText('cancel-left', fmtCountdown(cancelTimeLeft(t)));
     setText('dur', isTimed(s) ? `${fmtDuration(ms)} played, ${fmtBooking(plannedMs(s))} booked` : `${fmtDuration(ms)} played`);
-    setText('breakdown', s.cancelled ? 'game cancelled, no charge' : feeBreakdown(billed));
+    setText('breakdown', s.cancelled ? 'game cancelled, no charge'
+      : isPrepaid(s) ? `${feeBreakdown(billed)} · ${peso(paidFee(s))} already paid` : feeBreakdown(billed));
     setText('fee', peso(fee));
     if (isTimed(s)) {
       const over = overtimeMs(s, ms);
@@ -390,14 +397,42 @@ function mountBill(el, ctx, tableId) {
         if (!t?.session || !isTimed(t.session)) return undefined;
         const booked = plannedMs(t.session);
         const played = elapsedMs(t);
+        const prepaid = isPrepaid(t.session);
         return bookingDialog({
           title: `Add time · ${esc(t.name)}`,
           submitLabel: 'Add time',
           baseMs: booked,
           elapsedNow: played,
-          onPick: async (ms) => {
-            const total = await svc.extendSession(tableId, ms);
-            toast(`${t.name}: booked ${fmtBooking(total)}`);
+          paidThroughMs: prepaid ? paidMs(t.session) : null,
+          onPick: async (ms, payNow) => {
+            if (!payNow) {
+              const { planned } = await svc.extendSession(tableId, ms);
+              toast(`${t.name}: booked ${fmtBooking(planned)}`);
+              return;
+            }
+            const due = round2(tableFee(booked + ms) - tableFee(paidMs(t.session)));
+            bookingPaymentDialog({
+              title: `Pay for extra time · ${esc(t.name)}`,
+              due,
+              onPay: async (payment) => {
+                const { planned } = await svc.extendSession(tableId, ms, { payNow: true, ...payment, user: ctx.user });
+                toast(`${t.name}: booked ${fmtBooking(planned)}, extra time paid`);
+              },
+            });
+          },
+        });
+      }
+      case 'pay-booking': {
+        const t = table();
+        if (!t?.session || !isTimed(t.session)) return undefined;
+        const due = balanceDue(t.session);
+        if (!(due > 0)) return undefined;
+        return bookingPaymentDialog({
+          title: `${isPrepaid(t.session) ? 'Pay balance' : 'Pay booking now'} · ${esc(t.name)}`,
+          due,
+          onPay: async (payment) => {
+            await svc.payBooking(tableId, payment, ctx.user);
+            toast(`${t.name}: ${peso(due)} paid. Session keeps running.`);
           },
         });
       }

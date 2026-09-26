@@ -80,8 +80,10 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
 ## Data model (Firestore)
 
 - `tables/{id}` — `name, number, light, status (available|in_use), session, lastTxId`
-  - `session = { startedAt, ended, endedAt, plannedMs, rounds, items[], openedBy, openedByName, transfers[] }`
+  - `session = { startedAt, ended, endedAt, plannedMs, rounds, items[], openedBy, openedByName, transfers[], prepaid }`
   - `plannedMs` is `0` for **Open Time**, or the booked length for **Set Hours** (15-minute steps; it can be extended, never cut)
+  - `prepaid` (optional) — `{ paidMs, lastTxId, refunded }` for a **prepaid Set Hours booking** paid without ending the
+    session — see below; absent for Open Time and an unpaid Set Hours booking
   - `transfers` (optional) is the table-move history for **Transfer Table** — see below; the timer, items and bill never reset when a session moves
   - `startedAt` and `endedAt` are **server timestamps**. Elapsed time = `endedAt − startedAt` once ended, otherwise
     server-synced now − `startedAt`.
@@ -89,7 +91,7 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
 - `products/{id}` — `name, category, price, stock, reorderLevel, lastRestockedAt`
 - `restocks/{id}` — restock log (feeds "Restocked this week")
 - `cueSticks/{id}` — `name, brand, weight, price, photo, status (available|sold), soldAt, soldTxId, soldByName` — see **Cue Sticks** below
-- `transactions/{id}` — `tableId`/`tableName`, `startedAt`/`endedAt`/`durationMs` copied from the session, `mode` (open | timed), `plannedMs`, `billedMs`, `pricing` used, table fee, rounds, line items, totals, `method` (cash | gcash | split, or none for a ₱0 cancelled game), `payments {cash, gcash}`, cashier, `createdAt` (server time); a cancelled game also carries `gameCancelled`, `cancelReason`, `cancelNote`, `cancelledById`, `cancelledByName` (older sales may carry the retired `tableFeeVoided…` fields). While a game is open, a cancel is stored as `session.cancelled = { reason, note, byId, byName, at }`. A **Quick Sale** (walk-in) has `tableId: null` and no table-session fields — see below. A **Cue Sticks** sale instead carries `saleType: 'cue-stick'` and `cueStickTotal` (kept apart from `productTotal` so it reports separately). The stored field/value is still literally `gcash` (kept as the internal identifier so old records keep reading correctly) — everywhere the app displays it, the label is **QRPH**.
+- `transactions/{id}` — `tableId`/`tableName`, `startedAt`/`endedAt`/`durationMs` copied from the session, `mode` (open | timed), `plannedMs`, `billedMs`, `pricing` used, table fee, rounds, line items, totals, `method` (cash | gcash | split, or none for a ₱0 cancelled game), `payments {cash, gcash}`, cashier, `createdAt` (server time); a cancelled game also carries `gameCancelled`, `cancelReason`, `cancelNote`, `cancelledById`, `cancelledByName` (older sales may carry the retired `tableFeeVoided…` fields). While a game is open, a cancel is stored as `session.cancelled = { reason, note, byId, byName, at }`. A **Quick Sale** (walk-in) has `tableId: null` and no table-session fields — see below. A **Cue Sticks** sale instead carries `saleType: 'cue-stick'` and `cueStickTotal` (kept apart from `productTotal` so it reports separately). The stored field/value is still literally `gcash` (kept as the internal identifier so old records keep reading correctly) — everywhere the app displays it, the label is **QRPH**. A **prepaid Set Hours** payment instead carries `kind: 'prepay'` with `paidFromMs`/`paidToMs` and no items (table fee only — see *Prepaid Set Hours bookings*); cancelling a prepaid booking within 5 minutes adds a linked `kind: 'refund'` sale with a negative amount, `refundOfTxId` pointing back at the payment.
 - `users/{uid}` — `name, email, role, active, online, lastSeen`
 - `expenses/{id}` — `description, amount, cashierId, cashierName, createdAt` (server time). Cash taken from the drawer. Nobody edits one; only the owner can delete one.
 - `settings/shifts` — `twoShifts` (owner-only). Off by default: one shift per business day.
@@ -171,6 +173,39 @@ without the grace field is read with the old round-up rule.
 Checkout shows the breakdown and when the fee next goes up. `firestore.rules` holds a copy of the same numbers (`feeOk`),
 so change both together, and **deploy the rules together with this change** (`npm run deploy:rules`), otherwise checkouts are rejected.
 
+### Prepaid Set Hours bookings (paying without ending the session)
+
+A customer who wants to pay right away for an exact booked duration doesn't have to use Stop & Bill — which would end
+the session outright, even after a minute of play. Instead, Checkout on a running Set Hours table offers **Pay booking
+now**: it charges the table fee for the booked length and keeps the table In Use, the timer running, and auto-stop
+armed exactly as before. Payment and ending the session are separate actions for a prepaid booking; Open Time and an
+unpaid Set Hours booking are completely unaffected — Stop & Bill still works on them exactly as it always has.
+
+- **What's tracked:** `session.prepaid = { paidMs, lastTxId, refunded }` — how much of the *booked* time
+  (`session.plannedMs`) already has its fee paid. The **balance** (`balanceDue()` in `js/billing.js`) is the schedule
+  fee for the full booking minus the fee for `paidMs`, so it's always based on booked time, never on time actually
+  played — extending the booking without paying opens up a balance even if the customer never plays the extra time.
+- **Add time, Pay Now or Pay Later:** extending a prepaid booking offers a choice. **Pay Now** charges only the extra
+  amount — the difference between the new and old booking's schedule fee — and settles the balance back to ₱0 in the
+  same write; the already-paid time is never charged again. **Pay Later** just grows the booking, leaving a visible
+  **Balance** badge on the table card and at Checkout, collected later with **Pay balance** or at the final checkout.
+- **At the booking's end:** if the booking is fully paid and nothing else is owed (no balance, no unpaid items),
+  auto-stop closes the table itself — the same ₱0 "nothing to pay" shape a cancelled game with no items already uses.
+  Otherwise the table shows **Session ended** and waits for a cashier to collect the balance and/or items, exactly
+  like an unpaid booking always has.
+- **Ending early:** a customer who leaves before the booked time is up forfeits the unused prepaid time — no
+  refund, same as walking out of an Open Time game early costs whatever was actually played. The table frees once
+  nothing else is owed.
+- **Cancel game, within the first 5 minutes:** cancelling a prepaid booking also refunds what was paid on it, in the
+  same write — a second, append-only **refund** transaction with a negative amount, linked back to the original
+  payment (the ledger is append-only, so nothing is edited). Past 5 minutes, cancel isn't offered and the prepaid
+  amount stands, same as the rest of Cancel game.
+- **Items stay separate:** prepayment only ever covers the table fee. Drinks, snacks and accessories added during
+  play are always settled at the end, together with any unpaid balance, in one sale.
+- **Enforced on the server:** `firestore.rules` (`paysBooking`, `prepaySaleOk`, `refundOk`/`refundSaleOk`) recomputes
+  every payment and refund from the table's own before/after state, the same way it already re-checks every sale —
+  a booking's fee can never be charged twice, and a refund can't be forged or paid out twice.
+
 ## Time integrity (why a changed clock can't change a bill)
 
 - **Server timestamps:** session start, session end, sale time, cancel time and presence are written as server timestamps. The
@@ -204,7 +239,9 @@ receipt and freeing the table, so two terminals can't oversell stock or bill a t
 ## Cancel game (first 5 minutes, before paying)
 
 A customer who changes their mind in the first **5 minutes** isn't charged the table fee. Nobody pays first to be
-refunded later: the cashier cancels on the table itself.
+refunded later — the cashier cancels on the table itself — *except* a **prepaid Set Hours booking**, which by
+definition already paid: cancelling one within the window also refunds it, via a linked append-only refund sale
+(see *Prepaid Set Hours bookings* above). Once past 5 minutes, there's no cancel and no refund either way.
 
 - **Where:** open the table (click it on Tables, which opens its Checkout page). While the game is 5 minutes or less,
   a **Cancel game** button shows with a countdown ("4:12 left"). A clock that was stopped within 5 minutes can still

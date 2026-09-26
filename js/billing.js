@@ -148,17 +148,44 @@ export const itemsTotal = (items) =>
 
 export const itemsCount = (items) => (items || []).reduce((n, i) => n + i.qty, 0);
 
+/* ---------- prepaid Set Hours bookings ----------
+ * A Set Hours session can be paid for while it keeps running: session.prepaid tracks how much of the
+ * BOOKED time (plannedMs) already has its table fee paid, as { paidMs, paidFee, lastTxId, refunded }.
+ * paidMs only ever grows, up to the current plannedMs — "Pay Now" always brings it level with plannedMs
+ * in the same write, so the fee for any given minute of booked time is charged exactly once, never twice
+ * (see js/services.js payBooking/extendSession). "Pay Later" (extending the booking without paying) grows
+ * plannedMs alone, so a balance opens up between what's booked and what's paid; nothing here is charged
+ * until the cashier collects it. Open Time never has a prepaid marker.
+ */
+export const paidMs = (session) => Math.max(0, Number(session?.prepaid?.paidMs) || 0);
+export const isPrepaid = (session) => Boolean(session?.prepaid);
+/** Fee already collected for the booking (₱0 if never prepaid). */
+export const paidFee = (session, pricing = PRICING) => (isPrepaid(session) ? tableFee(paidMs(session), pricing) : 0);
 /**
- * One session's bill, from its elapsed time. `elapsedMs` is the real time played and is never altered;
- * The bill is calculated from the actual elapsed time alone (`billedMs` === `elapsedMs`); the booked length is
- * only kept for reference and never raises the amount. A cancelled game has no table fee at all.
- * Open Time and Set Hours both go through here, so they can never disagree.
+ * What's still owed on the BOOKED length alone (never on time actually played): the schedule fee for the
+ * full booking minus what's already been paid. Ends up ₱0 once "Pay Now" has covered the whole booking.
+ * Stays based on booked time, not consumed time, so it doesn't shrink if the customer plays less.
+ */
+export const balanceDue = (session, pricing = PRICING) =>
+  (isTimed(session) ? round2(tableFee(plannedMs(session), pricing) - paidFee(session, pricing)) : 0);
+
+/**
+ * One session's bill, from its elapsed time. `elapsedMs` is the real time played and is never altered.
+ * For an unpaid session the bill is the plain schedule fee for the time played, exactly as before.
+ * For a prepaid session, the paid portion is never charged again and is never refunded for playing
+ * less than booked (see js/billing.js prepaid section above): the fee is calculated on whichever is
+ * larger, the time actually played or the time already paid for, then the already-paid fee is
+ * subtracted — so `tableFee` here is always what's still OWED, not the full schedule amount. A
+ * cancelled game has no table fee owed at all (any refund of what was already paid is a separate,
+ * append-only refund transaction — see js/services.js cancelGame).
  */
 export function billSession(session, elapsed) {
   const cancelled = Boolean(session?.cancelled);
-  const billedMs = elapsed;
+  const floorMs = paidMs(session); // 0 for a session that was never prepaid
+  const billedMs = Math.max(elapsed, floorMs);
   const bill = calculateBilliardBill(billedMs);
-  return { elapsedMs: elapsed, billedMs, cancelled, ...bill, fee: cancelled ? 0 : bill.fee, tableFee: cancelled ? 0 : bill.fee };
+  const owed = cancelled ? 0 : round2(bill.fee - paidFee(session));
+  return { elapsedMs: elapsed, billedMs, cancelled, ...bill, fee: owed, tableFee: owed };
 }
 
 /**

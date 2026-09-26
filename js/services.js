@@ -8,6 +8,7 @@ import { db, auth } from './db.js';
 import {
   elapsedMs, round2, itemsTotal, CANCEL_REASONS, CANCEL_WINDOW_MS, PRICING,
   billSession, plannedMs, BOOKING_STEP_MS, canExtendEndedSession, bookingEndsAt,
+  isTimed, paidMs, isPrepaid, paidFee, balanceDue, tableFee,
 } from './billing.js';
 import { SERVER_TIME, serverNow } from './clock.js';
 
@@ -37,24 +38,116 @@ export function startSession(tableId, user, { booking = 0 } = {}) {
   });
 }
 
-/** Add booked time to a running session (a customer buying another hour). Booked time can't be cut. */
-export function extendSession(tableId, addMs) {
+/**
+ * Add booked time to a running session (a customer buying another hour). Booked time can't be cut.
+ * On a session that has already prepaid some of its booking, `payNow: true` also pays the additional
+ * fee for the extra time in this same write, bringing the balance back to ₱0; the default (`payNow:
+ * false`, "Pay Later") just grows the booking — a balance opens up for the extra time, visible on the
+ * table and collected later at checkout or with payBooking(). On a session that was never prepaid,
+ * extending it never charges anything here, exactly as before.
+ */
+export function extendSession(tableId, addMs, { payNow = false, method, tendered, cashPart, gcashRef, user } = {}) {
   if (!validBooking(addMs)) return Promise.reject(new Error('Choose the time in 15-minute steps.'));
   return db.transaction(async (tx) => {
     const t = await tx.get('tables', tableId);
     if (!t?.session) throw new Error('This table has no open session.');
-    if (t.session.ended && !canExtendEndedSession(t.session)) throw new Error('This session has already been stopped.');
-    const planned = plannedMs(t.session) + addMs;
-    tx.update('tables', tableId, {
+    const s = t.session;
+    if (s.ended && !canExtendEndedSession(s)) throw new Error('This session has already been stopped.');
+    const planned = plannedMs(s) + addMs;
+    const patch = {
       'session.plannedMs': planned,
-      ...(t.session.ended ? {
+      ...(s.ended ? {
         'session.ended': false, 'session.endedAt': null,
         'session.resumedAt': SERVER_TIME, 'session.elapsedBeforeResume': elapsedMs(t),
       } : {}),
       updatedAt: SERVER_TIME,
-    });
-    return planned;
+    };
+    let record = null;
+    if (payNow) {
+      if (!isPrepaid(s)) throw new Error('This session hasn’t been prepaid yet; use Pay booking first.');
+      const paid = bookingPaymentWrite({ table: t, session: s, targetPlannedMs: planned, method, tendered, cashPart, gcashRef, user });
+      Object.assign(patch, paid.patch);
+      record = paid.record;
+    }
+    if (record) tx.set('transactions', record.id, record.data);
+    tx.update('tables', tableId, patch);
+    return { planned, receipt: record ? { id: record.id, ...record.data, createdAt: serverNow() } : null };
   });
+}
+
+/**
+ * Pay some or all of a Set Hours booking's table fee while the session keeps running: the table stays
+ * In Use, the clock keeps counting, and only the fee for BOOKED time not yet paid is charged (see
+ * js/billing.js paidFee/balanceDue) — the same schedule as any other sale, so paying right after Set
+ * Hours starts costs exactly what Stop & Bill would if the whole booking were played out. This is used
+ * both for the first payment on a fresh booking and for collecting a "Pay Later" balance mid-session.
+ * Paying the same booked minute twice is impossible: this always brings paidMs level with the CURRENT
+ * plannedMs, and the fee is only the difference from what's already been paid.
+ */
+export function payBooking(tableId, { method, tendered, cashPart, gcashRef }, user) {
+  return db.transaction(async (tx) => {
+    const t = await tx.get('tables', tableId);
+    const s = t?.session;
+    if (!s) throw new Error('This table has no open session.');
+    if (s.ended || s.cancelled) throw new Error('This session has already ended.');
+    if (!isTimed(s)) throw new Error('Only a Set Hours booking can be paid in advance.');
+    if (paidMs(s) >= plannedMs(s)) throw new Error('This booking is already fully paid.');
+    const paid = bookingPaymentWrite({ table: t, session: s, targetPlannedMs: plannedMs(s), method, tendered, cashPart, gcashRef, user });
+    if (paid.record) tx.set('transactions', paid.record.id, paid.record.data);
+    tx.update('tables', tableId, { ...paid.patch, updatedAt: SERVER_TIME });
+    return paid.record ? { id: paid.record.id, ...paid.record.data, createdAt: serverNow() } : { id: null, paid: false };
+  });
+}
+
+/**
+ * Shared by extendSession()'s payNow and payBooking(): pays whatever is still owed up to
+ * `targetPlannedMs` (the booked length this write settles up to), bringing paidMs level with it.
+ * Returns the table's session.prepaid patch and, only when money actually changes hands, the
+ * transaction to save alongside it — some extensions land in a bracket that's already paid for (see
+ * js/billing.js PRICING), so nothing is charged or recorded, but paidMs still advances to match.
+ */
+function bookingPaymentWrite({ table, session, targetPlannedMs, method, tendered, cashPart, gcashRef, user }) {
+  // Belt-and-suspenders: every caller (payBooking, extendSession's payNow) already refuses to reach
+  // here for Open Time, but this shared helper is the one place that actually writes session.prepaid —
+  // it never touches a table that isn't a Set Hours booking, no matter what a future caller does.
+  if (!isTimed(session) || targetPlannedMs <= 0) throw new Error('Only a Set Hours booking can be paid in advance.');
+  const already = paidMs(session);
+  // paidFee(), not tableFee(already) directly: tableFee(0) is ₱200 (the flat first-hour minimum, see
+  // js/billing.js PRICING), not ₱0 — a session that was never prepaid has ₱0 already paid, full stop.
+  const due = round2(tableFee(targetPlannedMs) - paidFee(session));
+  if (due <= 0) {
+    return { patch: { 'session.prepaid': { ...(session.prepaid || { lastTxId: null, refunded: false }), paidMs: targetPlannedMs } }, record: null };
+  }
+  gcashRefFor(method, gcashRef); // check before touching the drawer
+  let paid = null;
+  let payments;
+  if (method === 'cash') {
+    paid = tendered == null ? due : round2(tendered);
+    if (paid < due) throw new Error('Cash tendered is less than the amount due.');
+    payments = { cash: due, gcash: 0 };
+  } else if (method === 'gcash') {
+    payments = { cash: 0, gcash: due };
+  } else if (method === 'split') {
+    const cash = round2(Number(cashPart));
+    if (!(cash > 0) || cash >= due) {
+      throw new Error(`For a split payment, enter a cash amount between ₱0 and the ₱${due.toFixed(2)} due.`);
+    }
+    payments = { cash, gcash: round2(due - cash) };
+  } else {
+    throw new Error('Choose a payment method.');
+  }
+  const id = db.newId('transactions');
+  const data = {
+    tableId: table.id, tableName: table.name, pricing: { ...PRICING },
+    startedAt: session.startedAt, endedAt: null, durationMs: null,
+    plannedMs: targetPlannedMs, billedMs: null, mode: 'timed', kind: 'prepay',
+    paidFromMs: already, paidToMs: targetPlannedMs,
+    tableFee: due, items: [], productTotal: 0, total: due, method, payments,
+    tendered: paid, change: paid == null ? null : round2(paid - due),
+    gcashRef: gcashRefFor(method, gcashRef),
+    cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
+  };
+  return { patch: { 'session.prepaid': { paidMs: targetPlannedMs, lastTxId: id, refunded: false } }, record: { id, data } };
 }
 
 /** Stop manually at server time, or automatically at the verified booking deadline. */
@@ -75,12 +168,44 @@ export function endSession(tableId, { expiredBooking = null, startedAt = null } 
 }
 
 /**
+ * Auto-stop's own entry point (js/time-alerts.js checkAutoStop): stops the clock like endSession(),
+ * then — only when the booking's table fee is fully paid and nothing else is owed (no balance, no
+ * items) — immediately closes the table too, the same ₱0 "nothing to pay" shape a cancelled game with
+ * no items already uses. If anything is still owed, the session is simply left "Session ended" for a
+ * cashier to check out, exactly like an unpaid booking always has been.
+ * `user`: whichever signed-in device's tick noticed the expiry, credited on the closing sale;
+ * completeCheckout() re-verifies everything server-side regardless of who calls it.
+ */
+export async function finishAutoStop(tableId, { expiredBooking, startedAt }, user) {
+  await endSession(tableId, { expiredBooking, startedAt });
+  if (!user) return; // no signed-in device to credit the closing sale to; leave it "Session ended"
+  const t = await db.get('tables', tableId);
+  const s = t?.session;
+  if (!s || !s.ended || s.cancelled) return;
+  // Open Time has no booking to be "fully paid" against — balanceDue() reads ₱0 for it unconditionally
+  // (see js/billing.js), which is not the same thing as its real table fee being settled. Auto-closing
+  // is a Set Hours-only shortcut; an ended Open Time table always waits for a cashier's own checkout.
+  if (!isTimed(s)) return;
+  if (balanceDue(s) > 0 || (s.items || []).length > 0) return;
+  // Nothing left to collect: close it here so a fully-settled table doesn't sit "ended" for no reason.
+  // Another device's tick (or the cashier) may be closing it at the same instant; completeCheckout's
+  // own transaction sorts that out, so a lost race here is expected and silently ignored.
+  await completeCheckout(tableId, { method: 'none' }, user).catch(() => {});
+}
+
+/**
  * Cancel a game within the first CANCEL_WINDOW_MS (5 minutes): the customer changed their mind, so
  * the table fee is ₱0. A running clock stops in the same write (server-stamped); a clock that was
  * already stopped must have run 5 minutes or less. firestore.rules checks the window against server
  * time. Items already on the bill are still owed and are paid at checkout.
+ *
+ * If any part of the booking was already prepaid (js/billing.js paidFee), cancelling within the window
+ * also refunds it, in the same write: a second, append-only transaction with a negative amount, linked
+ * back to the original payment — transactions are never edited or deleted (see firestore.rules).
+ * `refundMethod` ('cash' or 'gcash') says which drawer the money came back out of; it's required only
+ * when there's something to refund.
  */
-export function cancelGame(tableId, { reason, note = '' } = {}, user) {
+export function cancelGame(tableId, { reason, note = '', refundMethod = null } = {}, user) {
   if (!CANCEL_REASONS.includes(reason)) return Promise.reject(new Error('Choose a reason for cancelling.'));
   if (reason === 'Other' && !note.trim()) return Promise.reject(new Error('Add a note explaining why.'));
   return db.transaction(async (tx) => {
@@ -92,10 +217,31 @@ export function cancelGame(tableId, { reason, note = '' } = {}, user) {
       throw new Error('This game has run for more than 5 minutes, so it can no longer be cancelled.');
     }
     const cancelled = { reason, note: note.trim(), byId: user.uid, byName: user.name, at: SERVER_TIME };
-    tx.update('tables', tableId, s.ended
+    const patch = s.ended
       ? { 'session.cancelled': cancelled, updatedAt: SERVER_TIME }
-      : { 'session.ended': true, 'session.endedAt': SERVER_TIME, 'session.cancelled': cancelled, updatedAt: SERVER_TIME });
-    return { tableName: t.name, hasItems: (s.items || []).length > 0 };
+      : { 'session.ended': true, 'session.endedAt': SERVER_TIME, 'session.cancelled': cancelled, updatedAt: SERVER_TIME };
+
+    const owedRefund = round2(paidFee(s));
+    let refunded = false;
+    if (owedRefund > 0 && !s.prepaid.refunded) {
+      if (!['cash', 'gcash'].includes(refundMethod)) throw new Error('Choose how the prepaid amount was refunded.');
+      const id = db.newId('transactions');
+      tx.set('transactions', id, {
+        tableId, tableName: t.name, pricing: null, kind: 'refund', refundOfTxId: s.prepaid.lastTxId,
+        startedAt: s.startedAt, endedAt: SERVER_TIME, durationMs: elapsedMs(t, serverNow()),
+        plannedMs: plannedMs(s), billedMs: null, mode: 'timed',
+        tableFee: -owedRefund, items: [], productTotal: 0, total: -owedRefund,
+        method: refundMethod, payments: refundMethod === 'cash' ? { cash: -owedRefund, gcash: 0 } : { cash: 0, gcash: -owedRefund },
+        tendered: null, change: null, gcashRef: null,
+        cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
+        gameCancelled: true, cancelReason: reason, cancelNote: note.trim(),
+        cancelledById: user.uid, cancelledByName: user.name,
+      });
+      patch['session.prepaid'] = { ...s.prepaid, refunded: true, refundTxId: id };
+      refunded = true;
+    }
+    tx.update('tables', tableId, patch);
+    return { tableName: t.name, hasItems: (s.items || []).length > 0, refunded, refundAmount: owedRefund };
   });
 }
 
@@ -255,6 +401,8 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, gc
         cancelledById: cancelled.byId, cancelledByName: cancelled.byName,
       } : {}),
       ...(s.transfers?.length ? { transfers: s.transfers } : {}),
+      // A prepaid booking: what was already paid (for the receipt) and the sale it was paid on.
+      ...(isPrepaid(s) ? { prepaidAmount: paidFee(s), prepaidTxId: s.prepaid.lastTxId } : {}),
     };
     tx.set('transactions', id, record);
     tx.update('tables', tableId, { status: 'available', session: null, lastTxId: id, updatedAt: SERVER_TIME });

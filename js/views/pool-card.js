@@ -1,5 +1,5 @@
 import {
-  elapsedMs, currentBill, PRICING, isTimed, remainingMs, overtimeMs,
+  elapsedMs, currentBill, PRICING, isTimed, remainingMs, overtimeMs, isPrepaid, balanceDue,
 } from '../billing.js';
 import { esc, icon, peso, fmtDuration, fmtBooking } from '../ui.js';
 import { visibleHourLevel } from '../hour-alerts.js';
@@ -56,7 +56,9 @@ export function poolCard(t, { picker = false } = {}) {
       <div class="pool__table">
         ${POCKETS}
         <div class="pool__cloth">
-          <p class="pool__status">${live ? NINE_BALL : '<span class="pool__lamp" aria-hidden="true"></span>'}${status}</p>
+          <p class="pool__status">${live ? NINE_BALL : '<span class="pool__lamp" aria-hidden="true"></span>'}${status}${live && timed && !t.session.cancelled && isPrepaid(t.session)
+            ? (balanceDue(t.session) > 0 ? ` · <span class="badge badge--in-use">Bal ${peso(balanceDue(t.session))}</span>` : ' · <span class="badge badge--available">Paid</span>')
+            : ''}</p>
           <div class="led">
             ${live
               ? `<span class="led__digits num" data-elapsed="${id}">${fmtDuration(elapsed)}</span>`

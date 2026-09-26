@@ -2,9 +2,11 @@ import { state, on } from './state.js';
 import * as svc from './services.js';
 import {
   esc, icon, peso, fmtDuration, fmtCountdown, fmtDateTime, fmtTime, fmtBooking, METHOD_LABEL, openDialog, toast, preserveFocus, busy,
+  gcashRefField, wireGcashRef,
 } from './ui.js';
 import {
   canCancelGame, cancelTimeLeft, CANCEL_REASONS, elapsedMs, feeBreakdown, PRICING_LABEL, PRICING, tableFee, BOOKING_PRESETS,
+  paidFee, round2,
 } from './billing.js';
 import { serverNow } from './clock.js';
 import * as printer from './printer.js';
@@ -52,9 +54,13 @@ export function tableDialog(table) {
  * Pick a booked length: presets (1/2/3 hours) or custom hours + minutes in 15-minute steps, with a
  * live price preview. Used for "Set Hours" (new booking) and "Add time" (extending one).
  * baseMs: time already booked (for extensions); elapsedNow: time already played (for the preview).
+ * paidThroughMs: on a prepaid session, how much of the booking is already paid for — when given (> 0
+ * doesn't matter; the caller decides by passing it at all), the dialog also offers Pay Now (settle the
+ * extra fee immediately, onPick's second argument is true) or Pay Later (just grows the balance).
  */
-export function bookingDialog({ title, submitLabel, baseMs = 0, elapsedNow = 0, onPick }) {
+export function bookingDialog({ title, submitLabel, baseMs = 0, elapsedNow = 0, paidThroughMs = null, onPick }) {
   const extending = baseMs > 0;
+  const payChoice = paidThroughMs != null;
   openDialog({
     title,
     submitLabel,
@@ -86,6 +92,18 @@ export function bookingDialog({ title, submitLabel, baseMs = 0, elapsedNow = 0, 
         <div><dt>Fee if fully used</dt><dd class="num" data-fee></dd></div>
         <div><dt>Ends around</dt><dd class="num" data-ends></dd></div>
       </dl>
+      ${payChoice ? `
+      <fieldset class="booking-presets">
+        <legend>Payment for the extra time</legend>
+        <label class="booking-preset">
+          <input type="radio" name="pay-choice" value="later" checked>
+          <span>Pay later<span class="muted small"> · adds to the balance</span></span>
+        </label>
+        <label class="booking-preset">
+          <input type="radio" name="pay-choice" value="now">
+          <span>Pay now<span class="muted small" data-pay-now-due></span></span>
+        </label>
+      </fieldset>` : ''}
       <p class="muted small">The customer is billed only for the time actually played, so ending early costs less. The hall rate: the first hour plus a 5-minute grace, then ₱${PRICING.bracketPrice} every ${PRICING.bracketMinutes} minutes.</p>`,
     onOpen(dlg) {
       const form = dlg.querySelector('form');
@@ -103,6 +121,10 @@ export function bookingDialog({ title, submitLabel, baseMs = 0, elapsedNow = 0, 
         dlg.querySelector('[data-len]').textContent = add ? fmtBooking(total) : '—';
         dlg.querySelector('[data-fee]').textContent = add ? peso(tableFee(total)) : '—';
         dlg.querySelector('[data-ends]').textContent = add ? fmtTime(serverNow() - elapsedNow + total) : '—';
+        if (payChoice) {
+          const due = add ? Math.max(0, round2(tableFee(total) - tableFee(paidThroughMs))) : 0;
+          dlg.querySelector('[data-pay-now-due]').textContent = add ? ` · ${peso(due)}` : '';
+        }
       };
       form.addEventListener('change', update);
       update();
@@ -111,7 +133,65 @@ export function bookingDialog({ title, submitLabel, baseMs = 0, elapsedNow = 0, 
     async onSubmit(fd, dlg) {
       const ms = dlg.pickBooking();
       if (!(ms > 0)) throw new Error('Choose at least 15 minutes.');
-      await onPick(ms);
+      await onPick(ms, payChoice && fd.get('pay-choice') === 'now');
+    },
+  });
+}
+
+/**
+ * Small payment dialog for paying a Set Hours booking's table fee while the session keeps running:
+ * "Pay booking now" (the first payment), "Pay balance" (a Pay Later balance collected mid-session) and
+ * "Add time → Pay now" all use it. `due` is fixed for the life of the dialog — it's calculated purely
+ * from booked time, never from time actually played, so it doesn't move with the clock (js/billing.js
+ * balanceDue).
+ */
+export function bookingPaymentDialog({ title, due, onPay }) {
+  let method = 'cash';
+  openDialog({
+    title,
+    submitLabel: `Pay ${peso(due)}`,
+    body: `
+      <dl class="kv"><div><dt>Amount due</dt><dd class="num">${peso(due)}</dd></div></dl>
+      <div class="pay">
+        <p class="pay__label" id="bp-pay-label">Payment method</p>
+        <div class="seg" role="radiogroup" aria-labelledby="bp-pay-label">
+          ${svc.PAYMENT_METHODS.map((m) => `
+            <label class="seg__opt">
+              <input type="radio" name="bp-method" value="${m}" ${m === method ? 'checked' : ''}>
+              <span>${METHOD_LABEL[m]}</span>
+            </label>`).join('')}
+        </div>
+      </div>
+      <div class="cash" data-region="bp-cash">
+        <div class="field">
+          <label for="bp-tendered">Cash tendered</label>
+          <input id="bp-tendered" name="bp-tendered" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Exact amount">
+        </div>
+      </div>
+      <div class="cash" data-region="bp-split" hidden>
+        <div class="field">
+          <label for="bp-split-cash">Cash portion</label>
+          <input id="bp-split-cash" name="bp-split-cash" type="number" inputmode="decimal" min="0" step="0.01" placeholder="Amount paid in cash">
+        </div>
+      </div>
+      ${gcashRefField()}`,
+    onOpen(dlg) {
+      dlg.querySelectorAll('input[name=bp-method]').forEach((r) => r.addEventListener('change', () => {
+        method = r.value;
+        dlg.querySelector('[data-region=bp-cash]').hidden = method !== 'cash';
+        dlg.querySelector('[data-region=bp-split]').hidden = method !== 'split';
+        dlg.querySelector('[data-region=gcash-ref]').hidden = method === 'cash';
+      }));
+      wireGcashRef(dlg);
+    },
+    async onSubmit(fd) {
+      const tenderedRaw = fd.get('bp-tendered');
+      await onPay({
+        method,
+        tendered: method === 'cash' && tenderedRaw !== '' ? Number(tenderedRaw) : null,
+        cashPart: method === 'split' ? Number(fd.get('bp-split-cash')) : null,
+        gcashRef: fd.get('gcash-ref'),
+      });
     },
   });
 }
@@ -457,16 +537,24 @@ export function staffDialog(member, currentUser) {
 export function receiptDialog(tx, { fresh = false } = {}) {
   const cancelled = Boolean(tx.gameCancelled);
   const voided = Boolean(tx.tableFeeVoided);
+  const prepay = tx.kind === 'prepay';
+  const refund = tx.kind === 'refund';
   const { dlg } = openDialog({
-    title: cancelled ? 'Game cancelled' : voided ? 'Table fee voided' : fresh ? 'Transaction complete' : 'Receipt',
+    title: prepay ? 'Booking payment' : refund ? 'Refund' : cancelled ? 'Game cancelled' : voided ? 'Table fee voided' : fresh ? 'Transaction complete' : 'Receipt',
     cancelLabel: 'Close',
     body: `
-      <div class="receipt ${cancelled || voided ? 'is-voided' : ''}">
-        ${cancelled ? `
+      <div class="receipt ${cancelled || voided || refund ? 'is-voided' : ''}">
+        ${cancelled && !refund ? `
         <div class="void-banner" role="note">
           <span class="badge badge--danger">Game cancelled</span>
           <span>${esc(tx.cancelReason)}${tx.cancelNote ? ` · “${esc(tx.cancelNote)}”` : ''}<br>
             <span class="muted small">Cancelled by ${esc(tx.cancelledByName)} within the first 5 minutes, so there is no table fee.${tx.productTotal ? ' Items were still charged.' : ''}</span></span>
+        </div>` : ''}
+        ${refund ? `
+        <div class="void-banner" role="note">
+          <span class="badge badge--danger">Booking refunded</span>
+          <span>${esc(tx.cancelReason)}${tx.cancelNote ? ` · “${esc(tx.cancelNote)}”` : ''}<br>
+            <span class="muted small">Cancelled by ${esc(tx.cancelledByName)} within the first 5 minutes. The prepaid table fee was refunded via ${METHOD_LABEL[tx.method] || esc(tx.method)}.</span></span>
         </div>` : ''}
         ${voided ? `
         <div class="void-banner" role="note">
@@ -480,11 +568,20 @@ export function receiptDialog(tx, { fresh = false } = {}) {
           ${tx.transfers?.length ? `<p class="muted small">Started at ${esc(tx.transfers[0].fromTableName)}, moved to ${esc(tx.tableName)}${tx.transfers.length > 1 ? ` (${tx.transfers.length} moves)` : ''} at ${fmtTime(tx.transfers[tx.transfers.length - 1].at)}.</p>` : ''}
         </div>
         <dl class="sum-lines">
-          ${tx.tableId ? `
+          ${prepay ? `
+          <div class="sum-row">
+            <dt>Booking payment<span class="sum-sub">${fmtBooking(tx.paidFromMs)} → ${fmtBooking(tx.paidToMs)} of ${fmtBooking(tx.plannedMs)} booked</span></dt>
+            <dd class="num">${peso(tx.tableFee)}</dd>
+          </div>` : refund ? `
+          <div class="sum-row">
+            <dt>Booking fee refunded<span class="sum-sub">${fmtBooking(tx.plannedMs)} booked</span></dt>
+            <dd class="num">${peso(tx.tableFee)}</dd>
+          </div>` : tx.tableId ? `
           <div class="sum-row">
             <dt>Table fee<span class="sum-sub">${fmtDuration(tx.durationMs)} played${tx.plannedMs ? ` · ${fmtBooking(tx.plannedMs)} booked` : ' · open time'}${cancelled ? ' · cancelled' : ` · ${tx.pricing ? feeBreakdown(tx.billedMs ?? tx.durationMs, tx.pricing) : `${peso(tx.rate)}/hr (old rate)`}`}</span></dt>
             <dd class="num">${voided ? `<s class="muted">${peso(tx.originalTableFee)}</s> Waived` : cancelled ? 'No charge' : peso(tx.tableFee)}</dd>
           </div>
+          ${tx.prepaidAmount ? `<div class="sum-row sum-row--muted"><dt>Already paid on this booking</dt><dd class="num">${peso(tx.prepaidAmount)}</dd></div>` : ''}
           ${tx.rounds ? `<div class="sum-row sum-row--muted"><dt>Rounds played</dt><dd class="num">${tx.rounds}</dd></div>` : ''}` : ''}
           ${(tx.items || []).map((i) => `
           <div class="sum-row">
@@ -584,6 +681,7 @@ export function startTicketDialog(ticket) {
 export function cancelGameDialog(table, { onDone } = {}) {
   const items = table.session.items || [];
   const itemsDue = items.reduce((s, i) => s + i.price * i.qty, 0);
+  const refund = paidFee(table.session); // already paid on the booking, per js/billing.js
   const { dlg } = openDialog({
     title: `Cancel game · ${esc(table.name)}`,
     submitLabel: items.length ? 'Cancel game' : 'Cancel game, no charge',
@@ -592,9 +690,16 @@ export function cancelGameDialog(table, { onDone } = {}) {
     body: `
       <p><strong>${esc(table.name)}</strong> · played <span class="num" data-live="played"></span> ·
         <span data-live="left"></span></p>
-      <p>${items.length
+      <p>${refund > 0 ? `This booking was prepaid <strong class="num">${peso(refund)}</strong>. Cancelling now refunds it in full — a separate refund is recorded, since a completed sale can't be edited.` : ''}
+      ${items.length
         ? `The table fee becomes <strong>₱0</strong>. The items on the bill (<strong class="num">${peso(itemsDue)}</strong>) still need to be paid, so take payment for them next.`
         : 'The clock stops and the table is freed with <strong>no charge</strong>.'}</p>
+      ${refund > 0 ? `
+      <fieldset class="reason-list">
+        <legend>Refund via</legend>
+        <label class="reason"><input type="radio" name="refund-method" value="cash" checked required><span>Cash</span></label>
+        <label class="reason"><input type="radio" name="refund-method" value="gcash"><span>QRPH</span></label>
+      </fieldset>` : ''}
       <fieldset class="reason-list">
         <legend>Reason</legend>
         ${CANCEL_REASONS.map((r, i) => `
@@ -618,12 +723,13 @@ export function cancelGameDialog(table, { onDone } = {}) {
       if (!reason) throw new Error('Choose a reason for cancelling.');
       const live = state.tables.find((t) => t.id === table.id) || table;
       if (!canCancelGame(live)) throw new Error('This game has run for more than 5 minutes, so it can no longer be cancelled.');
-      const result = await svc.cancelGame(table.id, { reason, note: String(fd.get('note') || '') }, state.user);
+      const refundMethod = refund > 0 ? fd.get('refund-method') : null;
+      const result = await svc.cancelGame(table.id, { reason, note: String(fd.get('note') || ''), refundMethod }, state.user);
       if (!result.hasItems) {
         await svc.completeCheckout(table.id, { method: 'none' }, state.user);
-        toast(`${result.tableName}: game cancelled, no charge. The table is free.`);
+        toast(`${result.tableName}: game cancelled, no charge.${result.refunded ? ` ${peso(result.refundAmount)} refunded.` : ''} The table is free.`);
       } else {
-        toast(`${result.tableName}: game cancelled. Table fee is ₱0. Take payment for the items.`);
+        toast(`${result.tableName}: game cancelled. Table fee is ₱0.${result.refunded ? ` ${peso(result.refundAmount)} refunded.` : ''} Take payment for the items.`);
       }
       onDone?.(result);
     },

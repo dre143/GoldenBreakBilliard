@@ -224,7 +224,10 @@ export function cancelInfo(t) {
 
 export function cancelledGames(txs) {
   const at = (t) => (t.gameCancelled ? t.createdAt : t.tableFeeVoidedAt) || 0;
-  return txs.filter((t) => t.gameCancelled || t.tableFeeVoided).sort((a, b) => at(b) - at(a));
+  // A prepaid booking's cancel also writes a linked refund transaction (kind: 'refund'); it carries
+  // gameCancelled too so its own receipt reads right, but the cancellation itself is already counted by
+  // the checkout sale it's linked to, so it's excluded here to avoid listing one cancelled game twice.
+  return txs.filter((t) => (t.gameCancelled && t.kind !== 'refund') || t.tableFeeVoided).sort((a, b) => at(b) - at(a));
 }
 
 /** RFC 4180 CSV from a header row + data rows. */

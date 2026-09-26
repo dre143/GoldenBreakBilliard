@@ -36,19 +36,30 @@ service cloud.firestore {
     // ---- Official table rate (mirrors PRICING in js/billing.js) ----
     // First 60 minutes ₱200, plus a 5-minute grace: still ₱200 through 1:04:59. From 1:05:00 (3900000 ms) the
     // fee is ₱250, then +₱50 every 15 minutes (1:20:00, 1:35:00, ...): 200 + (1 + floor((ms - 3900000) / 900000)) * 50.
-    function feeOk(fee, durationMs) {
-      return durationMs is int && durationMs >= 0 && fee is int
-        && ((durationMs < 3900000 && fee == 200)
-            || (durationMs >= 3900000 && fee == 200 + (1 + math.floor((durationMs - 3900000) / 900000.0)) * 50));
+    // Returns the raw schedule fee for `ms` of billed time — not necessarily what's owed (see feeOk below).
+    function rawFee(ms) {
+      return ms < 3900000 ? 200 : 200 + (1 + math.floor((ms - 3900000) / 900000.0)) * 50;
+    }
+    // `fee` must be the schedule amount for `durationMs`, minus `alreadyPaid` (0 for an unpaid session —
+    // see prepaidFeeOf below). This is what's actually owed, mirroring js/billing.js billSession/paidFee.
+    function feeOk(fee, durationMs, alreadyPaid) {
+      return durationMs is int && durationMs >= 0 && fee is int && fee == rawFee(durationMs) - alreadyPaid;
     }
 
     // Booked time: 0 (open time) or whole 15-minute steps.
     function bookingOk(ms) { return ms is int && ms >= 0 && ms % 900000 == 0; }
 
-    // Billed time is the time actually played, never the booked time (unused booked time is not charged).
-    function billedOk(billedMs, durationMs) {
-      return billedMs is int && billedMs == durationMs;
-    }
+    // ---- Prepaid Set Hours bookings (mirrors the "prepaid" section of js/billing.js) ----
+    // session.prepaid == null for a session that was never paid in advance (Open Time or an unpaid Set
+    // Hours booking — Stop & Bill still works exactly as it always has). Otherwise it tracks how much of
+    // the BOOKED time (session.plannedMs) has its fee already paid: { paidMs, lastTxId, refunded }.
+    function prepaidMsOf(s) { return s.get('prepaid', null) == null ? 0 : s.prepaid.paidMs; }
+    // ₱0 for a session that was never prepaid — NOT rawFee(0), which would wrongly read as "the first
+    // hour is already paid". Only a real prepaid marker ever counts as money already collected.
+    function prepaidFeeOf(s) { return s.get('prepaid', null) == null ? 0 : rawFee(s.prepaid.paidMs); }
+    // Billed time floors at what's already been paid for (no refund for playing less than that — see
+    // js/billing.js billSession); it never exceeds it either, since a booking auto-stops at plannedMs.
+    function effectiveMs(s, durationMs) { return durationMs > prepaidMsOf(s) ? durationMs : prepaidMsOf(s); }
 
     // First-run marker: created atomically with the first owner profile.
     match /meta/setup {
@@ -168,31 +179,106 @@ service cloud.firestore {
         && after.session.plannedMs >= before.session.plannedMs;
     }
 
+    // Pays some or all of a running Set Hours booking's table fee (js/services.js payBooking, and
+    // extendSession's payNow) without stopping the session: status and ended are untouched, only
+    // session.prepaid (and, for "Add time → Pay now" in the same write, plannedMs) change.
+    function paysBooking() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let s = before.session;
+      return onlyChanges(['session', 'updatedAt'])
+        && before.status == 'in_use' && after.status == 'in_use'
+        && s.ended == false && s.get('cancelled', null) == null
+        && s.plannedMs > 0
+        && after.session.diff(s).affectedKeys().hasOnly(['prepaid', 'plannedMs'])
+        && bookingOk(after.session.plannedMs) && after.session.plannedMs >= s.plannedMs
+        && paymentAppliedOk(s, after.session);
+    }
+
+    // Same as paysBooking(), but for "Add time → Pay now" on an EXPIRED prepaid booking: the write also
+    // resumes the session, exactly like extendsExpiredSession() below, just with a payment folded in.
+    function extendsExpiredSessionWithPayment() {
+      let before = resource.data;
+      let after = request.resource.data;
+      let s = before.session;
+      return onlyChanges(['session', 'updatedAt'])
+        && before.status == 'in_use' && after.status == 'in_use'
+        && s.ended == true && s.get('cancelled', null) == null
+        && s.plannedMs > 0
+        && elapsedAt(s, s.endedAt) >= s.plannedMs - 2000
+        && after.session.diff(s).affectedKeys().hasOnly(['plannedMs', 'ended', 'endedAt', 'resumedAt', 'elapsedBeforeResume', 'prepaid'])
+        && bookingOk(after.session.plannedMs) && after.session.plannedMs > s.plannedMs
+        && after.session.resumedAt == request.time
+        && after.session.elapsedBeforeResume == endedDuration(s)
+        && after.session.ended == false && after.session.endedAt == null
+        && paymentAppliedOk(s, after.session);
+    }
+
+    // A payment write brings session.prepaid.paidMs level with the (possibly just-grown) plannedMs,
+    // either by linking a brand-new "prepay" transaction (see prepaySaleOk below — money actually
+    // changed hands) or, when the extra booked time lands in a bracket that's already paid for, with no
+    // linked transaction at all, since nothing new is owed (js/services.js bookingPaymentWrite).
+    function paymentAppliedOk(s, afterSession) {
+      let prevFee = prepaidFeeOf(s);
+      let p = afterSession.prepaid;
+      return p.keys().hasOnly(['paidMs', 'lastTxId', 'refunded'])
+        && p.paidMs == afterSession.plannedMs
+        && p.get('refunded', false) == s.get('prepaid', {}).get('refunded', false)
+        && (
+          (rawFee(p.paidMs) == prevFee && p.lastTxId == s.get('prepaid', {}).get('lastTxId', null))
+          || (rawFee(p.paidMs) > prevFee
+            && p.lastTxId is string
+            && !exists(txPath(p.lastTxId)) && existsAfter(txPath(p.lastTxId))));
+    }
+
     // Cancel game: within the first 5 minutes (CANCEL_WINDOW_MS in js/billing.js), measured on server
     // time, the table fee becomes ₱0. Either the running clock stops in this same write, or a clock
     // that was already stopped ran 5 minutes or less. Allowed once; items stay on the bill.
+    //
+    // If the booking was already prepaid, cancelling also refunds it in the same write — a linked
+    // append-only "refund" transaction (see refundOk/refundSaleOk) — since the money was already taken
+    // and transactions can never be edited or deleted.
     function cancelsGame() {
       let before = resource.data;
       let after = request.resource.data;
       let c = after.session.cancelled;
+      let s = before.session;
+      let refunding = prepaidFeeOf(s) > 0 && s.prepaid.get('refunded', false) == false;
       return onlyChanges(['session', 'updatedAt'])
         && before.status == 'in_use' && after.status == 'in_use'
-        && before.session.get('cancelled', null) == null
+        && s.get('cancelled', null) == null
         && c.keys().hasOnly(['reason', 'note', 'byId', 'byName', 'at'])
         && c.reason is string && c.reason.size() > 0 && c.reason.size() <= 80
         && c.note is string && c.note.size() <= 140
         && c.byId == request.auth.uid
         && c.at == request.time
+        && (refunding ? refundOk(s, after.session) : true)
         && (
-          (before.session.ended == false
-            && after.session.diff(before.session).affectedKeys().hasOnly(['ended', 'endedAt', 'cancelled'])
+          (s.ended == false
+            && after.session.diff(s).affectedKeys().hasOnly(refunding ? ['ended', 'endedAt', 'cancelled', 'prepaid'] : ['ended', 'endedAt', 'cancelled'])
             && after.session.ended == true
             && after.session.endedAt == request.time
-            && request.time <= before.session.startedAt + duration.value(300, 's'))
-          || (before.session.ended == true
-            && after.session.diff(before.session).affectedKeys().hasOnly(['cancelled'])
-            && before.session.endedAt.toMillis() - before.session.startedAt.toMillis() <= 300000)
+            && request.time <= s.startedAt + duration.value(300, 's'))
+          || (s.ended == true
+            && after.session.diff(s).affectedKeys().hasOnly(refunding ? ['cancelled', 'prepaid'] : ['cancelled'])
+            && s.endedAt.toMillis() - s.startedAt.toMillis() <= 300000)
         );
+    }
+
+    // The refund half of cancelsGame() above: paidMs/lastTxId are untouched (the original payment
+    // stands, just refunded), refunded flips true exactly once, and refundTxId points to a real,
+    // matching "refund" transaction created in the same batch (see refundSaleOk on transactions/{id}).
+    function refundOk(s, afterSession) {
+      let prev = s.prepaid;
+      let p = afterSession.prepaid;
+      let sale = getAfter(txPath(p.get('refundTxId', ''))).data;
+      return p.keys().hasOnly(['paidMs', 'lastTxId', 'refunded', 'refundTxId'])
+        && p.paidMs == prev.paidMs && p.lastTxId == prev.lastTxId
+        && p.refunded == true && p.refundTxId is string
+        && !exists(txPath(p.refundTxId)) && existsAfter(txPath(p.refundTxId))
+        && sale.get('kind', null) == 'refund'
+        && sale.tableFee == -rawFee(prev.paidMs)
+        && math.abs(sale.total - sale.tableFee) < 0.005;
     }
 
     // Transfer table: a live (unended) session moves to a different table, keeping its original start
@@ -237,6 +323,8 @@ service cloud.firestore {
         && after.session.plannedMs == s.plannedMs
         && after.session.get('resumedAt', null) == s.get('resumedAt', null)
         && after.session.get('elapsedBeforeResume', 0) == s.get('elapsedBeforeResume', 0)
+        // A prepaid marker (js/billing.js paidMs) travels with the game, unchanged, same as its start time.
+        && after.session.get('prepaid', null) == s.get('prepaid', null)
         && after.session.items == s.items
         && after.session.rounds == s.rounds
         && after.session.openedBy == s.openedBy && after.session.openedByName == s.openedByName
@@ -286,6 +374,8 @@ service cloud.firestore {
             || startsSession()
             || endsSession()
             || extendsExpiredSession()
+            || extendsExpiredSessionWithPayment()
+            || paysBooking()
             || cancelsGame()
             || editsSession()
             || closesWithSale(tableId)
@@ -362,9 +452,15 @@ service cloud.firestore {
         && math.abs(sale.total - sale.cueStickTotal) < 0.005;
     }
 
+    // A normal (non-prepay, non-refund) sale, at checkout: billed on the time actually played, floored
+    // at whatever was already prepaid so it's never charged twice and never refunded for playing less
+    // than what was paid for (js/billing.js billSession) — a cancelled game within 5 minutes still has
+    // no table fee of its own, but see refundSaleOk for money already taken on it.
     function saleMatchesSession(sale, id) {
       let before = get(tablePath(sale.tableId)).data;
       let after = getAfter(tablePath(sale.tableId)).data;
+      let s = before.session;
+      let billedMs = effectiveMs(s, sale.durationMs);
       return before.status == 'in_use' && before.session != null
         && before.session.ended == true && before.session.endedAt is timestamp
         && sale.startedAt.toMillis() == before.session.startedAt.toMillis()
@@ -374,8 +470,8 @@ service cloud.firestore {
         // A normal sale is billed at the rate; a game cancelled within 5 minutes has no table fee.
         && ((before.session.get('cancelled', null) == null
               && sale.get('gameCancelled', false) == false
-              && billedOk(sale.billedMs, sale.durationMs)
-              && feeOk(sale.tableFee, sale.billedMs))
+              && sale.billedMs == billedMs
+              && feeOk(sale.tableFee, billedMs, prepaidFeeOf(s)))
             || (before.session.get('cancelled', null) != null
               && sale.gameCancelled == true
               && sale.durationMs <= 300000
@@ -386,21 +482,69 @@ service cloud.firestore {
         && after.status == 'available' && after.session == null && after.lastTxId == id;
     }
 
+    // A payment on a running Set Hours booking (js/services.js payBooking / extendSession's payNow):
+    // no items, no clock stopped — just the fee for newly-paid booked time, from the same schedule as
+    // any other sale, cross-checked against the table's own before/after prepaid state.
+    function prepaySaleOk(sale, id) {
+      let before = get(tablePath(sale.tableId)).data;
+      let after = getAfter(tablePath(sale.tableId)).data;
+      let s = before.session;
+      let newPaidMs = after.session.prepaid.paidMs;
+      return before.status == 'in_use' && s != null && s.ended == false && s.get('cancelled', null) == null
+        && s.plannedMs > 0
+        && sale.startedAt.toMillis() == s.startedAt.toMillis()
+        && sale.plannedMs == newPaidMs
+        && sale.items.size() == 0 && sale.productTotal == 0
+        && sale.tableFee == rawFee(newPaidMs) - prepaidFeeOf(s)
+        && sale.tableFee > 0
+        && math.abs(sale.total - sale.tableFee) < 0.005
+        && after.status == 'in_use'
+        && after.session.prepaid.paidMs == newPaidMs
+        && after.session.prepaid.lastTxId == id;
+    }
+
+    // The refund half of cancelGame() on a prepaid booking: a negative, append-only sale for exactly
+    // what was paid on the booking, cross-checked against the table's cancelsGame()/refundOk() write.
+    function refundSaleOk(sale) {
+      let before = get(tablePath(sale.tableId)).data;
+      let s = before.session;
+      return s != null && prepaidFeeOf(s) > 0 && s.prepaid.get('refunded', false) == false
+        && sale.method in ['cash', 'gcash']
+        && sale.get('gameCancelled', false) == true
+        && sale.items.size() == 0 && sale.productTotal == 0
+        && math.abs(sale.tableFee + prepaidFeeOf(s)) < 0.005
+        && math.abs(sale.total - sale.tableFee) < 0.005
+        && sale.get('refundOfTxId', null) == s.prepaid.lastTxId;
+    }
+
     match /transactions/{id} {
       allow read: if isWorkingStaff();
       // Nothing to pay (a cancelled game with no items) is recorded as method 'none'.
       allow create: if isWorkingStaff()
         && request.resource.data.cashierId == request.auth.uid
-        && (request.resource.data.method in ['cash', 'gcash', 'split']
-            || (request.resource.data.method == 'none' && request.resource.data.total == 0))
-        // Any QRPH part needs the last 5 digits of the QRPH reference number.
-        && (!(request.resource.data.method in ['gcash', 'split'])
-            || (request.resource.data.get('gcashRef', null) is string
-                && request.resource.data.gcashRef.matches('^[0-9]{5}$')))
         && request.resource.data.createdAt == request.time
-        && ((request.resource.data.tableId == null
-              && (quickSaleOk(request.resource.data) || cueStickSaleOk(request.resource.data)))
-            || (request.resource.data.tableId != null && saleMatchesSession(request.resource.data, id)));
+        && (
+          (request.resource.data.get('kind', null) == 'prepay'
+            && request.resource.data.tableId != null
+            && request.resource.data.method in ['cash', 'gcash', 'split']
+            && (!(request.resource.data.method in ['gcash', 'split'])
+                || (request.resource.data.get('gcashRef', null) is string
+                    && request.resource.data.gcashRef.matches('^[0-9]{5}$')))
+            && prepaySaleOk(request.resource.data, id))
+          || (request.resource.data.get('kind', null) == 'refund'
+              && request.resource.data.tableId != null
+              && refundSaleOk(request.resource.data))
+          || (request.resource.data.get('kind', null) != 'prepay' && request.resource.data.get('kind', null) != 'refund'
+              && (request.resource.data.method in ['cash', 'gcash', 'split']
+                  || (request.resource.data.method == 'none' && request.resource.data.total == 0))
+              // Any QRPH part needs the last 5 digits of the QRPH reference number.
+              && (!(request.resource.data.method in ['gcash', 'split'])
+                  || (request.resource.data.get('gcashRef', null) is string
+                      && request.resource.data.gcashRef.matches('^[0-9]{5}$')))
+              && ((request.resource.data.tableId == null
+                    && (quickSaleOk(request.resource.data) || cueStickSaleOk(request.resource.data)))
+                  || (request.resource.data.tableId != null && saleMatchesSession(request.resource.data, id))))
+        );
       // The ledger is append-only. A game is cancelled on the table before payment (cancelsGame),
       // never by changing a completed sale.
       allow update, delete: if false;

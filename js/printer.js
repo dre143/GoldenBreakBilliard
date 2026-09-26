@@ -415,7 +415,18 @@ function saleReceipt(tx) {
     .newline()
     .align('left');
 
-  if (tx.tableId) {
+  if (tx.kind === 'prepay') {
+    e.line(twoColumn('Table', tx.tableName, width))
+      .line(twoColumn('Booking payment', `${played(tx.paidFromMs)} to ${played(tx.paidToMs)}`, width))
+      .line(twoColumn('of booked', played(tx.plannedMs), width))
+      .newline()
+      .line(twoColumn('Amount paid', money(tx.tableFee), width));
+  } else if (tx.kind === 'refund') {
+    e.line(twoColumn('Table', tx.tableName, width))
+      .line(clampLine('Booking cancelled - refund', width))
+      .newline()
+      .line(twoColumn('Refunded', money(-tx.tableFee), width));
+  } else if (tx.tableId) {
     e.line(twoColumn('Table', tx.tableName, width))
       .line(`In:  ${when(tx.startedAt)}`)
       .line(`Out: ${when(tx.endedAt)}`)
@@ -426,6 +437,7 @@ function saleReceipt(tx) {
       e.line(twoColumn('Table fee', 'P0.00', width)).line(clampLine('  Game cancelled - no charge', width));
     } else {
       e.line(twoColumn('Table fee', money(tx.tableFee), width));
+      if (tx.prepaidAmount) e.line(twoColumn('  Already paid', money(tx.prepaidAmount), width));
     }
   } else {
     e.line(twoColumn('Sale', 'Walk-in', width)).line(when(tx.createdAt)).newline();
@@ -433,14 +445,15 @@ function saleReceipt(tx) {
 
   for (const i of tx.items || []) e.line(twoColumn(`${i.qty}x ${i.name}`, money(i.total ?? i.price * i.qty), width));
 
+  const verb = tx.kind === 'refund' ? 'Refunded' : 'Paid';
   e.newline().line(twoColumn('TOTAL', money(tx.total), width));
   if (tx.method === 'split' && tx.payments) {
-    e.line(twoColumn('Paid (Cash)', money(tx.payments.cash), width))
-      .line(twoColumn('Paid (QRPH)', money(tx.payments.gcash), width));
+    e.line(twoColumn(`${verb} (Cash)`, money(tx.payments.cash), width))
+      .line(twoColumn(`${verb} (QRPH)`, money(tx.payments.gcash), width));
   } else if (tx.method === 'none') {
     e.line(twoColumn('Paid', 'No charge', width));
   } else {
-    e.line(twoColumn(`Paid (${tx.method === 'gcash' ? 'QRPH' : 'Cash'})`, money(tx.tendered ?? tx.total), width));
+    e.line(twoColumn(`${verb} (${tx.method === 'gcash' ? 'QRPH' : 'Cash'})`, money(Math.abs(tx.tendered ?? tx.total)), width));
   }
   if (tx.gcashRef) e.line(twoColumn('QRPH ref (last 5)', tx.gcashRef, width));
   if (tx.change > 0) e.line(twoColumn('Change', money(tx.change), width));
@@ -509,7 +522,11 @@ function dailySalesReceipt({ dateLabel, timeLabel, shiftLabel, txs, expenses, to
   } else {
     for (const x of [...txs].sort((a, b) => a.createdAt - b.createdAt)) {
       e.line(twoColumn(`${x.tableId ? x.tableName : 'Walk-in'}  ${refNo(x.id)}`, clock(x.createdAt), width));
-      if (x.tableId) {
+      if (x.kind === 'prepay') {
+        e.line(twoColumn('  Booking payment', money(x.tableFee), width));
+      } else if (x.kind === 'refund') {
+        e.line(twoColumn('  Booking refund', money(x.tableFee), width));
+      } else if (x.tableId) {
         e.line(twoColumn(`  Table ${played(x.durationMs)}`, x.gameCancelled ? 'cancelled' : money(x.tableFee), width));
       }
       if (x.productTotal) e.line(twoColumn('  Items', money(x.productTotal), width));

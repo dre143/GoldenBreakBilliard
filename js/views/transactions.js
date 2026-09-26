@@ -84,10 +84,12 @@ export function mount(el, ctx) {
             <td class="cell-nowrap">${showDate ? `${fmtDate(r.createdAt)}, ` : ''}${fmtTime(r.createdAt)}</td>
             <td>
               <strong>${esc(saleLabel(r))}</strong>
-              ${r.gameCancelled ? `<span class="tx-voided">Game cancelled · ${esc(r.cancelReason)}</span>` : ''}
+              ${r.kind === 'prepay' ? '<span class="tx-voided">Booking payment</span>' : ''}
+              ${r.kind === 'refund' ? '<span class="tx-voided">Booking refund</span>' : ''}
+              ${r.gameCancelled && r.kind !== 'refund' ? `<span class="tx-voided">Game cancelled · ${esc(r.cancelReason)}</span>` : ''}
               ${r.tableFeeVoided ? `<span class="tx-voided">Table fee voided · ${peso(r.refundAmount)} refunded</span>` : ''}
             </td>
-            <td class="cell-nowrap">${r.tableId ? fmtHuman(r.durationMs || 0) : '—'}</td>
+            <td class="cell-nowrap">${r.kind ? '—' : r.tableId ? fmtHuman(r.durationMs || 0) : '—'}</td>
             <td class="cell-nowrap">${METHOD_LABEL[r.method] || esc(r.method)}${r.gcashRef ? `<span class="cell-sub">Ref ${esc(r.gcashRef)}</span>` : ''}</td>
             <td class="cell-nowrap">${esc(r.cashierName)}</td>
             <td class="t-right num"><strong>${peso(r.total)}</strong></td>
