@@ -85,7 +85,7 @@ const stat = (label, value) => `
 
 const hourLabel = (h) => new Date(2000, 0, 1, h).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
 const refNo = (id) => String(id).slice(-6).toUpperCase();
-const saleLabel = (x) => (x.tableId ? x.tableName : x.saleType === 'cue-stick' ? 'Cue Stick' : 'Walk-in');
+const saleLabel = rep.saleLabel;
 const longDate = (key) => rep.keyLabel(key, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
 /** Listen to sales and expenses in [start, end); calls back once both have loaded, and on every change. */

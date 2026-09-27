@@ -9,6 +9,7 @@ import {
   paidFee, round2, isLowStock,
 } from './billing.js';
 import { serverNow } from './clock.js';
+import { saleLabel } from './reporting.js';
 import * as printer from './printer.js';
 import { isOwnerLevel, isSuperadmin } from './roles.js';
 
@@ -659,7 +660,7 @@ export function receiptDialog(tx, { fresh = false } = {}) {
             <span class="muted small">By ${esc(tx.tableFeeVoidedByName)} at ${fmtDateTime(tx.tableFeeVoidedAt)}. ${peso(tx.refundAmount)} refunded via ${tx.refundMethod === 'gcash' ? 'QRPH' : 'Cash'}.</span></span>
         </div>` : ''}
         <div class="receipt__head">
-          <p class="receipt__table">${tx.tableId ? esc(tx.tableName) : tx.saleType === 'cue-stick' ? 'Cue Stick Sale' : 'Walk-in sale'}</p>
+          <p class="receipt__table">${tx.tableId ? esc(tx.tableName) : `${esc(saleLabel(tx))} sale`}</p>
           <p class="muted">${fmtDateTime(tx.createdAt)} · ${esc(tx.cashierName)}</p>
           ${tx.transfers?.length ? `<p class="muted small">Started at ${esc(tx.transfers[0].fromTableName)}, moved to ${esc(tx.tableName)}${tx.transfers.length > 1 ? ` (${tx.transfers.length} moves)` : ''} at ${fmtTime(tx.transfers[tx.transfers.length - 1].at)}.</p>` : ''}
         </div>

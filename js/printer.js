@@ -11,6 +11,7 @@
 // Every receipt can also be previewed on screen as the exact lines the printer will get.
 import { round2, PRICING } from './billing.js';
 import { HALL_TZ } from './clock.js';
+import { saleLabel } from './reporting.js';
 
 const STORAGE_KEY = 'goldenbreak:thermal-printer';
 const PAPER_KEY = 'goldenbreak:thermal-paper-width';
@@ -440,7 +441,7 @@ function saleReceipt(tx) {
       if (tx.prepaidAmount) e.line(twoColumn('  Already paid', money(tx.prepaidAmount), width));
     }
   } else {
-    e.line(twoColumn('Sale', 'Walk-in', width)).line(when(tx.createdAt)).newline();
+    e.line(twoColumn('Sale', saleLabel(tx), width)).line(when(tx.createdAt)).newline();
   }
 
   for (const i of tx.items || []) e.line(twoColumn(`${i.qty}x ${i.name}`, money(i.total ?? i.price * i.qty), width));
@@ -521,7 +522,7 @@ function dailySalesReceipt({ dateLabel, timeLabel, shiftLabel, txs, expenses, to
     e.align('center').line('No sales.').align('left');
   } else {
     for (const x of [...txs].sort((a, b) => a.createdAt - b.createdAt)) {
-      e.line(twoColumn(`${x.tableId ? x.tableName : 'Walk-in'}  ${refNo(x.id)}`, clock(x.createdAt), width));
+      e.line(twoColumn(`${saleLabel(x)}  ${refNo(x.id)}`, clock(x.createdAt), width));
       if (x.kind === 'prepay') {
         e.line(twoColumn('  Booking payment', money(x.tableFee), width));
       } else if (x.kind === 'refund') {

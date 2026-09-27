@@ -91,6 +91,21 @@ export const shiftOf = (ts) => (ts < splitAt(dayKey(ts)) ? 'day' : 'night');
 /** Cash taken out of the drawer (water, fare, supplies…), logged by the cashier on duty. */
 export const expenseTotal = (expenses) => round2((expenses || []).reduce((s, e) => s + (e.amount || 0), 0));
 
+/**
+ * What to call a sale in a table/list: a table's own name, or — for a Quick Sale walk-in — what kind
+ * of walk-in it was, so the owner can tell products, cue sticks and mixed carts apart at a glance.
+ * Older cue-stick-only sales carried saleType: 'cue-stick' instead of a cueStickTotal; still honoured.
+ */
+export function saleLabel(tx) {
+  if (tx.tableId) return tx.tableName;
+  const hasCue = tx.cueStickTotal > 0 || tx.saleType === 'cue-stick';
+  const hasProduct = tx.productTotal > 0;
+  if (hasCue && hasProduct) return 'Bar + Cue Stick';
+  if (hasCue) return 'Cue Stick';
+  if (hasProduct) return 'Bar Counter';
+  return 'Walk-in';
+}
+
 /** Money received per channel. Older records without `payments` are inferred from `method`. */
 export function paymentsOf(tx) {
   if (tx.payments) return { cash: tx.payments.cash || 0, gcash: tx.payments.gcash || 0, other: 0 };

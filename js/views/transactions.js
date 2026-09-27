@@ -2,6 +2,7 @@
 // Money totals (sales, expenses, cash to count) live in Reports, so this page is only a searchable list.
 import { db } from '../db.js';
 import { CANCEL_WINDOW_MS } from '../billing.js';
+import { saleLabel } from '../reporting.js';
 import { receiptDialog } from '../dialogs.js';
 import {
   esc, peso, fmtTime, fmtDate, fmtHuman, startOfDay, addDays, METHOD_LABEL,
@@ -15,7 +16,6 @@ const RANGES = [
 ];
 
 const CANCEL_MINUTES = CANCEL_WINDOW_MS / 60000;
-const saleLabel = (r) => (r.tableId ? r.tableName : r.saleType === 'cue-stick' ? 'Cue Stick' : 'Walk-in');
 
 export function mount(el, ctx) {
   let range = 'today';
