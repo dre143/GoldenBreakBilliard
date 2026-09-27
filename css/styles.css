@@ -943,11 +943,84 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .showcase__layer {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  opacity: 0; transform: scale(1.015);
-  transition: opacity 1.1s ease, transform 1.4s ease;
+  /* Resting (leaving) pose: drifted left, slightly smaller and soft-focus. The incoming slide starts on
+     the right (.is-prep, set by showcase.js with transitions off) and glides to centre as this one exits. */
+  opacity: 0; transform: translateX(-5%) scale(.985); filter: blur(10px);
+  transition: opacity 1.2s ease, transform 1.4s cubic-bezier(.22, .8, .24, 1), filter 1.2s ease;
   pointer-events: none;
 }
-.showcase__layer.is-active { opacity: 1; transform: scale(1); pointer-events: auto; }
+.showcase__layer.is-prep { transform: translateX(5%) scale(.985); }
+.showcase__layer.is-active { opacity: 1; transform: none; filter: none; pointer-events: auto; }
+
+/* Ambient background: two very slow, soft light blobs drifting over the felt — motion you feel more than see. */
+.showcase::after {
+  content: ''; position: absolute; inset: -20%; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(232, 178, 61, .10), transparent 32%),
+    radial-gradient(circle at 72% 68%, rgba(217, 140, 61, .09), transparent 30%);
+  animation: showcase-ambient 26s ease-in-out infinite alternate;
+}
+@keyframes showcase-ambient { from { transform: translate(-4%, -3%) scale(1); } to { transform: translate(4%, 3%) scale(1.12); } }
+
+/* Slide timer: a thin gold line that fills over the slide's duration, so the next change is never a surprise. */
+.showcase__progress { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; z-index: 3; background: rgba(246, 243, 236, .07); }
+.showcase__progress span {
+  display: block; height: 100%; width: 100%; transform-origin: left;
+  background: linear-gradient(90deg, var(--sc-gold), var(--sc-gold-light));
+  box-shadow: 0 0 14px rgba(232, 178, 61, .55);
+  animation: showcase-progress var(--sc-slide, 9s) linear both;
+}
+@keyframes showcase-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Entrance choreography: each part of a slide rises in one after another (photo first, then the text
+   stack), instead of the whole panel appearing as one block. Photos then drift slowly (Ken Burns) so a
+   slide never looks frozen. showcase.js adds .no-anim when it only repaints live data in place. */
+@keyframes showcase-rise { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+@keyframes showcase-pop { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: none; } }
+@keyframes showcase-drift { from { transform: scale(1); } to { transform: scale(1.09) translate(-1.5%, -1%); } }
+@keyframes showcase-shimmer { from { background-position: 0% 50%; } to { background-position: 200% 50%; } }
+@keyframes showcase-glow { 0%, 100% { opacity: .55; transform: scale(1); } 50% { opacity: .95; transform: scale(1.08); } }
+
+.showcase__layer.is-active .showcase__spot { animation: showcase-pop .9s cubic-bezier(.22, .8, .24, 1) both; }
+.showcase__layer.is-active .showcase__spot-photo { animation: showcase-pop 1s .15s cubic-bezier(.22, .8, .24, 1) both; }
+.showcase__spot-photo img { animation: showcase-drift 16s ease-in-out infinite alternate; }
+.showcase__layer.is-active .showcase__spot-info > * { animation: showcase-rise .8s cubic-bezier(.22, .8, .24, 1) both; }
+.showcase__spot-info > :nth-child(1) { animation-delay: .35s !important; }
+.showcase__spot-info > :nth-child(2) { animation-delay: .5s !important; }
+.showcase__spot-info > :nth-child(3) { animation-delay: .65s !important; }
+.showcase__spot-info > :nth-child(4) { animation-delay: .8s !important; }
+.showcase__spot-info > :nth-child(5) { animation-delay: .95s !important; }
+
+/* Champion: a slow golden glow behind the portrait, and a light sweep across the name. */
+.showcase__spot--champion .showcase__spot-photo { position: relative; overflow: visible; }
+.showcase__spot--champion .showcase__spot-photo::before {
+  content: ''; position: absolute; inset: -14%; z-index: -1; border-radius: 50%;
+  background: radial-gradient(circle, rgba(232, 178, 61, .38), transparent 66%);
+  animation: showcase-glow 4.5s ease-in-out infinite;
+}
+.showcase__spot--champion .showcase__spot-photo img { border-radius: inherit; }
+.showcase__spot--champion .showcase__name {
+  background: linear-gradient(100deg, var(--ivory) 30%, var(--sc-gold-light) 46%, var(--ivory) 62%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: showcase-rise .8s .5s cubic-bezier(.22, .8, .24, 1) both, showcase-shimmer 5s 1.6s linear infinite;
+}
+
+/* Live Table Status: heading, then the table cards pop in one by one. */
+.showcase__layer.is-active .showcase__tables-head { animation: showcase-rise .8s both; }
+.showcase__layer.is-active .showcase__pool-grid > * { animation: showcase-pop .7s cubic-bezier(.22, .8, .24, 1) both; }
+.showcase__pool-grid > :nth-child(1) { animation-delay: .25s !important; }
+.showcase__pool-grid > :nth-child(2) { animation-delay: .35s !important; }
+.showcase__pool-grid > :nth-child(3) { animation-delay: .45s !important; }
+.showcase__pool-grid > :nth-child(4) { animation-delay: .55s !important; }
+.showcase__pool-grid > :nth-child(5) { animation-delay: .65s !important; }
+.showcase__pool-grid > :nth-child(n+6) { animation-delay: .75s !important; }
+/* PAID / Balance badges (pool-card.js) read small from across the room. */
+.showcase .pool__status .badge { font-size: 1.05em; padding: 3px 12px; }
+
+/* Live data repainting in place: no entrance replay. */
+.showcase__layer.no-anim .showcase__spot, .showcase__layer.no-anim .showcase__spot-photo,
+.showcase__layer.no-anim .showcase__spot-info > *, .showcase__layer.no-anim .showcase__tables-head,
+.showcase__layer.no-anim .showcase__pool-grid > * { animation: none !important; }
 
 .showcase__eyebrow {
   display: inline-flex; align-items: center; gap: 10px;
@@ -1043,8 +1116,11 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   .showcase__spot-photo { width: min(70vw, 420px); margin: 0 auto; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .showcase__layer { transition: opacity .3s ease; transform: none !important; }
+  .showcase__layer { transition: opacity .3s ease; transform: none !important; filter: none !important; }
   .showcase .pool--hour-warn, .showcase .pool--hour-crit { animation: none; }
+  .showcase::after, .showcase__spot-photo img, .showcase__spot--champion .showcase__spot-photo::before,
+  .showcase__layer *, .showcase__layer { animation: none !important; }
+  .showcase__progress span { animation: none !important; transform: none; }
 }
 
 /* ---------- data tables ---------- */

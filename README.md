@@ -359,17 +359,19 @@ room — meant for a screen behind the counter or near the tables, not a screen 
     limit gets an extra slow pulse here, purely for TV-distance legibility; the ordinary Tables screen is
     untouched. **This slide is never edited** — it's always the live data, exactly as before.
   - **Champion Spotlight, Featured Cue/Product, Promo/Announcement** — owner-set content; see below.
-- **Owner-controlled content:** Cue Sticks → **Customize Showcase** (owner-only; `js/dialogs.js`
-  `showcaseSettingsDialog`) edits Champion Spotlight, Featured Cue/Product and the Promo/Announcement
-  slide — photo, headline text, an on/off switch per slide — stored in `settings/showcase`. A slide only
-  joins the rotation once it's switched on and has something to show. **Featured** falls back to the
-  newest available cue stick when the owner hasn't set one, so that slot is never empty out of the box.
-- **Live, not a slideshow file:** it reads the same `state.tables`/`state.cueSticks`/`state.settings.showcase`
+- **Owner-controlled content, unlimited:** Cue Sticks → **Customize Showcase** (owner and superadmin
+  only; `js/dialogs.js` `manageShowcaseDialog`) is a list where you keep adding champions, featured
+  cues/products and announcements — as many as you like. Each entry is its own document in `showcaseItems`
+  and its own slide (photo, text, a "Show on the TV" switch, and — for announcements — an editable label
+  such as "Coming up" or "Happy hour" instead of a fixed "Happening now"). Entries rotate oldest first.
+  **Featured** falls back to the newest available cue stick while there are no featured entries, so that
+  slot is never empty out of the box.
+- **Live, not a slideshow file:** it reads the same `state.tables`/`state.cueSticks`/`state.showcaseItems`
   as the rest of the app, so a table freeing up, a new cue, or an owner edit updates the loop on its own —
   nothing here is ever exported or re-uploaded by hand.
-- **A display account can read `settings/showcase`** (and nothing else under `settings/`) — the one
-  exception to the Display role's tables/cueSticks-only rules (see below), so the TV itself can show what
-  the owner set without needing broader access.
+- **A display account can read `showcaseItems`** — the one exception to the Display role's
+  tables/cueSticks-only rules (see below), so the TV itself can show what the owner added. Only owner-level
+  accounts can write it; each entry's photo is size-capped so no one document nears Firestore's 1 MiB limit.
 - **How the fullscreen works:** the view adds a `showcase-mode` class to the app's `.shell` element,
   which is what actually hides the sidebar/top bar and lets the page fill the screen (see `css/styles.css`);
   the class comes off again when the view unmounts. A staff account sees a small "Back to app" link
@@ -390,10 +392,10 @@ so that screen never needs to borrow a real staff member's login (and everything
   else, even by typing a different URL.
 - **Enforced on the server, not just hidden on screen:** `firestore.rules`' `isWorkingStaff()` is
   `isStaff()` minus the Display role, and gates every collection except `tables` and `cueSticks` (which
-  stay on the broader `isStaff()`, since that's the whole point) — plus one single document,
-  `settings/showcase`, so the TV can also show the owner's Champion/Featured/Promo content (see
+  stay on the broader `isStaff()`, since that's the whole point) — plus the `showcaseItems` collection,
+  so the TV can also show the owner's Champion/Featured/Promo content (see
   *Showcase* above). A Display account's credentials, if anyone ever got hold of them, can read table
-  status, the cue stick catalog and that one settings document, and nothing more — no transactions,
+  status, the cue stick catalog and the Showcase entries, and nothing more — no transactions,
   expenses, other staff's names, other settings, or write access of any kind.
 
 ## Hour-mark alert (table cards)

@@ -626,15 +626,19 @@ export const setGcashQr = (qrImage) =>
 export const removeGcashQr = () => setGcashQr(null);
 
 /**
- * Owner-editable content for the Showcase TV slideshow (js/views/showcase.js): the Champion Spotlight,
- * Featured Cue/Product and Promo/Announcement slides. The Live Table Status slide is never editable
- * here — it's always the real, live table data. `patch` merges into whichever section is passed
- * (`{ champion: {...} }`, `{ featured: {...} }` or `{ promo: {...} }`); each section's own `enabled`
- * flag decides whether its slide appears in the rotation. Owner-only to write; a Display account (the
- * TV itself) can still read it (see firestore.rules settings/{id}).
+ * Owner-added content for the Showcase TV slideshow (js/views/showcase.js): unlimited Champion
+ * Spotlight / Featured Cue-Product / Promo-Announcement entries — add as many as you like, each gets
+ * its own slide in the rotation. The Live Table Status slide is never editable here — it's always the
+ * real, live table data. Owner/superadmin-only to write; a Display account (the TV itself) can still
+ * read the collection (see firestore.rules showcaseItems/{id}).
  */
-export const setShowcaseSettings = (patch) =>
-  db.set('settings', 'showcase', { ...patch, updatedAt: SERVER_TIME }, { merge: true });
+export function addShowcaseItem(type, data) {
+  return db.add('showcaseItems', { type, enabled: true, ...data, createdAt: SERVER_TIME, updatedAt: SERVER_TIME });
+}
+export function updateShowcaseItem(id, data) {
+  return db.update('showcaseItems', id, { ...data, updatedAt: SERVER_TIME });
+}
+export const removeShowcaseItem = (id) => db.remove('showcaseItems', id);
 
 /* ---------- tables (owner) ---------- */
 

@@ -4,7 +4,7 @@
 import { state, on } from '../state.js';
 import * as svc from '../services.js';
 import { round2 } from '../billing.js';
-import { receiptDialog, manageCueSticksDialog, cueThumb, showcaseSettingsDialog } from '../dialogs.js';
+import { receiptDialog, manageCueSticksDialog, cueThumb, manageShowcaseDialog } from '../dialogs.js';
 import * as printer from '../printer.js';
 import {
   esc, icon, peso, pageHeader, emptyBlock, busy, toast, METHOD_LABEL, preserveFocus,
@@ -223,7 +223,7 @@ export function mount(el, ctx) {
 
   el.addEventListener('click', (e) => {
     if (e.target.closest('[data-action=manage]')) { manageCueSticksDialog(); return; }
-    if (e.target.closest('[data-action=customize-showcase]')) { showcaseSettingsDialog(); return; }
+    if (e.target.closest('[data-action=customize-showcase]')) { manageShowcaseDialog(); return; }
     const add = e.target.closest('[data-add]');
     if (add) { addToCart(add.dataset.add); return; }
     const remove = e.target.closest('[data-remove]');

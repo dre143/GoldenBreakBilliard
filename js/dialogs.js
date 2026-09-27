@@ -1052,157 +1052,140 @@ export function gcashQrDialog() {
   render();
 }
 
-/**
- * Owner-only editor for the Showcase TV slideshow (js/views/showcase.js): Champion Spotlight, Featured
- * Cue/Product and Promo/Announcement — the three slides the owner controls. The Live Table Status slide
- * is never edited here; it's always the real, live table data, exactly as before. Each section has its
- * own on/off switch, so turning one off keeps what was typed in it for next time.
- */
-export function showcaseSettingsDialog() {
-  const saved = state.settings.showcase || {};
-  const champion = { enabled: false, photo: null, playerName: '', tournamentTitle: '', placement: 'Champion', achievement: '', ...saved.champion };
-  const featured = { enabled: false, photo: null, name: '', price: '', description: '', ...saved.featured };
-  const promo = { enabled: false, photo: null, headline: '', body: '', ...saved.promo };
+/* ---------- Showcase content (owner / superadmin) ----------
+ * Unlimited Champion Spotlight, Featured Cue/Product and Promo/Announcement entries for the TV slideshow
+ * (js/views/showcase.js) — each one is its own document in showcaseItems and its own slide. The Live
+ * Table Status slide is never edited here; it's always the real, live table data. */
 
-  const photoPick = (key, label, photo) => `
-    <div class="field">
-      <label for="sc-${key}-photo">${label}</label>
-      <div class="photo-pick" data-region="sc-${key}-photo-pick">
-        <span class="photo-pick__preview" aria-hidden="true">${photo ? `<img src="${esc(photo)}" alt="">` : icon('camera')}</span>
-        <div class="photo-pick__actions">
-          <input id="sc-${key}-photo" type="file" accept="image/*" class="sr-only">
-          <label for="sc-${key}-photo" class="btn btn--neutral btn--sm">${icon('camera')}${photo ? 'Change photo' : 'Add photo'}</label>
-          ${photo ? `<button type="button" class="link-btn link-btn--danger" data-remove-photo="${key}">Remove</button>` : ''}
-        </div>
+const SHOWCASE_TYPES = {
+  champion: {
+    label: 'Champion', plural: 'Champions', add: 'Add champion',
+    title: (i) => i.playerName || 'Untitled champion',
+    sub: (i) => [i.placement, i.tournamentTitle].filter(Boolean).join(' · '),
+  },
+  featured: {
+    label: 'Featured cue / product', plural: 'Featured cues / products', add: 'Add featured item',
+    title: (i) => i.name || 'Untitled item',
+    sub: (i) => (i.price != null && i.price !== '' ? peso(i.price) : ''),
+  },
+  promo: {
+    label: 'Announcement', plural: 'Promos / announcements', add: 'Add announcement',
+    title: (i) => i.headline || 'Untitled announcement',
+    sub: (i) => i.body || '',
+  },
+};
+
+/** Add or edit ONE Showcase entry (champion, featured item or announcement). */
+export function showcaseItemDialog(type, item) {
+  const editing = Boolean(item);
+  const t = SHOWCASE_TYPES[type];
+  let photo = item?.photo || null;
+  const v = (k) => esc(item?.[k] ?? '');
+  const fields = {
+    champion: `
+      <div class="field-row">
+        <div class="field"><label for="sc-a">Player name</label><input id="sc-a" name="playerName" required maxlength="60" value="${v('playerName')}"></div>
+        <div class="field"><label for="sc-b">Placement</label><input id="sc-b" name="placement" maxlength="30" placeholder="Champion, Runner-up…" value="${esc(item?.placement ?? 'Champion')}"></div>
       </div>
-    </div>`;
+      <div class="field"><label for="sc-c">Tournament title</label><input id="sc-c" name="tournamentTitle" maxlength="80" placeholder="e.g. Pro Open 2026" value="${v('tournamentTitle')}"></div>
+      <div class="field"><label for="sc-d">Achievement <span class="muted">(optional)</span></label><input id="sc-d" name="achievement" maxlength="120" value="${v('achievement')}"></div>`,
+    featured: `
+      <div class="field-row">
+        <div class="field"><label for="sc-a">Product name</label><input id="sc-a" name="name" required maxlength="60" value="${v('name')}"></div>
+        <div class="field"><label for="sc-b">Price (₱) <span class="muted">(optional)</span></label><input id="sc-b" name="price" type="number" inputmode="decimal" min="0" step="0.01" value="${item?.price ?? ''}"></div>
+      </div>
+      <div class="field"><label for="sc-c">Short description</label><input id="sc-c" name="description" maxlength="140" value="${v('description')}"></div>`,
+    promo: `
+      <div class="field"><label for="sc-l">Label <span class="muted">(small text above the headline)</span></label><input id="sc-l" name="label" maxlength="30" placeholder="Announcement, Coming up, Happy hour…" value="${esc(item?.label ?? 'Announcement')}"></div>
+      <div class="field"><label for="sc-a">Headline</label><input id="sc-a" name="headline" required maxlength="60" value="${v('headline')}"></div>
+      <div class="field"><label for="sc-b">Details</label><input id="sc-b" name="body" maxlength="140" placeholder="When, where, what's on" value="${v('body')}"></div>`,
+  };
+  openDialog({
+    title: `${editing ? 'Edit' : 'Add'} ${t.label.toLowerCase()}`,
+    submitLabel: editing ? 'Save changes' : t.add,
+    body: `<div class="field" data-region="photo-field"></div>${fields[type]}
+      <label class="check"><input type="checkbox" name="enabled" ${item?.enabled === false ? '' : 'checked'}><span>Show on the TV</span></label>`,
+    onOpen(d) {
+      const field = d.querySelector('[data-region=photo-field]');
+      const renderPhoto = () => {
+        field.innerHTML = `
+          <label for="sc-photo">Photo</label>
+          <div class="photo-pick">
+            <span class="photo-pick__preview" aria-hidden="true">${photo ? `<img src="${esc(photo)}" alt="">` : icon('camera')}</span>
+            <div class="photo-pick__actions">
+              <input id="sc-photo" type="file" accept="image/*" class="sr-only">
+              <label for="sc-photo" class="btn btn--neutral btn--sm">${icon('camera')}${photo ? 'Change photo' : 'Add photo'}</label>
+              ${photo ? '<button type="button" class="link-btn link-btn--danger" data-action="remove-photo">Remove</button>' : ''}
+            </div>
+          </div>`;
+        field.querySelector('#sc-photo').addEventListener('change', async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          try { photo = await compressImage(file); renderPhoto(); } catch (err) { toast(err.message, 'error'); }
+        });
+        field.querySelector('[data-action=remove-photo]')?.addEventListener('click', () => { photo = null; renderPhoto(); });
+      };
+      renderPhoto();
+    },
+    async onSubmit(fd) {
+      const s = (k) => String(fd.get(k) || '').trim();
+      const data = { enabled: fd.get('enabled') === 'on', photo };
+      if (type === 'champion') {
+        Object.assign(data, { playerName: requireName(fd, 'playerName', 'Player name'), placement: s('placement') || 'Champion', tournamentTitle: s('tournamentTitle'), achievement: s('achievement') });
+      }
+      if (type === 'featured') {
+        Object.assign(data, { name: requireName(fd, 'name', 'Product name'), price: s('price') === '' ? null : round2(Number(s('price'))), description: s('description') });
+      }
+      if (type === 'promo') {
+        Object.assign(data, { label: s('label') || 'Announcement', headline: requireName(fd, 'headline', 'Headline'), body: s('body') });
+      }
+      if (editing) await svc.updateShowcaseItem(item.id, data);
+      else await svc.addShowcaseItem(type, data);
+      toast(editing ? 'Showcase updated.' : 'Added to the Showcase.');
+    },
+  });
+}
 
+/** Owner-only list of everything in the Showcase rotation: add as many as you like, edit, hide or remove. */
+export function manageShowcaseDialog() {
+  let off = () => {};
   const { dlg } = openDialog({
     title: 'Customize Showcase',
     wide: true,
-    submitLabel: 'Save changes',
-    body: `
-      <p class="muted small">What the TV slideshow shows besides the live table status, which always stays the real
-        thing — nothing here ever changes how tables, timers or bills are read or billed.</p>
-
-      <fieldset class="showcase-edit-section">
-        <legend><label class="check"><input type="checkbox" name="champion-enabled" ${champion.enabled ? 'checked' : ''}><span>Champion Spotlight</span></label></legend>
-        <div class="showcase-edit-fields" data-region="champion-fields">
-          ${photoPick('champion', 'Champion photo', champion.photo)}
-          <div class="field-row">
-            <div class="field">
-              <label for="sc-champion-name">Player name</label>
-              <input id="sc-champion-name" name="champion-name" maxlength="60" value="${esc(champion.playerName)}">
-            </div>
-            <div class="field">
-              <label for="sc-champion-place">Placement</label>
-              <input id="sc-champion-place" name="champion-place" maxlength="30" placeholder="Champion, Runner-up…" value="${esc(champion.placement)}">
-            </div>
-          </div>
-          <div class="field">
-            <label for="sc-champion-title">Tournament title</label>
-            <input id="sc-champion-title" name="champion-title" maxlength="80" placeholder="e.g. Golden Break Summer Open 2026" value="${esc(champion.tournamentTitle)}">
-          </div>
-          <div class="field">
-            <label for="sc-champion-achievement">Achievement <span class="muted">(optional)</span></label>
-            <input id="sc-champion-achievement" name="champion-achievement" maxlength="120" placeholder="e.g. Undefeated, 12-0" value="${esc(champion.achievement)}">
-          </div>
-        </div>
-      </fieldset>
-
-      <fieldset class="showcase-edit-section">
-        <legend><label class="check"><input type="checkbox" name="featured-enabled" ${featured.enabled ? 'checked' : ''}><span>Featured Cue / Product</span></label></legend>
-        <div class="showcase-edit-fields" data-region="featured-fields">
-          ${photoPick('featured', 'Product photo', featured.photo)}
-          <div class="field-row">
-            <div class="field">
-              <label for="sc-featured-name">Product name</label>
-              <input id="sc-featured-name" name="featured-name" maxlength="60" value="${esc(featured.name)}">
-            </div>
-            <div class="field">
-              <label for="sc-featured-price">Price (₱) <span class="muted">(optional)</span></label>
-              <input id="sc-featured-price" name="featured-price" type="number" inputmode="decimal" min="0" step="0.01" value="${featured.price ?? ''}">
-            </div>
-          </div>
-          <div class="field">
-            <label for="sc-featured-desc">Short description</label>
-            <input id="sc-featured-desc" name="featured-desc" maxlength="140" placeholder="What makes it worth a look" value="${esc(featured.description)}">
-          </div>
-        </div>
-      </fieldset>
-
-      <fieldset class="showcase-edit-section">
-        <legend><label class="check"><input type="checkbox" name="promo-enabled" ${promo.enabled ? 'checked' : ''}><span>Promo / Announcement</span></label></legend>
-        <div class="showcase-edit-fields" data-region="promo-fields">
-          ${photoPick('promo', 'Photo (optional)', promo.photo)}
-          <div class="field">
-            <label for="sc-promo-headline">Headline</label>
-            <input id="sc-promo-headline" name="promo-headline" maxlength="60" placeholder="e.g. Happy Hour, 2-6 PM" value="${esc(promo.headline)}">
-          </div>
-          <div class="field">
-            <label for="sc-promo-body">Details</label>
-            <input id="sc-promo-body" name="promo-body" maxlength="140" placeholder="What's on, and until when" value="${esc(promo.body)}">
-          </div>
-        </div>
-      </fieldset>`,
-    onOpen(d) {
-      const photos = { champion: champion.photo, featured: featured.photo, promo: promo.photo };
-      const toggleFields = (key) => {
-        const enabled = d.querySelector(`[name=${key}-enabled]`).checked;
-        d.querySelector(`[data-region=${key}-fields]`).classList.toggle('is-disabled', !enabled);
-      };
-      ['champion', 'featured', 'promo'].forEach((key) => {
-        toggleFields(key);
-        d.querySelector(`[name=${key}-enabled]`).addEventListener('change', () => toggleFields(key));
-        const renderPhoto = () => {
-          const pick = d.querySelector(`[data-region=sc-${key}-photo-pick]`);
-          const photo = photos[key];
-          pick.innerHTML = `
-            <span class="photo-pick__preview" aria-hidden="true">${photo ? `<img src="${esc(photo)}" alt="">` : icon('camera')}</span>
-            <div class="photo-pick__actions">
-              <input id="sc-${key}-photo" type="file" accept="image/*" class="sr-only">
-              <label for="sc-${key}-photo" class="btn btn--neutral btn--sm">${icon('camera')}${photo ? 'Change photo' : 'Add photo'}</label>
-              ${photo ? `<button type="button" class="link-btn link-btn--danger" data-remove-photo="${key}">Remove</button>` : ''}
-            </div>`;
-          pick.querySelector(`#sc-${key}-photo`).addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            try { photos[key] = await compressImage(file); renderPhoto(); } catch (err) { toast(err.message, 'error'); }
-          });
-          pick.querySelector(`[data-remove-photo=${key}]`)?.addEventListener('click', () => { photos[key] = null; renderPhoto(); });
-        };
-        renderPhoto(); // wire the initial (static) markup's listeners too, not just later re-renders
-      });
-      d.getShowcasePhotos = () => photos;
-    },
-    async onSubmit(fd, d) {
-      const photos = d.getShowcasePhotos();
-      const priceRaw = fd.get('featured-price');
-      await svc.setShowcaseSettings({
-        champion: {
-          enabled: fd.get('champion-enabled') === 'on',
-          photo: photos.champion,
-          playerName: String(fd.get('champion-name') || '').trim(),
-          tournamentTitle: String(fd.get('champion-title') || '').trim(),
-          placement: String(fd.get('champion-place') || '').trim() || 'Champion',
-          achievement: String(fd.get('champion-achievement') || '').trim(),
-        },
-        featured: {
-          enabled: fd.get('featured-enabled') === 'on',
-          photo: photos.featured,
-          name: String(fd.get('featured-name') || '').trim(),
-          price: priceRaw === '' ? null : round2(Number(priceRaw)),
-          description: String(fd.get('featured-desc') || '').trim(),
-        },
-        promo: {
-          enabled: fd.get('promo-enabled') === 'on',
-          photo: photos.promo,
-          headline: String(fd.get('promo-headline') || '').trim(),
-          body: String(fd.get('promo-body') || '').trim(),
-        },
-      });
-      toast('Showcase updated.');
-    },
+    cancelLabel: 'Done',
+    body: `<p class="muted small">What the TV slideshow shows besides the live table status, which always stays the real thing. Add as many entries as you like — each one gets its own slide.</p>
+      <div data-region="lists"></div>`,
+    onClose: () => off(),
   });
+  const region = dlg.querySelector('[data-region=lists]');
+  const render = () => preserveFocus(region, () => {
+    region.innerHTML = Object.entries(SHOWCASE_TYPES).map(([type, t]) => {
+      const items = state.showcaseItems.filter((i) => i.type === type);
+      return `
+        <section class="showcase-edit-section">
+          <div class="toolbar"><h3 class="card-title">${t.plural} <span class="muted">(${items.length})</span></h3>
+            <button type="button" class="btn btn--primary btn--sm" data-add="${type}">${icon('plus')}${t.add}</button></div>
+          <ul class="manage-list">${items.length ? items.map((i) => `
+            <li class="manage-row">
+              ${i.photo ? `<img class="thumb thumb--sm cue-thumb" src="${esc(i.photo)}" alt="">` : `<span class="thumb thumb--sm thumb--slate" aria-hidden="true">${icon('camera')}</span>`}
+              <span class="manage-row__text"><span class="manage-row__name">${esc(t.title(i))}</span>
+                <span class="manage-row__sub">${i.enabled === false ? 'Hidden · ' : ''}${esc(t.sub(i))}</span></span>
+              <button type="button" class="btn btn--neutral btn--sm" data-edit="${esc(i.id)}">${icon('edit')}Edit</button>
+              <button type="button" class="btn btn--neutral btn--sm" data-remove="${esc(i.id)}">Remove</button>
+            </li>`).join('') : '<li class="muted">None yet.</li>'}</ul>
+        </section>`;
+    }).join('');
+  });
+  off = on('showcaseItems', render);
+  dlg.addEventListener('click', (e) => {
+    const add = e.target.closest('[data-add]');
+    if (add) { showcaseItemDialog(add.dataset.add); return; }
+    const edit = e.target.closest('[data-edit]');
+    const item = edit && state.showcaseItems.find((i) => i.id === edit.dataset.edit);
+    if (item) { showcaseItemDialog(item.type, item); return; }
+    const rm = e.target.closest('[data-remove]');
+    if (rm) busy(rm, async () => { await svc.removeShowcaseItem(rm.dataset.remove); toast('Removed from the Showcase.'); });
+  });
+  render();
   return dlg;
 }

@@ -727,15 +727,28 @@ test('a display account can read tables and cue sticks, same as any staff', asyn
   await assertSucceeds(getDoc(doc(tv, 'cueSticks/c1')));
 });
 
-// settings/showcase is the one settings doc a display account (the TV running Showcase) can also
-// read — the owner's Champion/Featured/Promo content (js/dialogs.js showcaseSettingsDialog). It stays
-// owner-only to write, same as every other settings doc.
-test('a display account can read (but not write) settings/showcase — the Showcase slideshow content', async () => {
-  await seed({ 'settings/showcase': { champion: { enabled: true, playerName: 'Test Player' } } });
+// showcaseItems: the owner's unlimited Champion/Featured/Promo entries (js/dialogs.js
+// manageShowcaseDialog). A display account (the TV running Showcase) reads them; only owner-level writes.
+test('a display account can read (but not write) showcaseItems; the owner can add as many as they like', async () => {
+  await seed({ 'showcaseItems/s1': { type: 'champion', enabled: true, playerName: 'Test Player' } });
   const tv = as('tv');
-  await assertSucceeds(getDoc(doc(tv, 'settings/showcase')));
-  await assertFails(updateDoc(doc(tv, 'settings/showcase'), { champion: { enabled: false } }));
-  await assertSucceeds(updateDoc(doc(as('owner'), 'settings/showcase'), { champion: { enabled: false } }));
+  await assertSucceeds(getDoc(doc(tv, 'showcaseItems/s1')));
+  await assertFails(updateDoc(doc(tv, 'showcaseItems/s1'), { enabled: false }));
+  await assertFails(setDoc(doc(tv, 'showcaseItems/s2'), { type: 'promo', headline: 'x' }));
+  const owner = as('owner');
+  await assertSucceeds(setDoc(doc(owner, 'showcaseItems/s2'), { type: 'promo', enabled: true, headline: 'Exhibition game' }));
+  await assertSucceeds(setDoc(doc(owner, 'showcaseItems/s3'), { type: 'promo', enabled: true, headline: 'Another one' }));
+  await assertSucceeds(updateDoc(doc(owner, 'showcaseItems/s1'), { enabled: false }));
+  await assertSucceeds(deleteDoc(doc(owner, 'showcaseItems/s3')));
+});
+
+test('showcaseItems: a cashier can read but not write; an unknown type or an oversized photo is refused', async () => {
+  await seed({ 'showcaseItems/s1': { type: 'champion', enabled: true, playerName: 'Test Player' } });
+  await assertSucceeds(getDoc(doc(as('joy'), 'showcaseItems/s1')));
+  await assertFails(setDoc(doc(as('joy'), 'showcaseItems/s9'), { type: 'promo', headline: 'nope' }));
+  const owner = as('owner');
+  await assertFails(setDoc(doc(owner, 'showcaseItems/bad'), { type: 'banner', headline: 'x' }));
+  await assertFails(setDoc(doc(owner, 'showcaseItems/big'), { type: 'promo', headline: 'x', photo: 'a'.repeat(900001) }));
 });
 
 test('a display account cannot read products, transactions, expenses, other settings or other staff', async () => {

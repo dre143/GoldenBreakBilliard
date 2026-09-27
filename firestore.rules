@@ -562,11 +562,26 @@ service cloud.firestore {
     }
     // Hall-wide settings (e.g. settings/shifts: whether the hall runs one shift or Day + Night).
     match /settings/{id} {
-      // settings/showcase is the one exception a Display account (the TV itself) can read: the
-      // Champion/Featured/Promo content the owner sets for the Showcase slideshow. Everything else
-      // under settings/ (shifts, cashDrawer, gcash) stays isWorkingStaff()-only, unchanged.
-      allow read: if id == 'showcase' ? isStaff() : isWorkingStaff();
+      allow read: if isWorkingStaff();
       allow write: if isOwner();
+    }
+
+    // ---------------- Showcase (owner-added TV slideshow content) ----------------
+    // Champion Spotlight / Featured Cue-Product / Promo-Announcement entries (js/views/showcase.js,
+    // js/dialogs.js manageShowcaseDialog). Unlimited entries per type — owner or superadmin keep adding
+    // them and each one gets its own slide in the rotation. Readable by isStaff() (not the narrower
+    // isWorkingStaff()) so a display account — the TV itself — can also show them, same as tables and
+    // cueSticks; still owner-only to write. A capped photo size (matches cueSticks) keeps any one
+    // document well under Firestore's 1 MiB document limit.
+    match /showcaseItems/{id} {
+      allow read: if isStaff();
+      allow create: if isOwner()
+        && request.resource.data.type in ['champion', 'featured', 'promo']
+        && (request.resource.data.get('photo', null) == null || request.resource.data.photo.size() < 900000);
+      allow update: if isOwner()
+        && request.resource.data.type == resource.data.type
+        && (request.resource.data.get('photo', null) == null || request.resource.data.photo.size() < 900000);
+      allow delete: if isOwner();
     }
 
     // ---------------- expenses ----------------

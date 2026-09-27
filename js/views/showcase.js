@@ -7,7 +7,7 @@
 // landing screen for a "display" account (see js/roles.js, js/app.js) — a role meant for an unattended
 // device (an old laptop, an Android TV box, a Fire Stick's browser) signed in once and left fullscreen,
 // with firestore.rules locking what it can read to just tables, cue sticks, and the owner's Showcase
-// content (settings/showcase — see js/dialogs.js showcaseSettingsDialog).
+// content (showcaseItems — see js/dialogs.js manageShowcaseDialog).
 //
 // Four slide types rotate: Live Table Status (always the real, live data — never edited here), Champion
 // Spotlight, Featured Cue/Product and a Promo/Announcement slide. The owner turns the last three on/off
@@ -76,7 +76,7 @@ function promoSlide(p) {
     <div class="showcase__spot showcase__spot--promo${p.photo ? '' : ' showcase__spot--centered'}">
       ${p.photo ? `<div class="showcase__spot-photo">${`<img src="${esc(p.photo)}" alt="">`}</div>` : ''}
       <div class="showcase__spot-info">
-        <p class="showcase__eyebrow showcase__eyebrow--amber">${icon('bell')}Happening Now</p>
+        <p class="showcase__eyebrow showcase__eyebrow--amber">${icon('bell')}${esc(p.label || 'Announcement')}</p>
         <h1 class="showcase__name">${esc(p.headline)}</h1>
         ${p.body ? `<p class="showcase__meta showcase__meta--lg">${esc(p.body)}</p>` : ''}
       </div>
@@ -85,25 +85,27 @@ function promoSlide(p) {
 
 const SLIDE_HTML = { tables: tablesSlide, champion: championSlide, featured: featuredSlide, promo: promoSlide };
 
-/** The featured slide's data: the owner's own pick if they've set one, otherwise the newest available
- * cue stick, so the slot is never empty without the owner having to configure anything. */
-function featuredData(sc) {
-  const own = sc.featured;
-  if (own?.enabled && own.name) return { name: own.name, price: own.price, description: own.description, photo: own.photo, meta: null };
-  const cue = state.cueSticks.find((c) => c.status === 'available');
-  if (!cue) return null;
-  return { name: cue.name, price: cue.price, description: null, photo: cue.photo, meta: [cue.brand, cue.weight].filter(Boolean).join(' · ') };
-}
+/** A cue stick from the shop, shaped like a Featured entry (used only when the owner has added none). */
+const cueAsFeatured = (cue) => ({
+  name: cue.name, price: cue.price, description: null, photo: cue.photo,
+  meta: [cue.brand, cue.weight].filter(Boolean).join(' · '),
+});
 
-/** What's in the rotation right now: Live Table Status always first, then whichever owner-set slides
- * are switched on and have something to show (Featured falls back to a real cue stick — see above). */
+/** What's in the rotation right now: Live Table Status always first, then one slide per owner-added
+ * entry that's switched on — unlimited of each kind, oldest first. With no Featured entries at all, the
+ * newest available cue stick fills that slot so it's never empty out of the box. */
 function buildSlides() {
-  const sc = state.settings.showcase || {};
+  const shown = state.showcaseItems.filter((i) => i.enabled !== false);
+  const of = (type) => shown.filter((i) => i.type === type);
   const list = [{ type: 'tables', data: null }];
-  if (sc.champion?.enabled && sc.champion.playerName) list.push({ type: 'champion', data: sc.champion });
-  const featured = featuredData(sc);
-  if (featured) list.push({ type: 'featured', data: featured });
-  if (sc.promo?.enabled && sc.promo.headline) list.push({ type: 'promo', data: sc.promo });
+  of('champion').forEach((c) => list.push({ type: 'champion', data: c }));
+  const featured = of('featured');
+  if (featured.length) featured.forEach((f) => list.push({ type: 'featured', data: { ...f, meta: null } }));
+  else {
+    const cue = state.cueSticks.find((c) => c.status === 'available');
+    if (cue) list.push({ type: 'featured', data: cueAsFeatured(cue) });
+  }
+  of('promo').forEach((p) => list.push({ type: 'promo', data: p }));
   return list;
 }
 
@@ -124,13 +126,23 @@ export function mount(el) {
         <div class="showcase__layer" data-region="layer-1"></div>
       </div>
       <div class="showcase__dots" data-region="dots"></div>
+      <div class="showcase__progress" data-region="progress" style="--sc-slide:${SLIDE_MS}ms"><span></span></div>
     </div>`;
 
   const layers = [el.querySelector('[data-region=layer-0]'), el.querySelector('[data-region=layer-1]')];
   const dots = el.querySelector('[data-region=dots]');
+  const progress = el.querySelector('[data-region=progress] span');
   let active = 0; // which layer is currently visible
   let index = 0; // index into the current slide list
   let timer = null;
+  let painted = false; // the first paint plays the entrance; later in-place repaints (live data) don't
+
+  /** Restart the gold slide-timer line from empty. */
+  function restartProgress() {
+    progress.style.animation = 'none';
+    void progress.offsetWidth; // force reflow so the animation really restarts
+    progress.style.animation = '';
+  }
 
   const currentType = () => buildSlides()[index]?.type;
 
@@ -143,7 +155,9 @@ export function mount(el) {
     const list = buildSlides();
     if (index >= list.length) index = 0;
     const slide = list[index];
+    layers[active].classList.toggle('no-anim', painted); // live data repaint: no entrance replay
     layers[active].innerHTML = (SLIDE_HTML[slide.type] || (() => ''))(slide.data);
+    painted = true;
     renderDots(list);
   }
 
@@ -154,11 +168,21 @@ export function mount(el) {
     index = (index + 1) % list.length;
     const slide = list[index];
     const next = active === 0 ? 1 : 0;
-    layers[next].innerHTML = (SLIDE_HTML[slide.type] || (() => ''))(slide.data);
-    layers[next].classList.add('is-active');
+    const incoming = layers[next];
+    incoming.classList.remove('no-anim');
+    incoming.innerHTML = (SLIDE_HTML[slide.type] || (() => ''))(slide.data);
+    // Park the incoming slide on the right with transitions off, then release it so it glides in
+    // while the current one drifts out to the left.
+    incoming.style.transition = 'none';
+    incoming.classList.add('is-prep');
+    void incoming.offsetWidth;
+    incoming.style.transition = '';
+    incoming.classList.remove('is-prep');
+    incoming.classList.add('is-active');
     layers[active].classList.remove('is-active');
     active = next;
     renderDots(list);
+    restartProgress();
   }
 
   function restart() {
@@ -184,7 +208,7 @@ export function mount(el) {
   const offs = [
     on('cueSticks', () => { if (currentType() === 'tables' || currentType() === 'featured') refresh(); }),
     on('tables', () => { if (currentType() === 'tables') refresh(); }),
-    on('settings', () => { if (index >= buildSlides().length) index = 0; refresh(); }),
+    on('showcaseItems', () => { if (index >= buildSlides().length) index = 0; refresh(); }),
     on('tick', () => { if (currentType() === 'tables') updateTableTimers(layers[active]); }),
   ];
   refresh();

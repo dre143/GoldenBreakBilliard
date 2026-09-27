@@ -140,9 +140,10 @@ function startData() {
   dataCleanups = [
     db.listen('tables', (rows) => set('tables', rows.sort((a, b) => (a.number ?? 0) - (b.number ?? 0) || byName(a, b))), {}, onDataError),
     db.listen('cueSticks', (rows) => set('cueSticks', rows.sort(byName)), {}, onDataError),
-    // settings/showcase is the one settings doc a display account (the TV itself) can also read (see
-    // firestore.rules) — the owner's Champion/Featured/Promo content for the Showcase slideshow.
-    db.listenDoc('settings', 'showcase', (doc) => set('settings', { ...state.settings, showcase: doc || null }), onDataError),
+    // showcaseItems is the one extra collection a display account (the TV itself) can also read (see
+    // firestore.rules) — the owner's Champion/Featured/Promo entries for the Showcase slideshow. Owner
+    // and superadmin can add as many as they like; oldest first, so new ones join the rotation at the end.
+    db.listen('showcaseItems', (rows) => set('showcaseItems', rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))), {}, onDataError),
   ];
   if (!display) {
     dataCleanups.push(
