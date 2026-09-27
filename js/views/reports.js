@@ -88,13 +88,6 @@ const refNo = (id) => String(id).slice(-6).toUpperCase();
 const saleLabel = (x) => (x.tableId ? x.tableName : x.saleType === 'cue-stick' ? 'Cue Stick' : 'Walk-in');
 const longDate = (key) => rep.keyLabel(key, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
-function paymentLabel(tx) {
-  const p = rep.paymentsOf(tx);
-  const ref = tx.gcashRef ? ` (Ref ${esc(tx.gcashRef)})` : '';
-  if (p.cash > 0 && p.gcash > 0) return `Cash ${peso(p.cash)} + QRPH ${peso(p.gcash)}${ref}`;
-  return `${METHOD_LABEL[tx.method] || esc(tx.method)}${ref}`;
-}
-
 /** Listen to sales and expenses in [start, end); calls back once both have loaded, and on every change. */
 function listenRange(start, end, cb) {
   const range = { where: [['createdAt', '>=', start], ['createdAt', '<', end]] };
@@ -344,7 +337,7 @@ function dailyTab(panel, ctx) {
 
   function salesSheet() {
     const t = rep.totals(txs);
-    const cols = 12;
+    const cols = 14;
     return `
       <div class="table-wrap">
         <table class="sheet">
@@ -358,13 +351,16 @@ function dailyTab(panel, ctx) {
             <th scope="col" class="t-right">Table fee</th>
             <th scope="col" class="t-right">Products</th>
             <th scope="col" class="t-right">Paid</th>
-            <th scope="col">Payment</th>
+            <th scope="col" class="t-right">Cash</th>
+            <th scope="col" class="t-right">QRPH</th>
             <th scope="col">Staff</th>
             <th scope="col">Remarks</th>
             <th scope="col" class="no-print"><span class="sr-only">Receipt</span></th>
           </tr></thead>
           <tbody>
-            ${txs.length ? txs.map((x) => `
+            ${txs.length ? txs.map((x) => {
+              const p = rep.paymentsOf(x);
+              return `
             <tr>
               <th scope="row" class="cell-nowrap">${esc(saleLabel(x))}</th>
               <td class="cell-nowrap">${refNo(x.id)}</td>
@@ -375,11 +371,13 @@ function dailyTab(panel, ctx) {
               <td class="t-right num">${x.tableId ? peso(x.tableFee) : ''}</td>
               <td class="t-right num">${x.productTotal || x.cueStickTotal ? peso((x.productTotal || 0) + (x.cueStickTotal || 0)) : ''}</td>
               <td class="t-right num">${peso(x.total)}</td>
-              <td class="cell-nowrap">${paymentLabel(x)}</td>
+              <td class="t-right num">${p.cash > 0 ? peso(p.cash) : ''}</td>
+              <td class="t-right num">${p.gcash > 0 ? `${peso(p.gcash)}${x.gcashRef ? `<span class="cell-sub">Ref ${esc(x.gcashRef)}</span>` : ''}` : ''}</td>
               <td class="cell-nowrap">${esc(x.cashierName)}</td>
               <td>${esc(rep.cancelInfo(x)?.remark ?? '')}</td>
               <td class="no-print"><button type="button" class="link-btn" data-tx-id="${esc(x.id)}" aria-label="View receipt ${refNo(x.id)}">Receipt</button></td>
-            </tr>`).join('') : `<tr><td colspan="${cols + 1}" class="sheet__empty">No sales ${shift === 'full' ? 'this business day' : 'this shift'} yet.</td></tr>`}
+            </tr>`;
+            }).join('') : `<tr><td colspan="${cols + 1}" class="sheet__empty">No sales ${shift === 'full' ? 'this business day' : 'this shift'} yet.</td></tr>`}
           </tbody>
           ${txs.length ? `
           <tfoot><tr>
@@ -387,7 +385,9 @@ function dailyTab(panel, ctx) {
             <td class="t-right num">${peso(t.tableFee)}</td>
             <td class="t-right num">${peso(t.productTotal + t.cueStickTotal)}</td>
             <td class="t-right num">${peso(t.total)}</td>
-            <td colspan="3"></td>
+            <td class="t-right num">${peso(t.cash)}</td>
+            <td class="t-right num">${peso(t.gcash)}</td>
+            <td colspan="2"></td>
             <td class="no-print"></td>
           </tr></tfoot>` : ''}
         </table>
