@@ -524,7 +524,9 @@ export function completeQuickSale({ items = [], cueItems = [], method, tendered,
     cues.forEach((c, k) => {
       const i = cueItems[k];
       if (!c) throw new Error(`${i.name} no longer exists in the cue stick catalog.`);
-      if (c.stock < i.qty) throw new Error(`Not enough ${i.name} in stock (${c.stock} left).`);
+      // A cue stick from before stock tracking existed may have no stock field yet — treat as 0.
+      const left = Number(c.stock) || 0;
+      if (left < i.qty) throw new Error(`Not enough ${i.name} in stock (${left} left).`);
     });
 
     const productLines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
@@ -551,7 +553,7 @@ export function completeQuickSale({ items = [], cueItems = [], method, tendered,
     }
 
     items.forEach((i, k) => tx.update('products', i.productId, { stock: products[k].stock - i.qty, updatedAt: SERVER_TIME }));
-    cueItems.forEach((i, k) => tx.update('cueSticks', i.cueStickId, { stock: cues[k].stock - i.qty, updatedAt: SERVER_TIME }));
+    cueItems.forEach((i, k) => tx.update('cueSticks', i.cueStickId, { stock: (Number(cues[k].stock) || 0) - i.qty, updatedAt: SERVER_TIME }));
     const id = db.newId('transactions');
     const record = {
       tableId: null, tableName: null, pricing: null,
@@ -708,11 +710,15 @@ export function addCueStock(cueStickId, qty, user) {
   return db.transaction(async (tx) => {
     const c = await tx.get('cueSticks', cueStickId);
     if (!c) throw new Error('Cue stick not found.');
-    tx.update('cueSticks', cueStickId, { stock: c.stock + qty, lastRestockedAt: SERVER_TIME, updatedAt: SERVER_TIME });
+    // A cue stick added before stock tracking existed may have no stock field at all yet (it was a
+    // unique available/sold item back then) — treat that as 0 rather than writing NaN. This heals the
+    // record the first time anyone restocks it.
+    const before = Number(c.stock) || 0;
+    tx.update('cueSticks', cueStickId, { stock: before + qty, lastRestockedAt: SERVER_TIME, updatedAt: SERVER_TIME });
     tx.set('restocks', db.newId('restocks'), {
       cueStickId, cueStickName: c.name, qty, byId: user.uid, byName: user.name, createdAt: SERVER_TIME,
     });
-    return c.stock + qty;
+    return before + qty;
   });
 }
 

@@ -379,14 +379,19 @@ export function cueStickDialog(cueStick) {
  * addStockDialog), just against the cueSticks catalog instead.
  */
 export function addCueStockDialog(cueStick, user) {
+  // Cue sticks added before stock tracking existed may still have no stock/reorderLevel field in
+  // Firestore — treat a missing value as 0 rather than showing "undefined"/NaN. The first Add Stock
+  // on one of these heals the record, same as services.addCueStock coercing it on write.
+  const stock0 = Number(cueStick.stock) || 0;
+  const reorder0 = Number(cueStick.reorderLevel) || 0;
   openDialog({
     title: `Add stock · ${esc(cueStick.name)}`,
     submitLabel: 'Add stock',
     body: `
       <dl class="kv">
-        <div><dt>On hand</dt><dd class="num">${cueStick.stock}</dd></div>
-        <div><dt>Reorder level</dt><dd class="num">${cueStick.reorderLevel}</dd></div>
-        <div><dt>After restock</dt><dd class="num" data-after>${cueStick.stock}</dd></div>
+        <div><dt>On hand</dt><dd class="num">${stock0}</dd></div>
+        <div><dt>Reorder level</dt><dd class="num">${reorder0}</dd></div>
+        <div><dt>After restock</dt><dd class="num" data-after>${stock0}</dd></div>
       </dl>
       <div class="field">
         <label for="cs-s-qty">Quantity received</label>
@@ -397,7 +402,7 @@ export function addCueStockDialog(cueStick, user) {
       const after = dlg.querySelector('[data-after]');
       input.addEventListener('input', () => {
         const q = Math.max(0, Math.floor(num(input.value)) || 0);
-        after.textContent = cueStick.stock + q;
+        after.textContent = stock0 + q;
       });
     },
     async onSubmit(fd) {
@@ -427,7 +432,7 @@ export function manageCueSticksDialog(user) {
         ${cueThumb(c)}
         <span class="manage-row__text">
           <span class="manage-row__name">${esc(c.name)}</span>
-          <span class="manage-row__sub">${c.brand ? `${esc(c.brand)} · ` : ''}${peso(c.price)} · ${c.stock} in stock${isLowStock(c) ? ' · Low' : ''}</span>
+          <span class="manage-row__sub">${c.brand ? `${esc(c.brand)} · ` : ''}${peso(c.price)} · ${Number(c.stock) || 0} in stock${isLowStock(c) ? ' · Low' : ''}</span>
         </span>
         <button type="button" class="btn btn--neutral btn--sm" data-stock="${esc(c.id)}" data-fk="stock-${esc(c.id)}" aria-label="Add stock for ${esc(c.name)}">${icon('restock')}Add Stock</button>
         <button type="button" class="btn btn--neutral btn--sm" data-edit="${esc(c.id)}" data-fk="edit-${esc(c.id)}" aria-label="Edit ${esc(c.name)}">${icon('edit')}Edit</button>
