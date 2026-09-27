@@ -500,13 +500,17 @@ async function payRunningBooking(tableId, { method, tendered, cashPart, gcashRef
 }
 
 /**
- * Ring up a walk-in sale: items only, no table, no timer, no table fee. The cart lives only in the
- * view until checkout — stock is checked and deducted here, in the same transaction as the sale,
- * exactly like a table checkout, so two terminals still can't oversell stock.
+ * Ring up a walk-in sale: products and/or cue sticks, no table, no timer, no table fee. One cart, one
+ * payment, one transaction — product stock is checked and deducted, and any cue sticks are marked sold
+ * (each is a unique physical item, not counted stock — see the cueSticks catalog), all in the same
+ * transaction, so two terminals still can't oversell either kind. `items` and `cueItems` land in the
+ * sale's one combined `items` list for the receipt, but keep separate `productTotal`/`cueStickTotal`
+ * fields — Reports (js/reporting.js) always sums those separately, so mixing the cart on one screen
+ * never mixes the two in the books.
  */
-export function completeQuickSale({ items, method, tendered, cashPart, gcashRef }, user) {
+export function completeQuickSale({ items = [], cueItems = [], method, tendered, cashPart, gcashRef }, user) {
   if (!PAYMENT_METHODS.includes(method)) throw new Error('Choose a payment method.');
-  if (!items || !items.length) throw new Error('Add at least one item to the sale.');
+  if (!items.length && !cueItems.length) throw new Error('Add at least one item to the sale.');
   const ref = gcashRefFor(method, gcashRef);
 
   return db.transaction(async (tx) => {
@@ -516,10 +520,18 @@ export function completeQuickSale({ items, method, tendered, cashPart, gcashRef 
       if (!p) throw new Error(`${i.name} no longer exists in inventory.`);
       if (p.stock < i.qty) throw new Error(`Not enough ${i.name} in stock (${p.stock} left).`);
     });
+    const cues = await Promise.all(cueItems.map((i) => tx.get('cueSticks', i.cueStickId)));
+    cues.forEach((c, k) => {
+      if (!c) throw new Error(`${cueItems[k].name} no longer exists.`);
+      if (c.status !== 'available') throw new Error(`${c.name} has already been sold.`);
+    });
 
-    const lines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
+    const productLines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
+    const cueLines = cueItems.map((i) => ({ ...i, qty: 1, total: round2(i.price) }));
+    const lines = [...productLines, ...cueLines];
     const productTotal = itemsTotal(items);
-    const total = productTotal;
+    const cueStickTotal = round2(cueItems.reduce((s, i) => s + i.price, 0));
+    const total = round2(productTotal + cueStickTotal);
 
     let paid = null;
     let payments;
@@ -539,11 +551,14 @@ export function completeQuickSale({ items, method, tendered, cashPart, gcashRef 
 
     items.forEach((i, k) => tx.update('products', i.productId, { stock: products[k].stock - i.qty, updatedAt: SERVER_TIME }));
     const id = db.newId('transactions');
+    cues.forEach((c, k) => tx.update('cueSticks', cueItems[k].cueStickId, {
+      status: 'sold', soldAt: SERVER_TIME, soldTxId: id, soldByName: user.name, updatedAt: SERVER_TIME,
+    }));
     const record = {
       tableId: null, tableName: null, pricing: null,
       startedAt: null, endedAt: null, durationMs: null,
       plannedMs: null, billedMs: null, mode: null, rounds: 0,
-      tableFee: 0, items: lines, productTotal, total, method, payments,
+      tableFee: 0, items: lines, productTotal, cueStickTotal, total, method, payments,
       tendered: paid, change: paid == null ? null : round2(paid - total),
       gcashRef: ref,
       cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
@@ -684,62 +699,6 @@ export function addCueStick({ name, brand, weight, price, photo }) {
 
 export function updateCueStick(cueStickId, { name, brand, weight, price, photo }) {
   return db.update('cueSticks', cueStickId, { name, brand, weight, price, photo: photo || null, updatedAt: SERVER_TIME });
-}
-
-/**
- * Ring up a cue stick sale: one or more specific cues, no table, no timer. Kept apart from Quick
- * Sale/products so it gets its own total in reports. Each cue can only be sold once — the transaction
- * re-checks every one is still 'available' before marking it 'sold', so two terminals can't sell the
- * same physical cue twice.
- */
-export function completeCueStickSale({ items, method, tendered, cashPart, gcashRef }, user) {
-  if (!PAYMENT_METHODS.includes(method)) throw new Error('Choose a payment method.');
-  if (!items || !items.length) throw new Error('Add at least one cue stick to the sale.');
-  const ref = gcashRefFor(method, gcashRef);
-
-  return db.transaction(async (tx) => {
-    const cues = await Promise.all(items.map((i) => tx.get('cueSticks', i.cueStickId)));
-    cues.forEach((c, k) => {
-      if (!c) throw new Error(`${items[k].name} no longer exists.`);
-      if (c.status !== 'available') throw new Error(`${c.name} has already been sold.`);
-    });
-
-    const lines = items.map((i) => ({ ...i, qty: 1, total: round2(i.price) }));
-    const total = round2(lines.reduce((s, l) => s + l.total, 0));
-
-    let paid = null;
-    let payments;
-    if (method === 'cash') {
-      paid = tendered == null ? total : round2(tendered);
-      if (paid < total) throw new Error('Cash tendered is less than the total.');
-      payments = { cash: total, gcash: 0 };
-    } else if (method === 'gcash') {
-      payments = { cash: 0, gcash: total };
-    } else {
-      const cash = round2(Number(cashPart));
-      if (!(cash > 0) || cash >= total) {
-        throw new Error(`For a split payment, enter a cash amount between ₱0 and the ₱${total.toFixed(2)} total.`);
-      }
-      payments = { cash, gcash: round2(total - cash) };
-    }
-
-    const id = db.newId('transactions');
-    cues.forEach((c, k) => tx.update('cueSticks', items[k].cueStickId, {
-      status: 'sold', soldAt: SERVER_TIME, soldTxId: id, soldByName: user.name, updatedAt: SERVER_TIME,
-    }));
-    const record = {
-      tableId: null, tableName: null, pricing: null,
-      startedAt: null, endedAt: null, durationMs: null,
-      plannedMs: null, billedMs: null, mode: null, rounds: 0,
-      saleType: 'cue-stick',
-      tableFee: 0, productTotal: 0, cueStickTotal: total, items: lines, total, method, payments,
-      tendered: paid, change: paid == null ? null : round2(paid - total),
-      gcashRef: ref,
-      cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
-    };
-    tx.set('transactions', id, record);
-    return { id, ...record, createdAt: serverNow() };
-  });
 }
 
 /* ---------- staff & accounts ---------- */

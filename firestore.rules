@@ -435,26 +435,19 @@ service cloud.firestore {
     // ---------------- transactions ----------------
     // Append-only ledger. A sale can only be created for a table whose clock was stopped by the server,
     // with the table fee recomputed from that session's server stamps, in the same write that frees the table.
-    // A Quick Sale (walk-in, no table) instead just has to add up: no table fee, total == productTotal.
+    // A Quick Sale (walk-in, no table) instead just has to add up: no table fee, total == productTotal
+    // + cueStickTotal. One walk-in sale can mix products and cue sticks in the same cart/transaction
+    // (js/services.js completeQuickSale) — Reports still keeps the two totals on separate lines, since
+    // they're separate fields on the sale regardless of whether it's one cart or two (see js/reporting.js).
+    // The cues themselves are independently marked 'sold' (see /cueSticks above), not cross-checked
+    // here, the same trust level the product-stock deduction already gets.
     function quickSaleOk(sale) {
       return sale.tableId == null
         && sale.tableFee == 0
         && sale.items is list
         && sale.productTotal is number && sale.productTotal >= 0
-        && math.abs(sale.total - sale.productTotal) < 0.005;
-    }
-
-    // A cue stick sale: no table fee, no products — the total is entirely cueStickTotal. The cues
-    // themselves are independently marked 'sold' (see /cueSticks above), not cross-checked here, the
-    // same trust level a Quick Sale's product-stock deduction already gets.
-    function cueStickSaleOk(sale) {
-      return sale.tableId == null
-        && sale.get('saleType', null) == 'cue-stick'
-        && sale.tableFee == 0
-        && sale.get('productTotal', 0) == 0
-        && sale.items is list
-        && sale.cueStickTotal is number && sale.cueStickTotal >= 0
-        && math.abs(sale.total - sale.cueStickTotal) < 0.005;
+        && sale.get('cueStickTotal', 0) is number && sale.get('cueStickTotal', 0) >= 0
+        && math.abs(sale.total - (sale.productTotal + sale.get('cueStickTotal', 0))) < 0.005;
     }
 
     // A normal (non-prepay, non-refund) sale, at checkout: billed on the time actually played, floored
@@ -552,8 +545,7 @@ service cloud.firestore {
               && (!(request.resource.data.method in ['gcash', 'split'])
                   || (request.resource.data.get('gcashRef', null) is string
                       && request.resource.data.gcashRef.matches('^[0-9]{5}$')))
-              && ((request.resource.data.tableId == null
-                    && (quickSaleOk(request.resource.data) || cueStickSaleOk(request.resource.data)))
+              && ((request.resource.data.tableId == null && quickSaleOk(request.resource.data))
                   || (request.resource.data.tableId != null && saleMatchesSession(request.resource.data, id))))
         );
       // The ledger is append-only. A game is cancelled on the table before payment (cancelsGame),

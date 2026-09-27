@@ -497,41 +497,47 @@ test('the owner can still fix a cue stick’s details after it is sold; only the
   await assertSucceeds(deleteDoc(doc(as('owner'), 'cueSticks/c1')));
 });
 
-/* ---------------- cue stick sale (its own walk-in sale type, apart from Quick Sale) ---------------- */
+/* ---------------- Quick Sale (walk-in, no table): products and cue sticks in one cart ----------------
+ * js/services.js completeQuickSale rings up products and/or cue sticks together; the cue stick catalog
+ * doc itself is independently marked 'sold' (see the cueSticks tests above), not cross-checked here,
+ * the same trust level a Quick Sale's product-stock deduction already gets. */
 
-function cueStickSale(fs, {
-  cueStickTotal = 8500, fee = 0, productTotal = 0, total = cueStickTotal, cashier = 'joy', createdAt = serverTimestamp(), txId = 'cs1', extra = {},
+const round2m = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+function mixedSale(fs, {
+  cueStickTotal = 8500, fee = 0, productTotal = 0, total = round2m(productTotal + cueStickTotal),
+  cashier = 'joy', createdAt = serverTimestamp(), txId = 'qs1', extra = {},
 }) {
+  const items = [];
+  if (productTotal) items.push({ productId: 'beer', name: 'Beer', category: 'Beverages', price: productTotal, qty: 1, total: productTotal });
+  if (cueStickTotal) items.push({ cueStickId: 'c1', name: 'Predator Sport II', brand: 'Predator', price: cueStickTotal, qty: 1, total: cueStickTotal });
   return setDoc(doc(fs, 'transactions', txId), {
     tableId: null, tableName: null, pricing: null,
     startedAt: null, endedAt: null, durationMs: null,
     plannedMs: null, billedMs: null, mode: null, rounds: 0,
-    saleType: 'cue-stick',
-    tableFee: fee, productTotal, cueStickTotal,
-    items: [{ cueStickId: 'c1', name: 'Predator Sport II', brand: 'Predator', price: 8500, qty: 1, total: 8500 }],
-    total, method: 'cash', payments: { cash: total, gcash: 0 }, tendered: total, change: 0,
+    tableFee: fee, productTotal, cueStickTotal, items, total,
+    method: 'cash', payments: { cash: total, gcash: 0 }, tendered: total, change: 0,
     cashierId: cashier, cashierName: 'Joy', createdAt, ...extra,
   });
 }
-
-test('cue stick sale: a walk-in sale with no table fee and no product total is allowed', async () => {
-  await assertSucceeds(cueStickSale(as('joy'), {}));
+test('quick sale: a cue-stick-only walk-in sale, no table fee, is allowed', async () => {
+  await assertSucceeds(mixedSale(as('joy'), {}));
 });
 
-test('cue stick sale: a fabricated table fee is rejected', async () => {
-  await assertFails(cueStickSale(as('joy'), { fee: 200, total: 8700 }));
+test('quick sale: a fabricated table fee is rejected — walk-ins never have one', async () => {
+  await assertFails(mixedSale(as('joy'), { fee: 200, total: 8700 }));
 });
 
-test('cue stick sale: total must equal cueStickTotal exactly', async () => {
-  await assertFails(cueStickSale(as('joy'), { total: 8000 }));
+test('quick sale: total must equal productTotal + cueStickTotal exactly', async () => {
+  await assertFails(mixedSale(as('joy'), { total: 8000 }));
 });
 
-test('cue stick sale: a fabricated product total is rejected — it stays apart from Quick Sale', async () => {
-  await assertFails(cueStickSale(as('joy'), { productTotal: 100, total: 8600 }));
+test('quick sale: a cart mixing a product and a cue stick is allowed, and both totals must add up', async () => {
+  await assertSucceeds(mixedSale(as('joy'), { productTotal: 85, cueStickTotal: 8500, total: 8585 }));
+  await assertFails(mixedSale(as('joy'), { productTotal: 85, cueStickTotal: 8500, total: 8600 }));
 });
 
-test('cue stick sale: cashier can’t record it under someone else’s name', async () => {
-  await assertFails(cueStickSale(as('joy'), { cashier: 'bea' }));
+test('quick sale: cashier can’t record it under someone else’s name', async () => {
+  await assertFails(mixedSale(as('joy'), { cashier: 'bea' }));
 });
 
 /* ---------------- transfer table ----------------

@@ -221,7 +221,7 @@ export function bookingPaymentDialog({ title, due, onPay }) {
         tendered: method === 'cash' && tenderedRaw !== '' ? Number(tenderedRaw) : null,
         cashPart: method === 'split' ? Number(fd.get('bp-split-cash')) : null,
         // #gcash-ref (from gcashRefField() in js/ui.js) has no name attribute — every other screen
-        // that uses it reads it straight off the DOM (checkout.js, quick-sale.js, cue-sticks.js) rather
+        // that uses it reads it straight off the DOM (checkout.js, quick-sale.js) rather
         // than through FormData, which would always read null here.
         gcashRef: dlg.querySelector('#gcash-ref')?.value ?? '',
       });

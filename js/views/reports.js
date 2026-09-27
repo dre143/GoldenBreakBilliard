@@ -373,7 +373,7 @@ function dailyTab(panel, ctx) {
               <td class="cell-nowrap">${x.tableId ? (x.plannedMs ? fmtBooking(x.plannedMs) : 'Open') : ''}</td>
               <td class="cell-nowrap">${x.tableId ? fmtHuman(x.durationMs || 0) : ''}</td>
               <td class="t-right num">${x.tableId ? peso(x.tableFee) : ''}</td>
-              <td class="t-right num">${x.productTotal || x.cueStickTotal ? peso(x.productTotal || x.cueStickTotal) : ''}</td>
+              <td class="t-right num">${x.productTotal || x.cueStickTotal ? peso((x.productTotal || 0) + (x.cueStickTotal || 0)) : ''}</td>
               <td class="t-right num">${peso(x.total)}</td>
               <td class="cell-nowrap">${paymentLabel(x)}</td>
               <td class="cell-nowrap">${esc(x.cashierName)}</td>
@@ -469,7 +469,7 @@ function dailyTab(panel, ctx) {
         return [
           saleLabel(x), refNo(x.id), fmtTime(x.tableId ? x.startedAt : x.createdAt),
           x.tableId ? fmtTime(x.endedAt) : '', x.tableId ? (x.plannedMs ? fmtBooking(x.plannedMs) : 'Open') : '',
-          x.tableId ? Math.round((x.durationMs || 0) / 60000) : '', x.tableId ? x.tableFee : '', x.productTotal || x.cueStickTotal || 0, x.total,
+          x.tableId ? Math.round((x.durationMs || 0) / 60000) : '', x.tableId ? x.tableFee : '', (x.productTotal || 0) + (x.cueStickTotal || 0), x.total,
           METHOD_LABEL[x.method] || x.method, p.cash, p.gcash, x.gcashRef || '', x.cashierName,
           rep.cancelInfo(x)?.remark ?? '',
         ];

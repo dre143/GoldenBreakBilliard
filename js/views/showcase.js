@@ -120,7 +120,7 @@ export function mount(el) {
     <div class="showcase">
       ${display
         ? `<button type="button" class="showcase__back" data-action="sign-out">${icon('logout')}Sign out</button>`
-        : `<a class="showcase__back" href="#/cue-sticks">${icon('arrowLeft')}Back to app</a>`}
+        : `<a class="showcase__back" href="#/quick-sale">${icon('arrowLeft')}Back to app</a>`}
       <div class="showcase__stage">
         <div class="showcase__layer is-active" data-region="layer-0"></div>
         <div class="showcase__layer" data-region="layer-1"></div>

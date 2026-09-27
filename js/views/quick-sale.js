@@ -1,27 +1,38 @@
-// Quick Sale: a walk-in item-only sale, no table and no timer. The cart lives only in this view
-// (not in Firestore) until the sale completes — services.completeQuickSale checks and deducts
-// stock atomically at that point, the same way a table checkout does, so nothing can oversell.
+// Quick Sale: the one walk-in POS screen — products and cue sticks in the same cart, no table and no
+// timer. Formerly two separate screens (Quick Sale for products, Cue Sticks for cues); merged so a
+// cashier rings up either kind from one place. The cart lives only in this view (not in Firestore)
+// until the sale completes — services.completeQuickSale checks stock and cue availability, and deducts/
+// marks-sold, atomically at that point, the same way a table checkout does, so nothing can oversell.
+// Reports still keep table fee, product sales and cue stick sales as separate totals (js/reporting.js),
+// even though this screen sells both from one cart — see completeQuickSale's own note in js/services.js.
 import { state, on } from '../state.js';
 import * as svc from '../services.js';
 import { round2, itemsTotal, itemsCount } from '../billing.js';
-import { receiptDialog } from '../dialogs.js';
+import { receiptDialog, manageCueSticksDialog, manageShowcaseDialog, cueThumb } from '../dialogs.js';
 import * as printer from '../printer.js';
 import {
   esc, icon, peso, thumb, pageHeader, emptyBlock, busy, toast, openDialog, METHOD_LABEL, preserveFocus,
   gcashRefField, gcashQrBlock, wireGcashRef,
 } from '../ui.js';
+import { isOwnerLevel } from '../roles.js';
 
 export function mount(el, ctx) {
-  let cart = []; // { productId, name, category, price, qty }
+  const owner = isOwnerLevel(ctx.user);
+  let cart = []; // { productId, name, category, price, qty } | { cueStickId, name, brand, weight, price, photo }
   let method = 'cash';
   let completing = false;
+
+  const isCue = (line) => Boolean(line.cueStickId);
+  const cartTotal = () => round2(cart.reduce((s, i) => s + i.price * (i.qty ?? 1), 0));
 
   el.innerHTML = `
     ${pageHeader({
       title: 'Quick Sale — Walk-in',
-      subtitle: 'No table required · items only',
+      subtitle: 'No table required · products and cue sticks',
       actions: `
-        <span class="badge badge--in-use">Walk-in</span>
+        <a class="btn btn--neutral" href="#/showcase">${icon('cue')}Open Showcase</a>
+        ${owner ? `<button type="button" class="btn btn--neutral" data-action="customize-showcase">${icon('bell')}Customize Showcase</button>` : ''}
+        ${owner ? `<button type="button" class="btn btn--neutral" data-action="manage-cues">${icon('edit')}Manage Cue Sticks</button>` : ''}
         <a class="btn btn--neutral" href="#/tables">${icon('arrowLeft')}Back to Tables</a>`,
     })}
     <div class="checkout">
@@ -32,9 +43,10 @@ export function mount(el, ctx) {
             <span class="card-sub" data-region="item-count"></span>
           </div>
           <div class="quick-actions">
-            <button type="button" class="pill-action pill-action--item" data-action="add-product">${icon('plus')}Add Item</button>
+            <button type="button" class="pill-action pill-action--item" data-action="add-product">${icon('plus')}Add Product</button>
+            <button type="button" class="pill-action pill-action--item" data-action="add-cue">${icon('cue')}Add Cue Stick</button>
           </div>
-          <ul class="order-list" data-region="items" aria-label="Products on this sale"></ul>
+          <ul class="order-list" data-region="items" aria-label="Products and cue sticks on this sale"></ul>
         </section>
       </div>
       <aside class="checkout__side">
@@ -88,10 +100,16 @@ export function mount(el, ctx) {
     const list = $('[data-region=items]');
     preserveFocus(list, () => {
       list.innerHTML = cart.length
-        ? cart.map((i) => {
-          const product = state.products.find((p) => p.id === i.productId);
-          const atMax = product ? i.qty >= product.stock : true;
-          return `
+        ? cart.map((i) => (isCue(i) ? `
+          <li class="order-item">
+            ${cueThumb(i)}
+            <div class="order-item__info">
+              <p class="order-item__name">${esc(i.name)}</p>
+              <p class="order-item__price num">${[i.brand, i.weight].filter(Boolean).map(esc).join(' · ') || peso(i.price)}</p>
+            </div>
+            <button type="button" class="btn btn--neutral btn--sm" data-remove-cue="${esc(i.cueStickId)}" aria-label="Remove ${esc(i.name)}">${icon('x')}Remove</button>
+            <p class="order-item__total num">${peso(i.price)}</p>
+          </li>` : `
           <li class="order-item">
             ${thumb(i.name, i.category)}
             <div class="order-item__info">
@@ -101,14 +119,13 @@ export function mount(el, ctx) {
             <div class="stepper" role="group" aria-label="Quantity of ${esc(i.name)}">
               <button type="button" class="stepper__btn" data-action="dec" data-pid="${esc(i.productId)}" data-fk="dec-${esc(i.productId)}" aria-label="${i.qty === 1 ? 'Remove' : 'Decrease'} ${esc(i.name)}">${icon('minus')}</button>
               <span class="stepper__val num">${i.qty}</span>
-              <button type="button" class="stepper__btn" data-action="inc" data-pid="${esc(i.productId)}" data-fk="inc-${esc(i.productId)}" aria-label="Increase ${esc(i.name)}" ${atMax ? 'disabled' : ''}>${icon('plus')}</button>
+              <button type="button" class="stepper__btn" data-action="inc" data-pid="${esc(i.productId)}" data-fk="inc-${esc(i.productId)}" aria-label="Increase ${esc(i.name)}" ${(() => { const p = state.products.find((x) => x.id === i.productId); return p ? i.qty >= p.stock : true; })() ? 'disabled' : ''}>${icon('plus')}</button>
             </div>
             <p class="order-item__total num">${peso(i.price * i.qty)}</p>
-          </li>`;
-        }).join('')
-        : `<li class="order-empty">Scan or search a product above to add it to this sale.</li>`;
+          </li>`)).join('')
+        : `<li class="order-empty">Add a product or a cue stick above to start this sale.</li>`;
     });
-    $('[data-region=item-count]').textContent = `${itemsCount(cart)} item${itemsCount(cart) === 1 ? '' : 's'}`;
+    $('[data-region=item-count]').textContent = `${itemsCount(cart.filter((i) => !isCue(i))) + cart.filter(isCue).length} item${cart.length === 1 ? '' : 's'}`;
   }
 
   function renderLines() {
@@ -116,19 +133,19 @@ export function mount(el, ctx) {
       <dl class="sum-lines">
         ${cart.map((i) => `
         <div class="sum-row">
-          <dt>${i.qty} × ${esc(i.name)}</dt>
-          <dd class="num">${peso(i.price * i.qty)}</dd>
+          <dt>${isCue(i) ? esc(i.name) : `${i.qty} × ${esc(i.name)}`}</dt>
+          <dd class="num">${peso(i.price * (i.qty ?? 1))}</dd>
         </div>`).join('')}
         ${cart.length ? `
         <div class="sum-row sum-row--muted">
-          <dt>Products subtotal</dt>
-          <dd class="num">${peso(itemsTotal(cart))}</dd>
+          <dt>Subtotal</dt>
+          <dd class="num">${peso(cartTotal())}</dd>
         </div>` : ''}
       </dl>`;
   }
 
   function tick() {
-    const total = itemsTotal(cart);
+    const total = cartTotal();
     const setText = (key, v) => { const n = $(`[data-live=${key}]`); if (n) n.textContent = v; };
     setText('total', peso(total));
     const raw = $('#cash-tendered').value;
@@ -167,6 +184,19 @@ export function mount(el, ctx) {
     render();
   }
 
+  function addCueToCart(id) {
+    if (cart.some((i) => i.cueStickId === id)) return;
+    const c = state.cueSticks.find((x) => x.id === id);
+    if (!c || c.status !== 'available') return;
+    cart.push({ cueStickId: c.id, name: c.name, brand: c.brand, weight: c.weight, price: c.price, photo: c.photo });
+    render();
+  }
+
+  function removeCueFromCart(id) {
+    cart = cart.filter((i) => i.cueStickId !== id);
+    render();
+  }
+
   function openProductPicker() {
     let query = '';
     let offs = [];
@@ -184,7 +214,7 @@ export function mount(el, ctx) {
     });
     const list = dlg.querySelector('[data-region=pp-list]');
     const renderList = () => {
-      const onBill = new Map(cart.map((i) => [i.productId, i.qty]));
+      const onBill = new Map(cart.filter((i) => !isCue(i)).map((i) => [i.productId, i.qty]));
       const rows = state.products.filter((p) => !query || `${p.name} ${p.category}`.toLowerCase().includes(query));
       preserveFocus(list, () => {
         list.innerHTML = rows.length ? rows.map((p) => {
@@ -218,6 +248,49 @@ export function mount(el, ctx) {
     renderList();
   }
 
+  function openCuePicker() {
+    let offs = [];
+    const { dlg } = openDialog({
+      title: 'Add cue stick',
+      wide: true,
+      cancelLabel: 'Done',
+      body: `<ul class="pick-list" data-region="cp-list" aria-label="Cue sticks"></ul>`,
+      onClose: () => offs.forEach((off) => off()),
+    });
+    const list = dlg.querySelector('[data-region=cp-list]');
+    const renderList = () => {
+      const inCart = new Set(cart.filter(isCue).map((i) => i.cueStickId));
+      const rows = state.cueSticks.filter((c) => c.status === 'available' && !inCart.has(c.id));
+      preserveFocus(list, () => {
+        list.innerHTML = rows.length ? rows.map((c) => `
+          <li>
+            <button type="button" class="pick-product" data-cid="${esc(c.id)}" data-fk="cp-${esc(c.id)}">
+              ${cueThumb(c)}
+              <span class="pick-product__text">
+                <span class="pick-product__name">${esc(c.name)}</span>
+                <span class="pick-product__meta">${[c.brand, c.weight].filter(Boolean).map(esc).join(' · ') || '—'}</span>
+              </span>
+              <span class="pick-product__price num">${peso(c.price)}</span>
+            </button>
+          </li>`).join('') : `<li>${emptyBlock(
+          state.cueSticks.length ? 'Every cue stick is either sold or already on this sale.' : 'No cue sticks yet.',
+          owner ? 'Use Manage Cue Sticks to add the first one.' : 'Ask the owner to add cue sticks.',
+        )}</li>`;
+      });
+    };
+    offs = [on('cueSticks', renderList)];
+    list.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-cid]');
+      if (!b) return;
+      const c = state.cueSticks.find((x) => x.id === b.dataset.cid);
+      if (!c) return;
+      addCueToCart(c.id);
+      renderList();
+      toast(`Added ${c.name}`);
+    });
+    renderList();
+  }
+
   async function complete(btn) {
     if (!cart.length) { toast('Add at least one item to the sale.', 'error'); return; }
     const raw = $('#cash-tendered').value;
@@ -238,7 +311,9 @@ export function mount(el, ctx) {
     completing = true;
     btn.disabled = true;
     try {
-      const record = await svc.completeQuickSale({ items: cart, method, tendered, cashPart, gcashRef }, ctx.user);
+      const items = cart.filter((i) => !isCue(i));
+      const cueItems = cart.filter(isCue).map((c) => ({ cueStickId: c.cueStickId, name: c.name, brand: c.brand, price: c.price }));
+      const record = await svc.completeQuickSale({ items, cueItems, method, tendered, cashPart, gcashRef }, ctx.user);
       // Cash changed hands: open the drawer (if the printer is connected and "On cash pay" is on).
       printer.kickDrawerForCash(record.payments?.cash).then((err) => err && toast(`Sold, but the drawer said: ${err}`, 'error'));
       location.hash = '#/tables';
@@ -251,12 +326,17 @@ export function mount(el, ctx) {
   }
 
   el.addEventListener('click', (e) => {
+    if (e.target.closest('[data-action=manage-cues]')) { manageCueSticksDialog(); return; }
+    if (e.target.closest('[data-action=customize-showcase]')) { manageShowcaseDialog(); return; }
+    const removeCue = e.target.closest('[data-remove-cue]');
+    if (removeCue) { removeCueFromCart(removeCue.dataset.removeCue); return; }
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
     switch (btn.dataset.action) {
       case 'inc': return changeItem(btn.dataset.pid, 1);
       case 'dec': return changeItem(btn.dataset.pid, -1);
       case 'add-product': return openProductPicker();
+      case 'add-cue': return openCuePicker();
       case 'complete': return complete(btn);
       default: return undefined;
     }
@@ -275,6 +355,7 @@ export function mount(el, ctx) {
 
   const offs = [
     on('products', render),
+    on('cueSticks', render),
     // The QRPH code loads via its own settings listener, which can resolve after this screen already
     // built its static HTML — refresh just that region rather than relying on a one-time render.
     on('settings', () => { const q = $('[data-region=gcash-qr]'); if (q) q.innerHTML = gcashQrBlock(); }),

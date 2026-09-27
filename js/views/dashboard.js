@@ -89,8 +89,11 @@ export function mount(el, ctx) {
       const up = pct >= 0;
       delta = `<span class="delta ${up ? 'delta--up' : 'delta--down'}"><span aria-hidden="true">${up ? '▲' : '▼'}</span> ${Math.abs(pct).toFixed(1)}% <span class="delta__ctx">vs this time yesterday</span></span>`;
     }
-    const itemsSold = today.filter((x) => x.saleType !== 'cue-stick').reduce((n, x) => n + (x.items || []).reduce((m, i) => m + i.qty, 0), 0);
-    const cueSticksSold = today.filter((x) => x.saleType === 'cue-stick').reduce((n, x) => n + (x.items || []).length, 0);
+    // Counted per line, not per sale: a Quick Sale can mix products and cue sticks in one cart
+    // (js/services.js completeQuickSale), so a transaction's saleType alone can't tell them apart —
+    // only cueStickId on the line can (older cue-stick-only sales still carry saleType, handled below).
+    const itemsSold = today.reduce((n, x) => n + (x.items || []).filter((i) => !i.cueStickId).reduce((m, i) => m + i.qty, 0), 0);
+    const cueSticksSold = today.reduce((n, x) => n + (x.items || []).filter((i) => i.cueStickId || x.saleType === 'cue-stick').length, 0);
     stats.innerHTML = `
       <article class="stat stat--dark">
         <p class="stat__label">Total sales today</p>
