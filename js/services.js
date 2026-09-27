@@ -502,11 +502,11 @@ async function payRunningBooking(tableId, { method, tendered, cashPart, gcashRef
 /**
  * Ring up a walk-in sale: products and/or cue sticks, no table, no timer, no table fee. One cart, one
  * payment, one transaction — product stock is checked and deducted, and any cue sticks are marked sold
- * (each is a unique physical item, not counted stock — see the cueSticks catalog), all in the same
- * transaction, so two terminals still can't oversell either kind. `items` and `cueItems` land in the
- * sale's one combined `items` list for the receipt, but keep separate `productTotal`/`cueStickTotal`
- * fields — Reports (js/reporting.js) always sums those separately, so mixing the cart on one screen
- * never mixes the two in the books.
+ * (stock-counted, same as products — see the cueSticks catalog), all in the same transaction, so two
+ * terminals still can't oversell either kind. `items` and `cueItems` land in the sale's one combined
+ * `items` list for the receipt, but keep separate `productTotal`/`cueStickTotal` fields — Reports
+ * (js/reporting.js) always sums those separately, so mixing the cart on one screen never mixes the two
+ * in the books.
  */
 export function completeQuickSale({ items = [], cueItems = [], method, tendered, cashPart, gcashRef }, user) {
   if (!PAYMENT_METHODS.includes(method)) throw new Error('Choose a payment method.');
@@ -522,15 +522,16 @@ export function completeQuickSale({ items = [], cueItems = [], method, tendered,
     });
     const cues = await Promise.all(cueItems.map((i) => tx.get('cueSticks', i.cueStickId)));
     cues.forEach((c, k) => {
-      if (!c) throw new Error(`${cueItems[k].name} no longer exists.`);
-      if (c.status !== 'available') throw new Error(`${c.name} has already been sold.`);
+      const i = cueItems[k];
+      if (!c) throw new Error(`${i.name} no longer exists in the cue stick catalog.`);
+      if (c.stock < i.qty) throw new Error(`Not enough ${i.name} in stock (${c.stock} left).`);
     });
 
     const productLines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
-    const cueLines = cueItems.map((i) => ({ ...i, qty: 1, total: round2(i.price) }));
+    const cueLines = cueItems.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
     const lines = [...productLines, ...cueLines];
     const productTotal = itemsTotal(items);
-    const cueStickTotal = round2(cueItems.reduce((s, i) => s + i.price, 0));
+    const cueStickTotal = itemsTotal(cueItems);
     const total = round2(productTotal + cueStickTotal);
 
     let paid = null;
@@ -550,10 +551,8 @@ export function completeQuickSale({ items = [], cueItems = [], method, tendered,
     }
 
     items.forEach((i, k) => tx.update('products', i.productId, { stock: products[k].stock - i.qty, updatedAt: SERVER_TIME }));
+    cueItems.forEach((i, k) => tx.update('cueSticks', i.cueStickId, { stock: cues[k].stock - i.qty, updatedAt: SERVER_TIME }));
     const id = db.newId('transactions');
-    cues.forEach((c, k) => tx.update('cueSticks', cueItems[k].cueStickId, {
-      status: 'sold', soldAt: SERVER_TIME, soldTxId: id, soldByName: user.name, updatedAt: SERVER_TIME,
-    }));
     const record = {
       tableId: null, tableName: null, pricing: null,
       startedAt: null, endedAt: null, durationMs: null,
@@ -688,17 +687,33 @@ export function addStock(productId, qty, user) {
 }
 
 /* ---------- cue sticks ---------- */
-// A separate catalog from products: each cue stick is a unique physical item (not counted stock), so
-// selling one just flips it from 'available' to 'sold' rather than decrementing a quantity.
+// A separate catalog from products, but stock-counted the same way — one entry per cue MODEL (e.g.
+// "Predator Sport II"), with a quantity, not one entry per physical stick. Selling decreases stock,
+// exactly like a product; Add Stock tops it back up the same way too.
 
-export function addCueStick({ name, brand, weight, price, photo }) {
+export function addCueStick({ name, brand, weight, price, photo, description, stock, reorderLevel }) {
   return db.add('cueSticks', {
-    name, brand, weight, price, photo: photo || null, status: 'available', createdAt: SERVER_TIME, updatedAt: SERVER_TIME,
+    name, brand, weight, price, photo: photo || null, description: description || '',
+    stock, reorderLevel, createdAt: SERVER_TIME, updatedAt: SERVER_TIME,
   });
 }
 
-export function updateCueStick(cueStickId, { name, brand, weight, price, photo }) {
-  return db.update('cueSticks', cueStickId, { name, brand, weight, price, photo: photo || null, updatedAt: SERVER_TIME });
+export function updateCueStick(cueStickId, { name, brand, weight, price, photo, description, reorderLevel }) {
+  return db.update('cueSticks', cueStickId, {
+    name, brand, weight, price, photo: photo || null, description: description || '', reorderLevel, updatedAt: SERVER_TIME,
+  });
+}
+
+export function addCueStock(cueStickId, qty, user) {
+  return db.transaction(async (tx) => {
+    const c = await tx.get('cueSticks', cueStickId);
+    if (!c) throw new Error('Cue stick not found.');
+    tx.update('cueSticks', cueStickId, { stock: c.stock + qty, lastRestockedAt: SERVER_TIME, updatedAt: SERVER_TIME });
+    tx.set('restocks', db.newId('restocks'), {
+      cueStickId, cueStickName: c.name, qty, byId: user.uid, byName: user.name, createdAt: SERVER_TIME,
+    });
+    return c.stock + qty;
+  });
 }
 
 /* ---------- staff & accounts ---------- */

@@ -413,23 +413,22 @@ service cloud.firestore {
     }
 
     // ---------------- cue sticks ----------------
-    // A separate catalog from products: each cue stick is a unique physical item, not counted stock,
-    // so a sale flips status available -> sold instead of decrementing a quantity. The photo, if any,
-    // is a compressed image kept right on the document (no separate file storage in this app).
+    // A separate catalog from products, but now stock-counted the same way (name, description, price,
+    // stock, reorderLevel) — a cashier's sale can only ever decrease stock, same rule shape as products
+    // below. The photo, if any, is a compressed image kept right on the document (no separate file
+    // storage in this app).
     match /cueSticks/{id} {
       allow read: if isStaff();
       allow create: if isOwner()
         && (request.resource.data.get('photo', null) == null || request.resource.data.photo.size() < 900000);
       allow delete: if isOwner();
-      // Cashiers may only mark an available cue sold at sale time, server-timestamped, one-way — the
-      // same shape as a product's stock only ever decreasing for a cashier.
-      allow update: if (isOwner()
-            && (request.resource.data.get('photo', null) == null || request.resource.data.photo.size() < 900000))
+      allow update: if isOwner()
+            && (request.resource.data.get('photo', null) == null || request.resource.data.photo.size() < 900000)
         || (isWorkingStaff()
-            && onlyChanges(['status', 'soldAt', 'soldTxId', 'soldByName', 'updatedAt'])
-            && resource.data.status == 'available'
-            && request.resource.data.status == 'sold'
-            && request.resource.data.soldAt == request.time);
+            && onlyChanges(['stock', 'updatedAt'])
+            && request.resource.data.stock is int
+            && request.resource.data.stock >= 0
+            && request.resource.data.stock < resource.data.stock);
     }
 
     // ---------------- transactions ----------------

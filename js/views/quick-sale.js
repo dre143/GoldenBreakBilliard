@@ -105,10 +105,14 @@ export function mount(el, ctx) {
             ${cueThumb(i)}
             <div class="order-item__info">
               <p class="order-item__name">${esc(i.name)}</p>
-              <p class="order-item__price num">${[i.brand, i.weight].filter(Boolean).map(esc).join(' · ') || peso(i.price)}</p>
+              <p class="order-item__price num">${[i.brand, i.weight].filter(Boolean).map(esc).join(' · ') || `${peso(i.price)} each`}</p>
             </div>
-            <button type="button" class="btn btn--neutral btn--sm" data-remove-cue="${esc(i.cueStickId)}" aria-label="Remove ${esc(i.name)}">${icon('x')}Remove</button>
-            <p class="order-item__total num">${peso(i.price)}</p>
+            <div class="stepper" role="group" aria-label="Quantity of ${esc(i.name)}">
+              <button type="button" class="stepper__btn" data-action="cue-dec" data-cid="${esc(i.cueStickId)}" data-fk="cue-dec-${esc(i.cueStickId)}" aria-label="${i.qty === 1 ? 'Remove' : 'Decrease'} ${esc(i.name)}">${icon('minus')}</button>
+              <span class="stepper__val num">${i.qty}</span>
+              <button type="button" class="stepper__btn" data-action="cue-inc" data-cid="${esc(i.cueStickId)}" data-fk="cue-inc-${esc(i.cueStickId)}" aria-label="Increase ${esc(i.name)}" ${(() => { const c = state.cueSticks.find((x) => x.id === i.cueStickId); return c ? i.qty >= c.stock : true; })() ? 'disabled' : ''}>${icon('plus')}</button>
+            </div>
+            <p class="order-item__total num">${peso(i.price * i.qty)}</p>
           </li>` : `
           <li class="order-item">
             ${thumb(i.name, i.category)}
@@ -125,7 +129,7 @@ export function mount(el, ctx) {
           </li>`)).join('')
         : `<li class="order-empty">Add a product or a cue stick above to start this sale.</li>`;
     });
-    $('[data-region=item-count]').textContent = `${itemsCount(cart.filter((i) => !isCue(i))) + cart.filter(isCue).length} item${cart.length === 1 ? '' : 's'}`;
+    $('[data-region=item-count]').textContent = `${itemsCount(cart)} item${itemsCount(cart) === 1 ? '' : 's'}`;
   }
 
   function renderLines() {
@@ -133,8 +137,8 @@ export function mount(el, ctx) {
       <dl class="sum-lines">
         ${cart.map((i) => `
         <div class="sum-row">
-          <dt>${isCue(i) ? esc(i.name) : `${i.qty} × ${esc(i.name)}`}</dt>
-          <dd class="num">${peso(i.price * (i.qty ?? 1))}</dd>
+          <dt>${i.qty} × ${esc(i.name)}</dt>
+          <dd class="num">${peso(i.price * i.qty)}</dd>
         </div>`).join('')}
         ${cart.length ? `
         <div class="sum-row sum-row--muted">
@@ -184,16 +188,21 @@ export function mount(el, ctx) {
     render();
   }
 
-  function addCueToCart(id) {
-    if (cart.some((i) => i.cueStickId === id)) return;
-    const c = state.cueSticks.find((x) => x.id === id);
-    if (!c || c.status !== 'available') return;
-    cart.push({ cueStickId: c.id, name: c.name, brand: c.brand, weight: c.weight, price: c.price, photo: c.photo });
-    render();
-  }
-
-  function removeCueFromCart(id) {
-    cart = cart.filter((i) => i.cueStickId !== id);
+  function changeCue(cueStickId, delta) {
+    const idx = cart.findIndex((i) => i.cueStickId === cueStickId);
+    const qty = (idx >= 0 ? cart[idx].qty : 0) + delta;
+    if (qty <= 0) {
+      if (idx >= 0) cart.splice(idx, 1);
+    } else {
+      const c = state.cueSticks.find((x) => x.id === cueStickId);
+      if (delta > 0 && c && qty > c.stock) {
+        toast(c.stock > 0 ? `Only ${c.stock} ${c.name} in stock.` : `${c.name} is out of stock.`, 'error');
+        return;
+      }
+      const base = c || cart[idx];
+      const line = { cueStickId, name: base.name, brand: base.brand, weight: base.weight, price: base.price, photo: base.photo, qty };
+      if (idx >= 0) cart[idx] = line; else cart.push(line);
+    }
     render();
   }
 
@@ -259,21 +268,25 @@ export function mount(el, ctx) {
     });
     const list = dlg.querySelector('[data-region=cp-list]');
     const renderList = () => {
-      const inCart = new Set(cart.filter(isCue).map((i) => i.cueStickId));
-      const rows = state.cueSticks.filter((c) => c.status === 'available' && !inCart.has(c.id));
+      const inCart = new Map(cart.filter(isCue).map((i) => [i.cueStickId, i.qty]));
+      const rows = state.cueSticks.filter((c) => c.stock > 0);
       preserveFocus(list, () => {
-        list.innerHTML = rows.length ? rows.map((c) => `
+        list.innerHTML = rows.length ? rows.map((c) => {
+          const onBill = inCart.get(c.id) || 0;
+          const left = c.stock - onBill;
+          return `
           <li>
-            <button type="button" class="pick-product" data-cid="${esc(c.id)}" data-fk="cp-${esc(c.id)}">
+            <button type="button" class="pick-product" data-cid="${esc(c.id)}" data-fk="cp-${esc(c.id)}" ${left <= 0 ? 'disabled' : ''}>
               ${cueThumb(c)}
               <span class="pick-product__text">
                 <span class="pick-product__name">${esc(c.name)}</span>
-                <span class="pick-product__meta">${[c.brand, c.weight].filter(Boolean).map(esc).join(' · ') || '—'}</span>
+                <span class="pick-product__meta">${[c.brand, c.weight].filter(Boolean).map(esc).join(' · ') || '—'} · ${c.stock <= 0 ? 'Out of stock' : `${c.stock} in stock`}${onBill ? ` · ${onBill} on bill` : ''}</span>
               </span>
               <span class="pick-product__price num">${peso(c.price)}</span>
             </button>
-          </li>`).join('') : `<li>${emptyBlock(
-          state.cueSticks.length ? 'Every cue stick is either sold or already on this sale.' : 'No cue sticks yet.',
+          </li>`;
+        }).join('') : `<li>${emptyBlock(
+          state.cueSticks.length ? 'Every cue stick is out of stock.' : 'No cue sticks yet.',
           owner ? 'Use Manage Cue Sticks to add the first one.' : 'Ask the owner to add cue sticks.',
         )}</li>`;
       });
@@ -284,7 +297,7 @@ export function mount(el, ctx) {
       if (!b) return;
       const c = state.cueSticks.find((x) => x.id === b.dataset.cid);
       if (!c) return;
-      addCueToCart(c.id);
+      changeCue(c.id, 1);
       renderList();
       toast(`Added ${c.name}`);
     });
@@ -312,7 +325,7 @@ export function mount(el, ctx) {
     btn.disabled = true;
     try {
       const items = cart.filter((i) => !isCue(i));
-      const cueItems = cart.filter(isCue).map((c) => ({ cueStickId: c.cueStickId, name: c.name, brand: c.brand, price: c.price }));
+      const cueItems = cart.filter(isCue).map((c) => ({ cueStickId: c.cueStickId, name: c.name, brand: c.brand, price: c.price, qty: c.qty }));
       const record = await svc.completeQuickSale({ items, cueItems, method, tendered, cashPart, gcashRef }, ctx.user);
       // Cash changed hands: open the drawer (if the printer is connected and "On cash pay" is on).
       printer.kickDrawerForCash(record.payments?.cash).then((err) => err && toast(`Sold, but the drawer said: ${err}`, 'error'));
@@ -326,15 +339,15 @@ export function mount(el, ctx) {
   }
 
   el.addEventListener('click', (e) => {
-    if (e.target.closest('[data-action=manage-cues]')) { manageCueSticksDialog(); return; }
+    if (e.target.closest('[data-action=manage-cues]')) { manageCueSticksDialog(ctx.user); return; }
     if (e.target.closest('[data-action=customize-showcase]')) { manageShowcaseDialog(); return; }
-    const removeCue = e.target.closest('[data-remove-cue]');
-    if (removeCue) { removeCueFromCart(removeCue.dataset.removeCue); return; }
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
     switch (btn.dataset.action) {
       case 'inc': return changeItem(btn.dataset.pid, 1);
       case 'dec': return changeItem(btn.dataset.pid, -1);
+      case 'cue-inc': return changeCue(btn.dataset.cid, 1);
+      case 'cue-dec': return changeCue(btn.dataset.cid, -1);
       case 'add-product': return openProductPicker();
       case 'add-cue': return openCuePicker();
       case 'complete': return complete(btn);

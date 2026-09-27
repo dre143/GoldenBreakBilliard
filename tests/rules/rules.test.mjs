@@ -446,11 +446,11 @@ test('cashiers can never raise stock', async () => {
   await assertFails(updateDoc(doc(as('joy'), 'products/beer'), { stock: 12, updatedAt: serverTimestamp() }));
 });
 
-/* ---------------- cue sticks (a separate catalog from products) ---------------- */
+/* ---------------- cue sticks (a separate catalog from products, stock-tracked like products) ---------------- */
 
 const cueStick = (overrides = {}) => ({
-  name: 'Predator Sport II', brand: 'Predator', weight: '19oz', price: 8500, photo: null,
-  status: 'available', createdAt: ts(Date.now() - MIN), updatedAt: ts(Date.now() - MIN), ...overrides,
+  name: 'Predator Sport II', brand: 'Predator', weight: '19oz', price: 8500, photo: null, description: '',
+  stock: 5, reorderLevel: 2, createdAt: ts(Date.now() - MIN), updatedAt: ts(Date.now() - MIN), ...overrides,
 });
 
 test('owner can add a cue stick; a cashier cannot', async () => {
@@ -463,36 +463,25 @@ test('a cue stick photo over ~900KB is rejected', async () => {
   await assertSucceeds(setDoc(doc(as('owner'), 'cueSticks/small'), cueStick({ photo: 'x'.repeat(1000) })));
 });
 
-test('a cashier can mark an available cue stick sold with a server timestamp, not a fabricated one', async () => {
-  await seed({ 'cueSticks/c1': cueStick() });
-  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
-    status: 'sold', soldAt: ts(Date.now() - MIN), soldTxId: 'x1', soldByName: 'Joy', updatedAt: serverTimestamp(),
-  }));
-  await assertSucceeds(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
-    status: 'sold', soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Joy', updatedAt: serverTimestamp(),
-  }));
+test('a cashier can sell a cue stick by lowering its stock, but never raise it', async () => {
+  await seed({ 'cueSticks/c1': cueStick({ stock: 5 }) });
+  await assertSucceeds(updateDoc(doc(as('joy'), 'cueSticks/c1'), { stock: 4, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), { stock: 6, updatedAt: serverTimestamp() }));
 });
 
-test('a cashier cannot change any other field while marking a cue stick sold', async () => {
-  await seed({ 'cueSticks/c1': cueStick() });
-  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
-    status: 'sold', price: 1, soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Joy', updatedAt: serverTimestamp(),
-  }));
+test('a cashier cannot change any other field while selling down a cue stick’s stock', async () => {
+  await seed({ 'cueSticks/c1': cueStick({ stock: 5 }) });
+  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), { stock: 4, price: 1, updatedAt: serverTimestamp() }));
 });
 
-test('a cashier cannot sell the same cue stick twice, or un-sell one', async () => {
-  await seed({ 'cueSticks/c1': cueStick({ status: 'sold', soldAt: ts(Date.now() - MIN), soldTxId: 'x0', soldByName: 'Joy' }) });
-  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
-    status: 'sold', soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Bea', updatedAt: serverTimestamp(),
-  }));
-  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
-    status: 'available', soldAt: null, soldTxId: null, soldByName: null, updatedAt: serverTimestamp(),
-  }));
+test('a cashier cannot sell a cue stick past zero stock', async () => {
+  await seed({ 'cueSticks/c1': cueStick({ stock: 0 }) });
+  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), { stock: -1, updatedAt: serverTimestamp() }));
 });
 
-test('the owner can still fix a cue stick’s details after it is sold; only the owner can delete one', async () => {
-  await seed({ 'cueSticks/c1': cueStick({ status: 'sold', soldAt: ts(Date.now() - MIN), soldTxId: 'x0', soldByName: 'Joy' }) });
-  await assertSucceeds(updateDoc(doc(as('owner'), 'cueSticks/c1'), { price: 8000, updatedAt: serverTimestamp() }));
+test('the owner can restock and fix a cue stick’s details; only the owner can delete one', async () => {
+  await seed({ 'cueSticks/c1': cueStick({ stock: 1 }) });
+  await assertSucceeds(updateDoc(doc(as('owner'), 'cueSticks/c1'), { price: 8000, stock: 6, updatedAt: serverTimestamp() }));
   await assertFails(deleteDoc(doc(as('joy'), 'cueSticks/c1')));
   await assertSucceeds(deleteDoc(doc(as('owner'), 'cueSticks/c1')));
 });
@@ -727,7 +716,7 @@ test('clock probe and presence must use server time', async () => {
 /* ---------------- display role (an unattended screen, e.g. a TV running Showcase) ---------------- */
 
 test('a display account can read tables and cue sticks, same as any staff', async () => {
-  await seed({ 'tables/t1': freeTable, 'cueSticks/c1': { name: 'Cue', status: 'available', price: 1000 } });
+  await seed({ 'tables/t1': freeTable, 'cueSticks/c1': { name: 'Cue', stock: 3, price: 1000 } });
   const tv = as('tv');
   await assertSucceeds(getDoc(doc(tv, 'tables/t1')));
   await assertSucceeds(getDoc(doc(tv, 'cueSticks/c1')));
@@ -772,12 +761,10 @@ test('a display account cannot read products, transactions, expenses, other sett
 });
 
 test('a display account cannot start, end or otherwise write a table, or sell a cue stick', async () => {
-  await seed({ 'tables/t1': freeTable, 'cueSticks/c1': { name: 'Cue', status: 'available', price: 1000 } });
+  await seed({ 'tables/t1': freeTable, 'cueSticks/c1': { name: 'Cue', stock: 3, price: 1000 } });
   const tv = as('tv');
   await assertFails(updateDoc(doc(tv, 'tables/t1'), { status: 'in_use', session: newSession(0), updatedAt: serverTimestamp() }));
-  await assertFails(updateDoc(doc(tv, 'cueSticks/c1'), {
-    status: 'sold', soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Lobby TV', updatedAt: serverTimestamp(),
-  }));
+  await assertFails(updateDoc(doc(tv, 'cueSticks/c1'), { stock: 2, updatedAt: serverTimestamp() }));
 });
 
 test('a display account can still update only its own presence, like any signed-in account', async () => {

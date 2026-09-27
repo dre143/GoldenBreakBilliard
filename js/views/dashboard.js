@@ -93,7 +93,7 @@ export function mount(el, ctx) {
     // (js/services.js completeQuickSale), so a transaction's saleType alone can't tell them apart —
     // only cueStickId on the line can (older cue-stick-only sales still carry saleType, handled below).
     const itemsSold = today.reduce((n, x) => n + (x.items || []).filter((i) => !i.cueStickId).reduce((m, i) => m + i.qty, 0), 0);
-    const cueSticksSold = today.reduce((n, x) => n + (x.items || []).filter((i) => i.cueStickId || x.saleType === 'cue-stick').length, 0);
+    const cueSticksSold = today.reduce((n, x) => n + (x.items || []).filter((i) => i.cueStickId || x.saleType === 'cue-stick').reduce((m, i) => m + (i.qty ?? 1), 0), 0);
     stats.innerHTML = `
       <article class="stat stat--dark">
         <p class="stat__label">Total sales today</p>

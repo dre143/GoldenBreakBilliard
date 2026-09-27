@@ -6,7 +6,7 @@ import {
 } from './ui.js';
 import {
   canCancelGame, cancelTimeLeft, CANCEL_REASONS, elapsedMs, feeBreakdown, PRICING_LABEL, PRICING, tableFee, BOOKING_PRESETS,
-  paidFee, round2,
+  paidFee, round2, isLowStock,
 } from './billing.js';
 import { serverNow } from './clock.js';
 import * as printer from './printer.js';
@@ -313,10 +313,25 @@ export function cueStickDialog(cueStick) {
         </div>
       </div>
       <div class="field">
-        <label for="cs-price">Price (₱)</label>
-        <input id="cs-price" name="price" type="number" inputmode="decimal" min="0" step="0.01" required value="${cueStick?.price ?? ''}">
+        <label for="cs-desc">Description <span class="muted">(optional)</span></label>
+        <input id="cs-desc" name="description" maxlength="140" placeholder="What makes it worth a look" value="${esc(cueStick?.description ?? '')}">
       </div>
-      ${editing && cueStick.status === 'sold' ? `<p class="field__hint">Sold ${fmtDateTime(cueStick.soldAt)} by ${esc(cueStick.soldByName)}. You can still fix these details for your records.</p>` : ''}`,
+      <div class="field-row">
+        <div class="field">
+          <label for="cs-price">Price (₱)</label>
+          <input id="cs-price" name="price" type="number" inputmode="decimal" min="0" step="0.01" required value="${cueStick?.price ?? ''}">
+        </div>
+        ${editing ? '' : `
+        <div class="field">
+          <label for="cs-stock">Opening stock</label>
+          <input id="cs-stock" name="stock" type="number" inputmode="numeric" min="0" step="1" required value="0">
+        </div>`}
+        <div class="field">
+          <label for="cs-reorder">Reorder level</label>
+          <input id="cs-reorder" name="reorderLevel" type="number" inputmode="numeric" min="0" step="1" required value="${cueStick?.reorderLevel ?? 2}">
+        </div>
+      </div>
+      ${editing ? '<p class="field__hint">Use “Add Stock” on the list to change how many you have — this only edits the catalog details.</p>' : ''}`,
     onOpen(innerDlg) {
       const field = innerDlg.querySelector('[data-region=photo-field]');
       const renderPhoto = () => {
@@ -344,18 +359,57 @@ export function cueStickDialog(cueStick) {
         name: requireName(fd, 'name', 'Name'),
         brand: String(fd.get('brand') || '').trim(),
         weight: String(fd.get('weight') || '').trim(),
+        description: String(fd.get('description') || '').trim(),
         price: requireNumber(fd, 'price', 'Price'),
+        reorderLevel: requireNumber(fd, 'reorderLevel', 'Reorder level', { integer: true }),
         photo,
       };
-      if (editing) await svc.updateCueStick(cueStick.id, data);
-      else await svc.addCueStick(data);
+      if (editing) {
+        await svc.updateCueStick(cueStick.id, data);
+      } else {
+        await svc.addCueStick({ ...data, stock: requireNumber(fd, 'stock', 'Opening stock', { integer: true }) });
+      }
       toast(editing ? `${data.name} updated` : `${data.name} added`);
     },
   });
 }
 
-/** Owner-only cue stick admin: mirrors Manage Tables — add a cue, or edit one's photo/details. */
-export function manageCueSticksDialog() {
+/**
+ * Add stock to an existing cue stick model — exactly like a product's Add Stock (js/dialogs.js
+ * addStockDialog), just against the cueSticks catalog instead.
+ */
+export function addCueStockDialog(cueStick, user) {
+  openDialog({
+    title: `Add stock · ${esc(cueStick.name)}`,
+    submitLabel: 'Add stock',
+    body: `
+      <dl class="kv">
+        <div><dt>On hand</dt><dd class="num">${cueStick.stock}</dd></div>
+        <div><dt>Reorder level</dt><dd class="num">${cueStick.reorderLevel}</dd></div>
+        <div><dt>After restock</dt><dd class="num" data-after>${cueStick.stock}</dd></div>
+      </dl>
+      <div class="field">
+        <label for="cs-s-qty">Quantity received</label>
+        <input id="cs-s-qty" name="qty" type="number" inputmode="numeric" min="1" step="1" required autofocus>
+      </div>`,
+    onOpen(dlg) {
+      const input = dlg.querySelector('#cs-s-qty');
+      const after = dlg.querySelector('[data-after]');
+      input.addEventListener('input', () => {
+        const q = Math.max(0, Math.floor(num(input.value)) || 0);
+        after.textContent = cueStick.stock + q;
+      });
+    },
+    async onSubmit(fd) {
+      const qty = requireNumber(fd, 'qty', 'Quantity', { min: 1, integer: true });
+      const total = await svc.addCueStock(cueStick.id, qty, user);
+      toast(`${cueStick.name}: +${qty} (now ${total})`);
+    },
+  });
+}
+
+/** Owner-only cue stick admin: mirrors Manage Tables/Inventory — add a cue model, add stock, or edit its details. */
+export function manageCueSticksDialog(user) {
   let off = () => {};
   const { dlg } = openDialog({
     title: 'Manage cue sticks',
@@ -373,14 +427,18 @@ export function manageCueSticksDialog() {
         ${cueThumb(c)}
         <span class="manage-row__text">
           <span class="manage-row__name">${esc(c.name)}</span>
-          <span class="manage-row__sub">${c.brand ? `${esc(c.brand)} · ` : ''}${peso(c.price)} · ${c.status === 'sold' ? 'Sold' : 'Available'}</span>
+          <span class="manage-row__sub">${c.brand ? `${esc(c.brand)} · ` : ''}${peso(c.price)} · ${c.stock} in stock${isLowStock(c) ? ' · Low' : ''}</span>
         </span>
+        <button type="button" class="btn btn--neutral btn--sm" data-stock="${esc(c.id)}" data-fk="stock-${esc(c.id)}" aria-label="Add stock for ${esc(c.name)}">${icon('restock')}Add Stock</button>
         <button type="button" class="btn btn--neutral btn--sm" data-edit="${esc(c.id)}" data-fk="edit-${esc(c.id)}" aria-label="Edit ${esc(c.name)}">${icon('edit')}Edit</button>
       </li>`).join('') : '<li class="muted">No cue sticks yet.</li>';
   });
   off = on('cueSticks', render);
   dlg.addEventListener('click', (e) => {
-    if (e.target.closest('[data-action=add-cue]')) cueStickDialog();
+    if (e.target.closest('[data-action=add-cue]')) { cueStickDialog(); return; }
+    const stock = e.target.closest('[data-stock]');
+    const stockCue = stock && state.cueSticks.find((c) => c.id === stock.dataset.stock);
+    if (stockCue) { addCueStockDialog(stockCue, user); return; }
     const edit = e.target.closest('[data-edit]');
     const cue = edit && state.cueSticks.find((c) => c.id === edit.dataset.edit);
     if (cue) cueStickDialog(cue);

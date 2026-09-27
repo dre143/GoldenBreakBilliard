@@ -102,7 +102,7 @@ function buildSlides() {
   const featured = of('featured');
   if (featured.length) featured.forEach((f) => list.push({ type: 'featured', data: { ...f, meta: null } }));
   else {
-    const cue = state.cueSticks.find((c) => c.status === 'available');
+    const cue = state.cueSticks.find((c) => c.stock > 0);
     if (cue) list.push({ type: 'featured', data: cueAsFeatured(cue) });
   }
   of('promo').forEach((p) => list.push({ type: 'promo', data: p }));
