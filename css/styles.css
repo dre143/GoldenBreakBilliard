@@ -613,10 +613,13 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .pool--stopped .led__digits, .timer-panel.is-stopped .led__digits { color: var(--led-stopped); text-shadow: 0 0 10px rgba(255, 179, 107, .45); }
 .pool--idle .led__digits { color: var(--led-off); text-shadow: none; }
 
-.pool__meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.pool__meta div { display: flex; flex-direction: column; gap: 2px; }
+/* container-type here (same trick .pool__cloth .led uses for the timer, above): a long peso amount
+   (thousands, or the 1.4x zoom Showcase applies — css/styles.css .showcase__pool-grid) shrinks to fit
+   its own column via cqi instead of overflowing past the card's felt/wood edge. */
+.pool__meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; container-type: inline-size; }
+.pool__meta div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pool__meta dt { font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--display-text); }
-.pool__meta dd { font-size: clamp(15px, 1.35vw, 19px); white-space: nowrap; font-weight: 500; color: #fff; }
+.pool__meta dd { font-size: clamp(13px, 9cqi, 19px); white-space: nowrap; font-weight: 500; color: #fff; }
 .pool--idle .pool__meta dt { color: #4F574F; }
 .pool--idle .pool__meta dd { color: var(--ink); }
 
