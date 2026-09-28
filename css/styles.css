@@ -320,6 +320,10 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 
 /* ---------- buttons ---------- */
 
+/* One premium, consistent button language for the whole app: every .btn gets a soft resting shadow, a
+ * subtle glossy top-sheen, a gentle lift + deeper shadow on hover, a tactile press on click, and the
+ * same amber focus ring used everywhere else (e.g. .seg__opt) for keyboard/tab users. Colors and sizing
+ * are unchanged — this is a finish pass, not a re-theme, so nothing that reads the DOM breaks. */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: var(--tap); padding: 0 18px;
@@ -327,27 +331,43 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   font-size: 14px; font-weight: 700; line-height: 1.1;
   text-decoration: none; white-space: nowrap;
   cursor: pointer;
-  transition: background-color .15s, border-color .15s, color .15s;
+  box-shadow: 0 1px 2px rgba(30, 27, 22, .07);
+  transition: background-color .15s, border-color .15s, color .15s, box-shadow .18s ease, transform .12s ease;
 }
 .btn .ico { width: 18px; height: 18px; }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(30, 27, 22, .14); }
+.btn:active:not(:disabled) { transform: translateY(0); box-shadow: 0 1px 2px rgba(30, 27, 22, .08); }
+.btn:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; transform: none; }
 .btn--block { width: 100%; }
 .btn--lg { min-height: 54px; font-size: 16px; }
 .btn--sm { padding: 0 14px; font-size: 13px; }
 .btn--sm .ico { width: 16px; height: 16px; }
 
-.btn--primary { background: var(--felt); color: #fff; }
-.btn--primary:hover:not(:disabled) { background: var(--felt-dark); }
-.btn--amber { background: var(--amber); color: var(--ink); }
-.btn--amber:hover:not(:disabled) { background: var(--amber-hover); }
+.btn--primary {
+  background: var(--felt) linear-gradient(180deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 55%);
+  color: #fff; box-shadow: 0 1px 2px rgba(18, 63, 44, .25), 0 3px 8px rgba(18, 63, 44, .12);
+}
+.btn--primary:hover:not(:disabled) { background-color: var(--felt-dark); box-shadow: 0 8px 18px rgba(18, 63, 44, .28); }
+.btn--amber {
+  background: var(--amber) linear-gradient(180deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, 0) 55%);
+  color: var(--ink); box-shadow: 0 1px 2px rgba(122, 68, 24, .2), 0 3px 8px rgba(122, 68, 24, .12);
+}
+.btn--amber:hover:not(:disabled) { background-color: var(--amber-hover); box-shadow: 0 8px 18px rgba(122, 68, 24, .26); }
 .btn--neutral { background: var(--ground); color: var(--ink); border-color: var(--line); }
 .btn--neutral:hover:not(:disabled) { background: var(--ground-deep); }
-.btn--light { background: rgba(246, 243, 236, .1); color: var(--ivory); border-color: rgba(246, 243, 236, .24); }
+.btn--light { background: rgba(246, 243, 236, .1); color: var(--ivory); border-color: rgba(246, 243, 236, .24); box-shadow: none; }
 .btn--light:hover:not(:disabled) { background: rgba(246, 243, 236, .18); }
-.btn--end { background: var(--ivory); color: var(--felt-dark); }
-.btn--end:hover:not(:disabled) { background: #fff; }
-.btn--danger { background: var(--danger); color: #fff; }
-.btn--danger:hover:not(:disabled) { background: var(--danger-ink); }
+.btn--end {
+  background: var(--ivory) linear-gradient(180deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 55%);
+  color: var(--felt-dark);
+}
+.btn--end:hover:not(:disabled) { background-color: #fff; }
+.btn--danger {
+  background: var(--danger) linear-gradient(180deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 55%);
+  color: #fff; box-shadow: 0 1px 2px rgba(140, 29, 23, .25), 0 3px 8px rgba(140, 29, 23, .12);
+}
+.btn--danger:hover:not(:disabled) { background-color: var(--danger-ink); box-shadow: 0 8px 18px rgba(140, 29, 23, .28); }
 .btn--danger-ghost { background: var(--surface); color: var(--danger-ink); border-color: #E6BDB8; }
 .btn--danger-ghost:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger); }
 .btn--restock { background: var(--surface); color: var(--danger-ink); border-color: #E6BDB8; }
@@ -358,8 +378,11 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   display: inline-grid; place-items: center;
   padding: 0; border: 0; border-radius: 999px;
   background: transparent; color: inherit; cursor: pointer;
+  transition: background-color .15s, transform .12s ease;
 }
 .icon-btn:hover { background: rgba(30, 27, 22, .06); }
+.icon-btn:active { transform: scale(.94); }
+.icon-btn:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 .icon-btn--light:hover { background: rgba(255, 255, 255, .1); }
 .icon-btn--sm .ico { width: 18px; height: 18px; color: var(--ink-soft); }
 
@@ -746,10 +769,14 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   border: 0; border-radius: 999px;
   font-size: 15px; font-weight: 800;
   cursor: pointer;
-  transition: background-color .15s;
+  box-shadow: 0 1px 2px rgba(30, 27, 22, .07);
+  transition: background-color .15s, box-shadow .18s ease, transform .12s ease;
 }
 .pill-action .ico { width: 20px; height: 20px; }
-.pill-action:disabled { opacity: .5; cursor: not-allowed; }
+.pill-action:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(30, 27, 22, .16); }
+.pill-action:active:not(:disabled) { transform: translateY(0); }
+.pill-action:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+.pill-action:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
 .pill-action--item { background: var(--cue-blue); color: #fff; }
 .pill-action--item:hover:not(:disabled) { background: var(--cue-blue-hover); }
 .icon-btn--outline { background: var(--ground); border: 1px solid var(--line); }
@@ -799,9 +826,12 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   display: grid; place-items: center;
   padding: 0; border: 0; border-radius: 999px;
   background: transparent; cursor: pointer;
+  transition: background-color .15s, transform .12s ease;
 }
 .stepper__btn .ico { width: 18px; height: 18px; }
 .stepper__btn:hover:not(:disabled) { background: var(--ground-deep); }
+.stepper__btn:active:not(:disabled) { transform: scale(.94); }
+.stepper__btn:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 .stepper__btn:disabled { opacity: .35; cursor: not-allowed; }
 .stepper__val { min-width: 28px; text-align: center; font-size: 18px; }
 
@@ -1243,6 +1273,7 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .plain-table tfoot td { background: var(--ground); font-weight: 600; }
 
 .link-btn { padding: 0; background: none; border: 0; font: inherit; font-size: 13px; color: var(--felt); text-decoration: underline; cursor: pointer; }
+.link-btn:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 .link-btn--danger { color: var(--danger-ink); }
 .tx-rule { font-size: 13px; color: var(--ink-soft); max-width: 80ch; }
 .cancel-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 4px 0 8px; }
