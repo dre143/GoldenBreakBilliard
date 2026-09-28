@@ -508,6 +508,10 @@ export function productDialog(product) {
         <label for="p-cat">Category</label>
         <input id="p-cat" name="category" required list="p-cat-list" maxlength="30" value="${esc(product?.category ?? '')}">
         <datalist id="p-cat-list">${categories.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+        ${categories.length ? `
+        <div class="quick-picks" role="group" aria-label="Existing categories">
+          ${categories.map((c) => `<button type="button" class="btn btn--neutral btn--sm" data-pick-cat="${esc(c)}">${esc(c)}</button>`).join('')}
+        </div>` : ''}
       </div>
       <div class="field-row">
         <div class="field">
@@ -525,6 +529,18 @@ export function productDialog(product) {
         </div>
       </div>
       ${editing ? '<p class="field__hint">Use “Add Stock” to change quantities so restocks are logged.</p>' : ''}`,
+    onOpen(dlg) {
+      // Tap an existing category instead of retyping it — categories aren't stored anywhere of their
+      // own, they're just whatever's already on a product, so this reuses that list directly (see
+      // `categories` above) rather than needing a separate "manage categories" screen.
+      dlg.querySelector('[role=group][aria-label="Existing categories"]')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-pick-cat]');
+        if (!btn) return;
+        const input = dlg.querySelector('#p-cat');
+        input.value = btn.dataset.pickCat;
+        input.focus();
+      });
+    },
     async onSubmit(fd) {
       const data = {
         name: requireName(fd, 'name', 'Product name'),

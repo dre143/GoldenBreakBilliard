@@ -401,6 +401,10 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .field label { font-size: 13px; font-weight: 700; }
 .field__hint { font-size: 12px; color: var(--ink-soft); }
 .field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; }
+/* Tap an existing value instead of retyping it (e.g. product categories) — same small neutral button
+ * as everywhere else (full tap-target height, tablet-friendly), just wrapped to flow under the field
+ * it fills in. */
+.quick-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .field input, .field select, .select select, .search input {
   width: 100%; min-height: var(--tap);
   padding: 0 14px;
