@@ -41,6 +41,16 @@ export const money = (v) => ({ __money: true, v: Number(v) || 0 });
 const isMoney = (c) => c != null && typeof c === 'object' && c.__money === true;
 const plainValue = (c) => (isMoney(c) ? c.v : c);
 
+/** How wide a cell will actually look once rendered — for a money cell that's the formatted "₱1,234.56"
+ * string, not the bare number's digit count, which undersizes the column and shows "####" in Excel. */
+function displayWidth(c) {
+  if (isMoney(c)) {
+    const n = c.v;
+    return `${n < 0 ? '-' : ''}₱${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.length;
+  }
+  return String(plainValue(c) ?? '').length;
+}
+
 /**
  * A report's rows, described by kind rather than as a bare grid. Nothing here touches ExcelJS —
  * downloadReportXlsx() below does the styling — so report code stays free of spreadsheet details.
@@ -76,7 +86,7 @@ export async function downloadReportXlsx(filename, sheetName, sheet) {
     const plainCells = r.cells.map(plainValue);
     const row = ws.addRow(plainCells.length ? plainCells : ['']);
     r.cells.forEach((c, ci) => {
-      widths[ci] = Math.min(36, Math.max(widths[ci], String(plainValue(c) ?? '').length + 2));
+      widths[ci] = Math.min(40, Math.max(widths[ci], displayWidth(c) + 2));
       if (isMoney(c)) row.getCell(ci + 1).numFmt = PESO_FMT;
     });
     switch (r.kind) {

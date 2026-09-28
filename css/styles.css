@@ -1255,6 +1255,9 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .pay-strip div { display: flex; gap: 6px; }
 .pay-strip dt { color: var(--ink-soft); }
 .pay-strip dd { font-weight: 600; }
+/* Bar Counter / Cue Stick sales sit apart from the cash/QRPH figures — pushed to the right edge of the
+ * strip (wraps to its own row on narrow screens, same as any other pay-strip item). */
+.pay-strip__split { margin-left: auto; padding-left: 24px; border-left: 1px solid var(--line); }
 
 .overall {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px;

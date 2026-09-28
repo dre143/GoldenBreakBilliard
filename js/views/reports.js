@@ -135,6 +135,8 @@ const payStrip = (t) => `
     <div><dt>QRPH collected</dt><dd class="num">${peso(t.gcash)}</dd></div>
     <div><dt>Total collected</dt><dd class="num">${peso(t.total)}</dd></div>
     <div><dt>Net after expenses</dt><dd class="num">${peso(t.net)}</dd></div>
+    <div class="pay-strip__split"><dt>Bar Counter sales</dt><dd class="num">${peso(t.productTotal)}</dd></div>
+    <div><dt>Cue Stick sales</dt><dd class="num">${peso(t.cueStickTotal)}</dd></div>
   </dl>`;
 
 function expenseTable(expenses, { owner, withDate = false, withShift = false }) {
@@ -437,7 +439,7 @@ function dailyTab(panel, ctx) {
       <div class="stats stats--6 no-print">
         ${stat('Table sessions', sessions)}
         ${stat('Table revenue', peso(t.tableFee))}
-        ${stat('Product sales', peso(t.productTotal))}
+        ${stat('Bar Counter sales', peso(t.productTotal))}
         ${stat('Cue stick sales', peso(t.cueStickTotal))}
         ${stat('Expenses', peso(t.expenses))}
         ${stat('Net sales', peso(t.net))}
@@ -477,7 +479,11 @@ function dailyTab(panel, ctx) {
     expenses.forEach((e) => sheet.row(fmtTime(e.createdAt), ...(withShift ? [rep.SHIFT_SHORT[rep.shiftOf(e.createdAt)]] : []), e.description, e.cashierName, money(e.amount)));
     sheet.total('Total expenses', ...(withShift ? [''] : []), '', '', money(t.expenses))
       .blank().section('Summary')
-      .row('Cash collected', money(t.cash)).row('Expenses', money(t.expenses)).row('Net cash (cash to count)', money(t.cashToCount))
+      // Bar Counter / Cue Stick sales sit to the right of the cash figures, same as the on-screen and
+      // printed pay-strip (see payStrip() above) — a blank column C keeps them visually separate.
+      .row('Cash collected', money(t.cash), '', 'Bar Counter sales', money(t.productTotal))
+      .row('Expenses', money(t.expenses), '', 'Cue Stick sales', money(t.cueStickTotal))
+      .row('Net cash (cash to count)', money(t.cashToCount))
       .row('QRPH collected', money(t.gcash)).row('Total collected', money(t.total)).row('Net after expenses', money(t.net))
       .total('Overall Sale', money(t.net));
     exportXlsx(btn, `golden-break-daily-${key}${shift === 'full' ? '' : `-${shift}`}.xlsx`, 'Daily Sales', sheet);
@@ -608,7 +614,7 @@ function chartCard(title, sub, days, today) {
         <div><h2 class="card-title">${title}</h2><p class="card-sub">${sub}</p></div>
         <ul class="legend" aria-label="Legend">
           <li><span class="swatch swatch--felt" aria-hidden="true"></span>Table revenue</li>
-          <li><span class="swatch swatch--amber" aria-hidden="true"></span>Product sales</li>
+          <li><span class="swatch swatch--amber" aria-hidden="true"></span>Bar Counter sales</li>
         </ul>
       </div>
       <div class="chart">${barChart(chartDays)}</div>
@@ -658,7 +664,7 @@ function rangeTab(panel, ctx) {
       <div class="stats stats--6">
         ${stat('Table sessions', sessions)}
         ${stat('Table revenue', peso(t.tableFee))}
-        ${stat('Product sales', peso(t.productTotal))}
+        ${stat('Bar Counter sales', peso(t.productTotal))}
         ${stat('Cue stick sales', peso(t.cueStickTotal))}
         ${stat('Total sales', peso(t.total))}
         ${stat('Expenses', peso(t.expenses))}
@@ -736,7 +742,7 @@ function rangeTab(panel, ctx) {
     const t = rep.totals(txs, expenses);
     const sheet = reportSheet()
       .title(HALL).subtitle('Sales Report').meta(rangeLabel()).blank()
-      .header('Date', 'Table revenue', 'Product sales', 'Cue stick sales', 'Sales', 'Cash', 'QRPH', 'Expenses', 'Net');
+      .header('Date', 'Table revenue', 'Bar Counter sales', 'Cue stick sales', 'Sales', 'Cash', 'QRPH', 'Expenses', 'Net');
     rep.byDay(txs, fromKey, toKey, expenses).forEach((d) => sheet.row(
       d.key, money(d.tableFee), money(d.productTotal), money(d.cueStickTotal), money(d.total), money(d.cash), money(d.gcash), money(d.expenses), money(d.net),
     ));
@@ -833,7 +839,7 @@ function monthlyTab(panel) {
       <div class="stats stats--6">
         ${stat('Total sales', peso(t.total))}
         ${stat('Table revenue', peso(t.tableFee))}
-        ${stat('Product sales', peso(t.productTotal))}
+        ${stat('Bar Counter sales', peso(t.productTotal))}
         ${stat('Cue stick sales', peso(t.cueStickTotal))}
         ${stat('Expenses', peso(t.expenses))}
         ${stat('Net sales', peso(t.net))}
@@ -865,10 +871,10 @@ function monthlyTab(panel) {
     const sheet = reportSheet()
       .title(HALL).subtitle('Monthly Report').meta(monthLabel()).blank()
       .section('Summary')
-      .row('Total sales', money(t.total)).row('Table revenue', money(t.tableFee)).row('Product sales', money(t.productTotal))
+      .row('Total sales', money(t.total)).row('Table revenue', money(t.tableFee)).row('Bar Counter sales', money(t.productTotal))
       .row('Cue stick sales', money(t.cueStickTotal)).row('Expenses', money(t.expenses)).row('Net sales', money(t.net))
       .row('Hours played', Number((t.durationMs / 3600000).toFixed(1)))
-      .blank().section('By day').header('Date', 'Table revenue', 'Product sales', 'Cue stick sales', 'Sales', 'Expenses', 'Net');
+      .blank().section('By day').header('Date', 'Table revenue', 'Bar Counter sales', 'Cue stick sales', 'Sales', 'Expenses', 'Net');
     rep.byDay(txs, first, last, expenses).forEach((d) => sheet.row(d.key, money(d.tableFee), money(d.productTotal), money(d.cueStickTotal), money(d.total), money(d.expenses), money(d.net)));
     sheet.blank().section('By table').header('Table', 'Sessions', 'Hours played', 'Revenue');
     byTable().forEach((r) => sheet.row(r.name, r.sessions, Number((r.durationMs / 3600000).toFixed(1)), money(r.revenue)));

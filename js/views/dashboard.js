@@ -28,7 +28,7 @@ export function mount(el, ctx) {
             </div>
             <ul class="legend" aria-label="Legend">
               <li><span class="swatch swatch--felt" aria-hidden="true"></span>Table revenue</li>
-              <li><span class="swatch swatch--amber" aria-hidden="true"></span>Product sales</li>
+              <li><span class="swatch swatch--amber" aria-hidden="true"></span>Bar Counter sales</li>
             </ul>
           </div>
           <div class="chart" data-region="chart"></div>
@@ -106,7 +106,7 @@ export function mount(el, ctx) {
         <p class="stat__sub">${sessionsToday.length} session${sessionsToday.length === 1 ? '' : 's'} billed</p>
       </article>
       <article class="stat">
-        <p class="stat__label">Product sales</p>
+        <p class="stat__label">Bar Counter sales</p>
         <p class="stat__value num">${peso(sum(today, 'productTotal'))}</p>
         <p class="stat__sub">${itemsSold} item${itemsSold === 1 ? '' : 's'} sold</p>
       </article>
