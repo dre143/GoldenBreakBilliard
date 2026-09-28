@@ -5,7 +5,8 @@
 // on a .csv too). Reports describe their rows with the small builder below — title/section/header/
 // row/total, with money() marking a currency cell — instead of a bare array of values, and get back a
 // real .xlsx with bold headers on a green band, a peso number format on money cells, readable column
-// widths and a shaded totals row.
+// widths and a shaded totals row. The finished sheet is also protected (see downloadReportXlsx) so it
+// opens read-only — a sales report shouldn't be casually editable.
 const CDN = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
 let loading = null;
 
@@ -127,6 +128,25 @@ export async function downloadReportXlsx(filename, sheetName, sheet) {
   // off-screen in a plain .csv.
   const headerRow = sheet.rows.findIndex((r) => r.kind === 'header');
   if (headerRow >= 0) ws.views = [{ state: 'frozen', ySplit: headerRow + 1 }];
+
+  // Lock the sheet so a sales figure can't be typed over, sorted, or quietly deleted after export —
+  // this is a financial record, not a working spreadsheet. No password: anyone who genuinely needs to
+  // edit it can still do so via Excel's own Review ▸ Unprotect Sheet, just not by accident.
+  await ws.protect('', {
+    selectLockedCells: true,
+    selectUnlockedCells: true,
+    formatCells: false,
+    formatColumns: false,
+    formatRows: false,
+    insertColumns: false,
+    insertRows: false,
+    insertHyperlinks: false,
+    deleteColumns: false,
+    deleteRows: false,
+    sort: false,
+    autoFilter: false,
+    pivotTables: false,
+  });
 
   const buf = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
