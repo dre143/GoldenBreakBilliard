@@ -42,7 +42,9 @@ class EscPosBuilder {
   initialize() {
     this.alignment = 'left';
     this.push(0x1b, 0x40); // reset
-    this.push(0x1c, 0x2e); // FS . cancel Chinese mode, or some clones print ASCII blank
+    // No FS . (cancel Chinese mode) here: every byte this app sends is already plain ASCII
+    // (toPrinterAscii below), so Kanji mode can never be triggered in the first place, and on
+    // some cheap clones that command itself causes blank paper for everything after it.
     this.push(0x1b, 0x74, 0x00); // code page PC437
     this.push(0x1b, 0x4d, 0x00); // font A
     this.push(0x1b, 0x45, 0x01); // bold (darker on weak print heads)
