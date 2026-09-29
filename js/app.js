@@ -9,7 +9,6 @@ import * as tablesView from './views/tables.js';
 import * as checkoutView from './views/checkout.js';
 import * as quickSaleView from './views/quick-sale.js';
 import * as inventoryView from './views/inventory.js';
-import * as cueSticksView from './views/cue-sticks.js';
 import * as showcaseView from './views/showcase.js';
 import * as transactionsView from './views/transactions.js';
 import * as dashboardView from './views/dashboard.js';
@@ -40,9 +39,12 @@ const ROUTES = {
   tables: { label: 'Tables', icon: 'tables', view: tablesView },
   inventory: { label: 'Inventory', icon: 'box', view: inventoryView },
   checkout: { label: 'Checkout', icon: 'receipt', view: checkoutView },
+  // Quick Sale is the one walk-in POS screen: products and cue sticks in the same cart (merged from a
+  // formerly separate Cue Sticks sale screen — Manage Cue Sticks/Showcase links live here now). The
+  // 'cue-sticks' key is kept as an alias to the same view so an old bookmark/link still lands somewhere.
   'quick-sale': { label: 'Quick Sale', icon: 'bag', view: quickSaleView },
-  'cue-sticks': { label: 'Cue Sticks', icon: 'cue', view: cueSticksView },
-  // Not in the sidebar nav (see below) — a fullscreen TV display, reached from a link on Cue Sticks.
+  'cue-sticks': { label: 'Quick Sale', icon: 'bag', view: quickSaleView },
+  // Not in the sidebar nav (see below) — a fullscreen TV display, reached from a link on Quick Sale.
   showcase: { label: 'Cue Stick Showcase', icon: 'cue', view: showcaseView },
   transactions: { label: 'Transactions', icon: 'list', view: transactionsView },
   dashboard: { label: 'Owner Dashboard', icon: 'chart', view: dashboardView, owner: true },
@@ -140,6 +142,10 @@ function startData() {
   dataCleanups = [
     db.listen('tables', (rows) => set('tables', rows.sort((a, b) => (a.number ?? 0) - (b.number ?? 0) || byName(a, b))), {}, onDataError),
     db.listen('cueSticks', (rows) => set('cueSticks', rows.sort(byName)), {}, onDataError),
+    // showcaseItems is the one extra collection a display account (the TV itself) can also read (see
+    // firestore.rules) — the owner's Champion/Featured/Promo entries for the Showcase slideshow. Owner
+    // and superadmin can add as many as they like; oldest first, so new ones join the rotation at the end.
+    db.listen('showcaseItems', (rows) => set('showcaseItems', rows.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))), {}, onDataError),
   ];
   if (!display) {
     dataCleanups.push(
@@ -221,7 +227,7 @@ function renderShell() {
       <aside class="sidebar" id="sidebar">
         ${brand()}
         <nav class="nav" aria-label="Primary">
-          ${['tables', 'inventory', 'checkout', 'quick-sale', 'cue-sticks', 'transactions', 'reports'].map(link).join('')}
+          ${['tables', 'inventory', 'checkout', 'quick-sale', 'transactions', 'reports'].map(link).join('')}
           ${owner ? `<p class="nav__label">Owner</p>${['dashboard', 'staff'].map(link).join('')}` : ''}
         </nav>
         <div class="sidebar__spacer"></div>

@@ -320,6 +320,10 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 
 /* ---------- buttons ---------- */
 
+/* One premium, consistent button language for the whole app: every .btn gets a soft resting shadow, a
+ * subtle glossy top-sheen, a gentle lift + deeper shadow on hover, a tactile press on click, and the
+ * same amber focus ring used everywhere else (e.g. .seg__opt) for keyboard/tab users. Colors and sizing
+ * are unchanged — this is a finish pass, not a re-theme, so nothing that reads the DOM breaks. */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: var(--tap); padding: 0 18px;
@@ -327,27 +331,43 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   font-size: 14px; font-weight: 700; line-height: 1.1;
   text-decoration: none; white-space: nowrap;
   cursor: pointer;
-  transition: background-color .15s, border-color .15s, color .15s;
+  box-shadow: 0 1px 2px rgba(30, 27, 22, .07);
+  transition: background-color .15s, border-color .15s, color .15s, box-shadow .18s ease, transform .12s ease;
 }
 .btn .ico { width: 18px; height: 18px; }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(30, 27, 22, .14); }
+.btn:active:not(:disabled) { transform: translateY(0); box-shadow: 0 1px 2px rgba(30, 27, 22, .08); }
+.btn:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; transform: none; }
 .btn--block { width: 100%; }
 .btn--lg { min-height: 54px; font-size: 16px; }
 .btn--sm { padding: 0 14px; font-size: 13px; }
 .btn--sm .ico { width: 16px; height: 16px; }
 
-.btn--primary { background: var(--felt); color: #fff; }
-.btn--primary:hover:not(:disabled) { background: var(--felt-dark); }
-.btn--amber { background: var(--amber); color: var(--ink); }
-.btn--amber:hover:not(:disabled) { background: var(--amber-hover); }
+.btn--primary {
+  background: var(--felt) linear-gradient(180deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 55%);
+  color: #fff; box-shadow: 0 1px 2px rgba(18, 63, 44, .25), 0 3px 8px rgba(18, 63, 44, .12);
+}
+.btn--primary:hover:not(:disabled) { background-color: var(--felt-dark); box-shadow: 0 8px 18px rgba(18, 63, 44, .28); }
+.btn--amber {
+  background: var(--amber) linear-gradient(180deg, rgba(255, 255, 255, .22), rgba(255, 255, 255, 0) 55%);
+  color: var(--ink); box-shadow: 0 1px 2px rgba(122, 68, 24, .2), 0 3px 8px rgba(122, 68, 24, .12);
+}
+.btn--amber:hover:not(:disabled) { background-color: var(--amber-hover); box-shadow: 0 8px 18px rgba(122, 68, 24, .26); }
 .btn--neutral { background: var(--ground); color: var(--ink); border-color: var(--line); }
 .btn--neutral:hover:not(:disabled) { background: var(--ground-deep); }
-.btn--light { background: rgba(246, 243, 236, .1); color: var(--ivory); border-color: rgba(246, 243, 236, .24); }
+.btn--light { background: rgba(246, 243, 236, .1); color: var(--ivory); border-color: rgba(246, 243, 236, .24); box-shadow: none; }
 .btn--light:hover:not(:disabled) { background: rgba(246, 243, 236, .18); }
-.btn--end { background: var(--ivory); color: var(--felt-dark); }
-.btn--end:hover:not(:disabled) { background: #fff; }
-.btn--danger { background: var(--danger); color: #fff; }
-.btn--danger:hover:not(:disabled) { background: var(--danger-ink); }
+.btn--end {
+  background: var(--ivory) linear-gradient(180deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 55%);
+  color: var(--felt-dark);
+}
+.btn--end:hover:not(:disabled) { background-color: #fff; }
+.btn--danger {
+  background: var(--danger) linear-gradient(180deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 55%);
+  color: #fff; box-shadow: 0 1px 2px rgba(140, 29, 23, .25), 0 3px 8px rgba(140, 29, 23, .12);
+}
+.btn--danger:hover:not(:disabled) { background-color: var(--danger-ink); box-shadow: 0 8px 18px rgba(140, 29, 23, .28); }
 .btn--danger-ghost { background: var(--surface); color: var(--danger-ink); border-color: #E6BDB8; }
 .btn--danger-ghost:hover:not(:disabled) { background: var(--danger-soft); border-color: var(--danger); }
 .btn--restock { background: var(--surface); color: var(--danger-ink); border-color: #E6BDB8; }
@@ -358,8 +378,11 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   display: inline-grid; place-items: center;
   padding: 0; border: 0; border-radius: 999px;
   background: transparent; color: inherit; cursor: pointer;
+  transition: background-color .15s, transform .12s ease;
 }
 .icon-btn:hover { background: rgba(30, 27, 22, .06); }
+.icon-btn:active { transform: scale(.94); }
+.icon-btn:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 .icon-btn--light:hover { background: rgba(255, 255, 255, .1); }
 .icon-btn--sm .ico { width: 18px; height: 18px; color: var(--ink-soft); }
 
@@ -401,6 +424,10 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .field label { font-size: 13px; font-weight: 700; }
 .field__hint { font-size: 12px; color: var(--ink-soft); }
 .field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; }
+/* Tap an existing value instead of retyping it (e.g. product categories) — same small neutral button
+ * as everywhere else (full tap-target height, tablet-friendly), just wrapped to flow under the field
+ * it fills in. */
+.quick-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .field input, .field select, .select select, .search input {
   width: 100%; min-height: var(--tap);
   padding: 0 14px;
@@ -613,10 +640,13 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .pool--stopped .led__digits, .timer-panel.is-stopped .led__digits { color: var(--led-stopped); text-shadow: 0 0 10px rgba(255, 179, 107, .45); }
 .pool--idle .led__digits { color: var(--led-off); text-shadow: none; }
 
-.pool__meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.pool__meta div { display: flex; flex-direction: column; gap: 2px; }
+/* container-type here (same trick .pool__cloth .led uses for the timer, above): a long peso amount
+   (thousands, or the 1.4x zoom Showcase applies — css/styles.css .showcase__pool-grid) shrinks to fit
+   its own column via cqi instead of overflowing past the card's felt/wood edge. */
+.pool__meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; container-type: inline-size; }
+.pool__meta div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pool__meta dt { font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--display-text); }
-.pool__meta dd { font-size: clamp(15px, 1.35vw, 19px); white-space: nowrap; font-weight: 500; color: #fff; }
+.pool__meta dd { font-size: clamp(13px, 9cqi, 19px); white-space: nowrap; font-weight: 500; color: #fff; }
 .pool--idle .pool__meta dt { color: #4F574F; }
 .pool--idle .pool__meta dd { color: var(--ink); }
 
@@ -739,10 +769,14 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   border: 0; border-radius: 999px;
   font-size: 15px; font-weight: 800;
   cursor: pointer;
-  transition: background-color .15s;
+  box-shadow: 0 1px 2px rgba(30, 27, 22, .07);
+  transition: background-color .15s, box-shadow .18s ease, transform .12s ease;
 }
 .pill-action .ico { width: 20px; height: 20px; }
-.pill-action:disabled { opacity: .5; cursor: not-allowed; }
+.pill-action:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(30, 27, 22, .16); }
+.pill-action:active:not(:disabled) { transform: translateY(0); }
+.pill-action:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
+.pill-action:disabled { opacity: .5; cursor: not-allowed; box-shadow: none; }
 .pill-action--item { background: var(--cue-blue); color: #fff; }
 .pill-action--item:hover:not(:disabled) { background: var(--cue-blue-hover); }
 .icon-btn--outline { background: var(--ground); border: 1px solid var(--line); }
@@ -792,9 +826,12 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   display: grid; place-items: center;
   padding: 0; border: 0; border-radius: 999px;
   background: transparent; cursor: pointer;
+  transition: background-color .15s, transform .12s ease;
 }
 .stepper__btn .ico { width: 18px; height: 18px; }
 .stepper__btn:hover:not(:disabled) { background: var(--ground-deep); }
+.stepper__btn:active:not(:disabled) { transform: scale(.94); }
+.stepper__btn:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 .stepper__btn:disabled { opacity: .35; cursor: not-allowed; }
 .stepper__val { min-width: 28px; text-align: center; font-size: 18px; }
 
@@ -891,18 +928,41 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .cue-card__meta { font-size: 12px; color: var(--ink-soft); }
 .cue-card__price { font-size: 16px; }
 
-/* ---------- cue stick showcase (fullscreen TV slideshow) ---------- */
+/* ---------- Showcase: fullscreen TV digital signage (16:9, viewed from across the room) ----------
+ * Its own small premium palette, scoped to .showcase so it can't leak into (or be confused with) the
+ * light dashboard tokens at :root — the same deliberate-departure approach .gb-auth uses for the
+ * sign-in screen. Four slide types rotate (js/views/showcase.js): Live Table Status (always the real,
+ * live poolCard() data), Champion Spotlight, Featured Cue/Product and a Promo/Announcement slide, the
+ * last three owner-edited from Cue Sticks → "Customize Showcase" (js/dialogs.js). */
 
 .showcase {
+  --sc-gold: #E8B23D;
+  --sc-gold-light: #FFE29A;
+  --sc-orange: #D98C3D;
+  --sc-panel: rgba(15, 26, 20, .55);
+  --sc-panel-edge: rgba(232, 178, 61, .2);
+  --sc-ink: rgba(246, 243, 236, .68);
   position: relative;
   width: 100%; height: 100%;
   display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(circle at 30% 20%, #163C29 0%, var(--felt-deep) 60%, #081A12 100%);
+  background:
+    radial-gradient(circle at 22% 15%, rgba(232, 178, 61, .09) 0%, transparent 45%),
+    radial-gradient(circle at 78% 85%, rgba(217, 140, 61, .08) 0%, transparent 45%),
+    radial-gradient(circle at 30% 20%, #163C29 0%, var(--felt-deep) 60%, #081A12 100%);
   color: var(--ivory);
+  font-family: var(--font-body);
   overflow: hidden;
 }
+/* A faint diamond-rack texture, purely decorative and very low-contrast — a tasteful billiard detail
+   that reads as "felt table" from a distance without ever competing with the actual content. */
+.showcase::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+  background-image: radial-gradient(rgba(246, 243, 236, .05) 1.5px, transparent 1.5px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(circle at 50% 45%, black 0%, transparent 72%);
+}
 .showcase__back {
-  position: absolute; top: 20px; left: 20px; z-index: 2;
+  position: absolute; top: 20px; left: 20px; z-index: 3;
   display: flex; align-items: center; gap: 8px;
   padding: 10px 16px;
   background: none; /* the Display account's "Sign out" is a <button>, which needs this reset explicitly —
@@ -913,60 +973,192 @@ html.compact-nav .sidebar .printer-btn { display: none; }
   opacity: 0; transition: opacity .2s;
 }
 .showcase:hover .showcase__back, .showcase__back:focus-visible { opacity: 1; }
-.showcase__stage { width: min(1700px, 94vw); }
-.showcase__card {
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: clamp(24px, 5vw, 72px);
-  animation: showcase-in .6s ease both;
+
+/* Two stacked, absolutely-positioned layers crossfade between slides (js/views/showcase.js): the next
+   slide is painted into the hidden one, then both opacities swap — a real crossfade, not a hard cut. */
+.showcase__stage { position: relative; z-index: 1; width: min(1800px, 94vw); height: min(920px, 84vh); }
+.showcase__layer {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  /* Resting (leaving) pose: drifted left, slightly smaller and soft-focus. The incoming slide starts on
+     the right (.is-prep, set by showcase.js with transitions off) and glides to centre as this one exits. */
+  opacity: 0; transform: translateX(-5%) scale(.985); filter: blur(10px);
+  transition: opacity 1.2s ease, transform 1.4s cubic-bezier(.22, .8, .24, 1), filter 1.2s ease;
+  pointer-events: none;
 }
-@keyframes showcase-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
-.showcase__photo {
-  aspect-ratio: 1 / 1;
-  display: grid; place-items: center;
-  border-radius: 28px;
-  background: rgba(246, 243, 236, .06);
-  border: 1px solid rgba(246, 243, 236, .12);
-  box-shadow: 0 40px 80px -30px rgba(0, 0, 0, .6);
-  overflow: hidden;
+.showcase__layer.is-prep { transform: translateX(5%) scale(.985); }
+.showcase__layer.is-active { opacity: 1; transform: none; filter: none; pointer-events: auto; }
+
+/* Ambient background: two very slow, soft light blobs drifting over the felt — motion you feel more than see. */
+.showcase::after {
+  content: ''; position: absolute; inset: -20%; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(232, 178, 61, .10), transparent 32%),
+    radial-gradient(circle at 72% 68%, rgba(217, 140, 61, .09), transparent 30%);
+  animation: showcase-ambient 26s ease-in-out infinite alternate;
 }
-.showcase__photo img { width: 100%; height: 100%; object-fit: cover; }
-.showcase__photo .ico { width: 25%; height: 25%; color: rgba(246, 243, 236, .3); }
-.showcase__info { min-width: 0; }
+@keyframes showcase-ambient { from { transform: translate(-4%, -3%) scale(1); } to { transform: translate(4%, 3%) scale(1.12); } }
+
+/* Slide timer: a thin gold line that fills over the slide's duration, so the next change is never a surprise. */
+.showcase__progress { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; z-index: 3; background: rgba(246, 243, 236, .07); }
+.showcase__progress span {
+  display: block; height: 100%; width: 100%; transform-origin: left;
+  background: linear-gradient(90deg, var(--sc-gold), var(--sc-gold-light));
+  box-shadow: 0 0 14px rgba(232, 178, 61, .55);
+  animation: showcase-progress var(--sc-slide, 9s) linear both;
+}
+@keyframes showcase-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Entrance choreography: each part of a slide rises in one after another (photo first, then the text
+   stack), instead of the whole panel appearing as one block. Photos then drift slowly (Ken Burns) so a
+   slide never looks frozen. showcase.js adds .no-anim when it only repaints live data in place. */
+@keyframes showcase-rise { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+@keyframes showcase-pop { from { opacity: 0; transform: scale(.9); } to { opacity: 1; transform: none; } }
+@keyframes showcase-drift { from { transform: scale(1); } to { transform: scale(1.09) translate(-1.5%, -1%); } }
+@keyframes showcase-shimmer { from { background-position: 0% 50%; } to { background-position: 200% 50%; } }
+@keyframes showcase-glow { 0%, 100% { opacity: .55; transform: scale(1); } 50% { opacity: .95; transform: scale(1.08); } }
+
+.showcase__layer.is-active .showcase__spot { animation: showcase-pop .9s cubic-bezier(.22, .8, .24, 1) both; }
+.showcase__layer.is-active .showcase__spot-photo { animation: showcase-pop 1s .15s cubic-bezier(.22, .8, .24, 1) both; }
+.showcase__spot-photo img { animation: showcase-drift 16s ease-in-out infinite alternate; }
+.showcase__layer.is-active .showcase__spot-info > * { animation: showcase-rise .8s cubic-bezier(.22, .8, .24, 1) both; }
+.showcase__spot-info > :nth-child(1) { animation-delay: .35s !important; }
+.showcase__spot-info > :nth-child(2) { animation-delay: .5s !important; }
+.showcase__spot-info > :nth-child(3) { animation-delay: .65s !important; }
+.showcase__spot-info > :nth-child(4) { animation-delay: .8s !important; }
+.showcase__spot-info > :nth-child(5) { animation-delay: .95s !important; }
+
+/* Champion: a slow golden glow behind the portrait, and a light sweep across the name. */
+.showcase__spot--champion .showcase__spot-photo { position: relative; overflow: visible; }
+.showcase__spot--champion .showcase__spot-photo::before {
+  content: ''; position: absolute; inset: -14%; z-index: -1; border-radius: 50%;
+  background: radial-gradient(circle, rgba(232, 178, 61, .38), transparent 66%);
+  animation: showcase-glow 4.5s ease-in-out infinite;
+}
+.showcase__spot--champion .showcase__spot-photo img { border-radius: inherit; }
+.showcase__spot--champion .showcase__name {
+  background: linear-gradient(100deg, var(--ivory) 30%, var(--sc-gold-light) 46%, var(--ivory) 62%);
+  background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: showcase-rise .8s .5s cubic-bezier(.22, .8, .24, 1) both, showcase-shimmer 5s 1.6s linear infinite;
+}
+
+/* Live Table Status: heading, then the table cards pop in one by one. */
+.showcase__layer.is-active .showcase__tables-head { animation: showcase-rise .8s both; }
+.showcase__layer.is-active .showcase__pool-grid > * { animation: showcase-pop .7s cubic-bezier(.22, .8, .24, 1) both; }
+.showcase__pool-grid > :nth-child(1) { animation-delay: .25s !important; }
+.showcase__pool-grid > :nth-child(2) { animation-delay: .35s !important; }
+.showcase__pool-grid > :nth-child(3) { animation-delay: .45s !important; }
+.showcase__pool-grid > :nth-child(4) { animation-delay: .55s !important; }
+.showcase__pool-grid > :nth-child(5) { animation-delay: .65s !important; }
+.showcase__pool-grid > :nth-child(n+6) { animation-delay: .75s !important; }
+/* PAID / Balance badges (pool-card.js) read small from across the room. */
+.showcase .pool__status .badge { font-size: 1.05em; padding: 3px 12px; }
+
+/* Live data repainting in place: no entrance replay. */
+.showcase__layer.no-anim .showcase__spot, .showcase__layer.no-anim .showcase__spot-photo,
+.showcase__layer.no-anim .showcase__spot-info > *, .showcase__layer.no-anim .showcase__tables-head,
+.showcase__layer.no-anim .showcase__pool-grid > * { animation: none !important; }
+
 .showcase__eyebrow {
-  font-size: clamp(14px, 1.6vw, 26px); font-weight: 800; letter-spacing: .18em; text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: clamp(14px, 1.5vw, 24px); font-weight: 800; letter-spacing: .16em; text-transform: uppercase;
   color: var(--amber);
 }
+.showcase__eyebrow .ico { width: 1em; height: 1em; }
+.showcase__eyebrow--gold { color: var(--sc-gold); }
+.showcase__eyebrow--amber { color: var(--sc-orange); }
+
+/* Champion / Featured / Promo: one shared "advertisement" layout — a glass panel, a photo, a headline
+   hierarchy — so each reads as a premium slide, not a database record. */
+.showcase__spot {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); align-items: center;
+  gap: clamp(28px, 5vw, 76px);
+  width: 100%; padding: clamp(28px, 4vw, 56px);
+  background: var(--sc-panel);
+  border: 1px solid var(--sc-panel-edge);
+  border-radius: 32px;
+  box-shadow: 0 50px 100px -40px rgba(0, 0, 0, .65), inset 0 1px 0 rgba(255, 255, 255, .04);
+  backdrop-filter: blur(6px);
+}
+.showcase__spot--centered { grid-template-columns: minmax(0, 1fr); text-align: center; justify-items: center; }
+.showcase__spot-photo {
+  aspect-ratio: 1 / 1;
+  display: grid; place-items: center;
+  border-radius: 24px;
+  background: rgba(246, 243, 236, .06);
+  border: 1px solid rgba(246, 243, 236, .14);
+  box-shadow: 0 30px 60px -26px rgba(0, 0, 0, .6);
+  overflow: hidden;
+}
+.showcase__spot-photo--round { border-radius: 50%; border-color: var(--sc-panel-edge); }
+.showcase__spot-photo img { width: 100%; height: 100%; object-fit: cover; }
+.showcase__spot-photo .ico { width: 30%; height: 30%; color: rgba(246, 243, 236, .28); }
+.showcase__spot-info { min-width: 0; }
+.showcase__placement {
+  margin: 14px 0 0; font: 700 clamp(15px, 1.6vw, 24px)/1 var(--font-display);
+  letter-spacing: .04em; color: var(--sc-gold-light);
+}
 .showcase__name {
-  margin-top: 18px;
-  font: 700 clamp(36px, 5.5vw, 100px)/1.05 var(--font-display);
+  margin-top: 12px;
+  font: 700 clamp(34px, 5vw, 88px)/1.06 var(--font-display);
   overflow-wrap: break-word;
 }
-.showcase__meta { margin-top: 18px; font-size: clamp(16px, 2vw, 32px); color: rgba(246, 243, 236, .68); }
-.showcase__price { margin-top: 28px; font: 600 clamp(30px, 4.2vw, 72px)/1 var(--font-display); color: var(--ivory); }
+.showcase__meta { margin-top: 16px; font-size: clamp(15px, 1.7vw, 28px); color: var(--sc-ink); }
+.showcase__meta--lg { font-size: clamp(17px, 2vw, 32px); }
+.showcase__desc { margin-top: 14px; font-size: clamp(15px, 1.6vw, 26px); color: var(--sc-ink); line-height: 1.4; }
+.showcase__achievement {
+  margin-top: 18px; display: inline-flex; align-items: center; gap: 8px;
+  font-size: clamp(14px, 1.5vw, 22px); font-weight: 700; color: var(--sc-gold);
+}
+.showcase__achievement .ico { width: 1.1em; height: 1.1em; }
+.showcase__price {
+  margin-top: 24px; font: 600 clamp(28px, 3.8vw, 60px)/1 var(--font-display);
+  color: var(--sc-gold-light);
+}
+/* Champion Spotlight leans gold, Promo leans orange/amber — Featured stays the neutral ivory/amber
+   the rest of the app already uses, so it still reads as "the shop", not a special occasion. */
+.showcase__spot--champion { border-color: rgba(232, 178, 61, .3); }
+.showcase__spot--champion .showcase__spot-photo { border-color: rgba(232, 178, 61, .35); }
+.showcase__spot--promo { border-color: rgba(217, 140, 61, .3); }
+
 .showcase__dots {
-  position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 2;
+  position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 2;
   display: flex; gap: 10px;
 }
-.showcase__dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(246, 243, 236, .25); }
-.showcase__dot.is-active { background: var(--amber); }
+.showcase__dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(246, 243, 236, .22); transition: background .3s, transform .3s; }
+.showcase__dot.is-active { background: var(--sc-gold); transform: scale(1.25); }
 
-/* Table-status slide, the showcase's first slide: the real Tables screen cards (poolCard(), see
-   js/views/pool-card.js), so the TV shows the exact same timer, bill and rate details, not a summary. */
-.showcase__tables { width: 100%; text-align: center; animation: showcase-in .6s ease both; }
-.showcase__tables-title { margin-top: 10px; font: 700 clamp(28px, 4vw, 64px)/1.1 var(--font-display); }
+/* Table-status slide: the real Tables screen cards (poolCard(), see js/views/pool-card.js), so the TV
+   shows the exact same timer, bill and rate details, not a summary. */
+.showcase__tables { width: 100%; height: 100%; text-align: center; display: flex; flex-direction: column; }
+.showcase__tables-head { flex: none; }
+.showcase__tables-title { margin-top: 8px; font: 700 clamp(30px, 4vw, 64px)/1.1 var(--font-display); }
+.showcase__tables-sub { margin-top: 6px; font-size: clamp(14px, 1.4vw, 22px); color: var(--sc-ink); }
 .showcase__pool-grid {
-  margin: 48px auto 0; max-width: min(1800px, 94vw);
+  margin: clamp(24px, 3vw, 44px) auto 0; max-width: min(1800px, 96vw);
   text-align: left; /* the cards themselves stay left-aligned; only the slide's heading is centered */
   /* poolCard() (js/views/pool-card.js) sizes its own text for the normal floor-grid screen, which reads
      small on an actual TV a few metres away — zoom blows up the whole reused card (not just this slide)
      without touching that component's own CSS, so the ordinary Tables screen is completely unaffected. */
-  zoom: 1.45;
+  zoom: 1.4;
 }
+/* A table nearing its time limit (the existing hour-mark alert, js/hour-alerts.js) gets a slow, steady
+   pulse here — purely a TV-distance legibility boost, scoped to the Showcase only; the normal Tables
+   screen keeps its own (already-attention-getting) rail/bell treatment untouched. */
+.showcase .pool--hour-warn, .showcase .pool--hour-crit { animation: showcase-pulse 2.2s ease-in-out infinite; }
+@keyframes showcase-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.18); } }
 
 @media (max-width: 900px) {
-  .showcase__card { grid-template-columns: minmax(0, 1fr); text-align: center; }
-  .showcase__photo { width: min(70vw, 420px); margin: 0 auto; }
+  .showcase__spot { grid-template-columns: minmax(0, 1fr); text-align: center; justify-items: center; }
+  .showcase__spot-photo { width: min(70vw, 420px); margin: 0 auto; }
 }
-@media (prefers-reduced-motion: reduce) { .showcase__card, .showcase__tables { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .showcase__layer { transition: opacity .3s ease; transform: none !important; filter: none !important; }
+  .showcase .pool--hour-warn, .showcase .pool--hour-crit { animation: none; }
+  .showcase::after, .showcase__spot-photo img, .showcase__spot--champion .showcase__spot-photo::before,
+  .showcase__layer *, .showcase__layer { animation: none !important; }
+  .showcase__progress span { animation: none !important; transform: none; }
+}
 
 /* ---------- data tables ---------- */
 
@@ -1021,6 +1213,14 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .reason { display: flex; align-items: center; gap: 10px; min-height: var(--tap); padding: 0 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; font-size: 14px; }
 .reason:has(input:checked) { border-color: var(--danger); background: var(--danger-soft); color: var(--danger-ink); font-weight: 700; }
 .reason input { width: 18px; height: 18px; accent-color: var(--danger); }
+
+/* Customize Showcase dialog (js/dialogs.js showcaseSettingsDialog): one collapsible-feeling section
+   per slide, each with its own on/off switch in the legend. */
+.showcase-edit-section { margin: 0 0 18px; padding: 0; border: 0; min-width: 0; }
+.showcase-edit-section legend { width: 100%; padding: 0 0 10px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.showcase-edit-fields { display: flex; flex-direction: column; gap: 14px; transition: opacity .15s; }
+.showcase-edit-fields.is-disabled { opacity: .45; pointer-events: none; }
+
 .data-table tbody th .cell-strong, .data-table tbody th .cell-sub { display: block; }
 
 /* ---------- reports ---------- */
@@ -1073,6 +1273,7 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .plain-table tfoot td { background: var(--ground); font-weight: 600; }
 
 .link-btn { padding: 0; background: none; border: 0; font: inherit; font-size: 13px; color: var(--felt); text-decoration: underline; cursor: pointer; }
+.link-btn:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; }
 .link-btn--danger { color: var(--danger-ink); }
 .tx-rule { font-size: 13px; color: var(--ink-soft); max-width: 80ch; }
 .cancel-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 4px 0 8px; }
@@ -1089,6 +1290,9 @@ html.compact-nav .sidebar .printer-btn { display: none; }
 .pay-strip div { display: flex; gap: 6px; }
 .pay-strip dt { color: var(--ink-soft); }
 .pay-strip dd { font-weight: 600; }
+/* Bar Counter / Cue Stick sales sit apart from the cash/QRPH figures — pushed to the right edge of the
+ * strip (wraps to its own row on narrow screens, same as any other pay-strip item). */
+.pay-strip__split { margin-left: auto; padding-left: 24px; border-left: 1px solid var(--line); }
 
 .overall {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px;

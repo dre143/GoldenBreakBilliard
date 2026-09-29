@@ -8,6 +8,7 @@ import { db, auth } from './db.js';
 import {
   elapsedMs, round2, itemsTotal, CANCEL_REASONS, CANCEL_WINDOW_MS, PRICING,
   billSession, plannedMs, BOOKING_STEP_MS, canExtendEndedSession, bookingEndsAt,
+  isTimed, paidMs, isPrepaid, paidFee, balanceDue, tableFee,
 } from './billing.js';
 import { SERVER_TIME, serverNow } from './clock.js';
 
@@ -37,24 +38,116 @@ export function startSession(tableId, user, { booking = 0 } = {}) {
   });
 }
 
-/** Add booked time to a running session (a customer buying another hour). Booked time can't be cut. */
-export function extendSession(tableId, addMs) {
+/**
+ * Add booked time to a running session (a customer buying another hour). Booked time can't be cut.
+ * On a session that has already prepaid some of its booking, `payNow: true` also pays the additional
+ * fee for the extra time in this same write, bringing the balance back to ₱0; the default (`payNow:
+ * false`, "Pay Later") just grows the booking — a balance opens up for the extra time, visible on the
+ * table and collected later at checkout or with payBooking(). On a session that was never prepaid,
+ * extending it never charges anything here, exactly as before.
+ */
+export function extendSession(tableId, addMs, { payNow = false, method, tendered, cashPart, gcashRef, user } = {}) {
   if (!validBooking(addMs)) return Promise.reject(new Error('Choose the time in 15-minute steps.'));
   return db.transaction(async (tx) => {
     const t = await tx.get('tables', tableId);
     if (!t?.session) throw new Error('This table has no open session.');
-    if (t.session.ended && !canExtendEndedSession(t.session)) throw new Error('This session has already been stopped.');
-    const planned = plannedMs(t.session) + addMs;
-    tx.update('tables', tableId, {
+    const s = t.session;
+    if (s.ended && !canExtendEndedSession(s)) throw new Error('This session has already been stopped.');
+    const planned = plannedMs(s) + addMs;
+    const patch = {
       'session.plannedMs': planned,
-      ...(t.session.ended ? {
+      ...(s.ended ? {
         'session.ended': false, 'session.endedAt': null,
         'session.resumedAt': SERVER_TIME, 'session.elapsedBeforeResume': elapsedMs(t),
       } : {}),
       updatedAt: SERVER_TIME,
-    });
-    return planned;
+    };
+    let record = null;
+    if (payNow) {
+      if (!isPrepaid(s)) throw new Error('This session hasn’t been prepaid yet; use Pay booking first.');
+      const paid = bookingPaymentWrite({ table: t, session: s, targetPlannedMs: planned, method, tendered, cashPart, gcashRef, user });
+      Object.assign(patch, paid.patch);
+      record = paid.record;
+    }
+    if (record) tx.set('transactions', record.id, record.data);
+    tx.update('tables', tableId, patch);
+    return { planned, receipt: record ? { id: record.id, ...record.data, createdAt: serverNow() } : null };
   });
+}
+
+/**
+ * Pay some or all of a Set Hours booking's table fee while the session keeps running: the table stays
+ * In Use, the clock keeps counting, and only the fee for BOOKED time not yet paid is charged (see
+ * js/billing.js paidFee/balanceDue) — the same schedule as any other sale, so paying right after Set
+ * Hours starts costs exactly what Stop & Bill would if the whole booking were played out. This is used
+ * both for the first payment on a fresh booking and for collecting a "Pay Later" balance mid-session.
+ * Paying the same booked minute twice is impossible: this always brings paidMs level with the CURRENT
+ * plannedMs, and the fee is only the difference from what's already been paid.
+ */
+export function payBooking(tableId, { method, tendered, cashPart, gcashRef }, user) {
+  return db.transaction(async (tx) => {
+    const t = await tx.get('tables', tableId);
+    const s = t?.session;
+    if (!s) throw new Error('This table has no open session.');
+    if (s.ended || s.cancelled) throw new Error('This session has already ended.');
+    if (!isTimed(s)) throw new Error('Only a Set Hours booking can be paid in advance.');
+    if (paidMs(s) >= plannedMs(s)) throw new Error('This booking is already fully paid.');
+    const paid = bookingPaymentWrite({ table: t, session: s, targetPlannedMs: plannedMs(s), method, tendered, cashPart, gcashRef, user });
+    if (paid.record) tx.set('transactions', paid.record.id, paid.record.data);
+    tx.update('tables', tableId, { ...paid.patch, updatedAt: SERVER_TIME });
+    return paid.record ? { id: paid.record.id, ...paid.record.data, createdAt: serverNow() } : { id: null, paid: false };
+  });
+}
+
+/**
+ * Shared by extendSession()'s payNow and payBooking(): pays whatever is still owed up to
+ * `targetPlannedMs` (the booked length this write settles up to), bringing paidMs level with it.
+ * Returns the table's session.prepaid patch and, only when money actually changes hands, the
+ * transaction to save alongside it — some extensions land in a bracket that's already paid for (see
+ * js/billing.js PRICING), so nothing is charged or recorded, but paidMs still advances to match.
+ */
+function bookingPaymentWrite({ table, session, targetPlannedMs, method, tendered, cashPart, gcashRef, user }) {
+  // Belt-and-suspenders: every caller (payBooking, extendSession's payNow) already refuses to reach
+  // here for Open Time, but this shared helper is the one place that actually writes session.prepaid —
+  // it never touches a table that isn't a Set Hours booking, no matter what a future caller does.
+  if (!isTimed(session) || targetPlannedMs <= 0) throw new Error('Only a Set Hours booking can be paid in advance.');
+  const already = paidMs(session);
+  // paidFee(), not tableFee(already) directly: tableFee(0) is ₱200 (the flat first-hour minimum, see
+  // js/billing.js PRICING), not ₱0 — a session that was never prepaid has ₱0 already paid, full stop.
+  const due = round2(tableFee(targetPlannedMs) - paidFee(session));
+  if (due <= 0) {
+    return { patch: { 'session.prepaid': { ...(session.prepaid || { lastTxId: null, refunded: false }), paidMs: targetPlannedMs } }, record: null };
+  }
+  gcashRefFor(method, gcashRef); // check before touching the drawer
+  let paid = null;
+  let payments;
+  if (method === 'cash') {
+    paid = tendered == null ? due : round2(tendered);
+    if (paid < due) throw new Error('Cash tendered is less than the amount due.');
+    payments = { cash: due, gcash: 0 };
+  } else if (method === 'gcash') {
+    payments = { cash: 0, gcash: due };
+  } else if (method === 'split') {
+    const cash = round2(Number(cashPart));
+    if (!(cash > 0) || cash >= due) {
+      throw new Error(`For a split payment, enter a cash amount between ₱0 and the ₱${due.toFixed(2)} due.`);
+    }
+    payments = { cash, gcash: round2(due - cash) };
+  } else {
+    throw new Error('Choose a payment method.');
+  }
+  const id = db.newId('transactions');
+  const data = {
+    tableId: table.id, tableName: table.name, pricing: { ...PRICING },
+    startedAt: session.startedAt, endedAt: null, durationMs: null,
+    plannedMs: targetPlannedMs, billedMs: null, mode: 'timed', kind: 'prepay',
+    paidFromMs: already, paidToMs: targetPlannedMs,
+    tableFee: due, items: [], productTotal: 0, total: due, method, payments,
+    tendered: paid, change: paid == null ? null : round2(paid - due),
+    gcashRef: gcashRefFor(method, gcashRef),
+    cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
+  };
+  return { patch: { 'session.prepaid': { paidMs: targetPlannedMs, lastTxId: id, refunded: false } }, record: { id, data } };
 }
 
 /** Stop manually at server time, or automatically at the verified booking deadline. */
@@ -75,12 +168,44 @@ export function endSession(tableId, { expiredBooking = null, startedAt = null } 
 }
 
 /**
+ * Auto-stop's own entry point (js/time-alerts.js checkAutoStop): stops the clock like endSession(),
+ * then — only when the booking's table fee is fully paid and nothing else is owed (no balance, no
+ * items) — immediately closes the table too, the same ₱0 "nothing to pay" shape a cancelled game with
+ * no items already uses. If anything is still owed, the session is simply left "Session ended" for a
+ * cashier to check out, exactly like an unpaid booking always has been.
+ * `user`: whichever signed-in device's tick noticed the expiry, credited on the closing sale;
+ * completeCheckout() re-verifies everything server-side regardless of who calls it.
+ */
+export async function finishAutoStop(tableId, { expiredBooking, startedAt }, user) {
+  await endSession(tableId, { expiredBooking, startedAt });
+  if (!user) return; // no signed-in device to credit the closing sale to; leave it "Session ended"
+  const t = await db.get('tables', tableId);
+  const s = t?.session;
+  if (!s || !s.ended || s.cancelled) return;
+  // Open Time has no booking to be "fully paid" against — balanceDue() reads ₱0 for it unconditionally
+  // (see js/billing.js), which is not the same thing as its real table fee being settled. Auto-closing
+  // is a Set Hours-only shortcut; an ended Open Time table always waits for a cashier's own checkout.
+  if (!isTimed(s)) return;
+  if (balanceDue(s) > 0 || (s.items || []).length > 0) return;
+  // Nothing left to collect: close it here so a fully-settled table doesn't sit "ended" for no reason.
+  // Another device's tick (or the cashier) may be closing it at the same instant; completeCheckout's
+  // own transaction sorts that out, so a lost race here is expected and silently ignored.
+  await completeCheckout(tableId, { method: 'none' }, user).catch(() => {});
+}
+
+/**
  * Cancel a game within the first CANCEL_WINDOW_MS (5 minutes): the customer changed their mind, so
  * the table fee is ₱0. A running clock stops in the same write (server-stamped); a clock that was
  * already stopped must have run 5 minutes or less. firestore.rules checks the window against server
  * time. Items already on the bill are still owed and are paid at checkout.
+ *
+ * If any part of the booking was already prepaid (js/billing.js paidFee), cancelling within the window
+ * also refunds it, in the same write: a second, append-only transaction with a negative amount, linked
+ * back to the original payment — transactions are never edited or deleted (see firestore.rules).
+ * `refundMethod` ('cash' or 'gcash') says which drawer the money came back out of; it's required only
+ * when there's something to refund.
  */
-export function cancelGame(tableId, { reason, note = '' } = {}, user) {
+export function cancelGame(tableId, { reason, note = '', refundMethod = null } = {}, user) {
   if (!CANCEL_REASONS.includes(reason)) return Promise.reject(new Error('Choose a reason for cancelling.'));
   if (reason === 'Other' && !note.trim()) return Promise.reject(new Error('Add a note explaining why.'));
   return db.transaction(async (tx) => {
@@ -92,10 +217,31 @@ export function cancelGame(tableId, { reason, note = '' } = {}, user) {
       throw new Error('This game has run for more than 5 minutes, so it can no longer be cancelled.');
     }
     const cancelled = { reason, note: note.trim(), byId: user.uid, byName: user.name, at: SERVER_TIME };
-    tx.update('tables', tableId, s.ended
+    const patch = s.ended
       ? { 'session.cancelled': cancelled, updatedAt: SERVER_TIME }
-      : { 'session.ended': true, 'session.endedAt': SERVER_TIME, 'session.cancelled': cancelled, updatedAt: SERVER_TIME });
-    return { tableName: t.name, hasItems: (s.items || []).length > 0 };
+      : { 'session.ended': true, 'session.endedAt': SERVER_TIME, 'session.cancelled': cancelled, updatedAt: SERVER_TIME };
+
+    const owedRefund = round2(paidFee(s));
+    let refunded = false;
+    if (owedRefund > 0 && !s.prepaid.refunded) {
+      if (!['cash', 'gcash'].includes(refundMethod)) throw new Error('Choose how the prepaid amount was refunded.');
+      const id = db.newId('transactions');
+      tx.set('transactions', id, {
+        tableId, tableName: t.name, pricing: null, kind: 'refund', refundOfTxId: s.prepaid.lastTxId,
+        startedAt: s.startedAt, endedAt: SERVER_TIME, durationMs: elapsedMs(t, serverNow()),
+        plannedMs: plannedMs(s), billedMs: null, mode: 'timed',
+        tableFee: -owedRefund, items: [], productTotal: 0, total: -owedRefund,
+        method: refundMethod, payments: refundMethod === 'cash' ? { cash: -owedRefund, gcash: 0 } : { cash: 0, gcash: -owedRefund },
+        tendered: null, change: null, gcashRef: null,
+        cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
+        gameCancelled: true, cancelReason: reason, cancelNote: note.trim(),
+        cancelledById: user.uid, cancelledByName: user.name,
+      });
+      patch['session.prepaid'] = { ...s.prepaid, refunded: true, refundTxId: id };
+      refunded = true;
+    }
+    tx.update('tables', tableId, patch);
+    return { tableName: t.name, hasItems: (s.items || []).length > 0, refunded, refundAmount: owedRefund };
   });
 }
 
@@ -172,10 +318,11 @@ export function gcashRefFor(method, ref) {
   return digits;
 }
 
-/** Thrown when stopping the clock changed the amount due from what the cashier was looking at. */
+/** Thrown when the bill changed from what the cashier was looking at (the clock stopped between
+ * checks, or someone else's payment/edit landed first). `durationMs` is null when nothing was stopped. */
 export class TotalChangedError extends Error {
-  constructor(total, durationMs) {
-    super('The clock has stopped and the final total changed. Check the amount and complete again.');
+  constructor(total, durationMs, message) {
+    super(message || 'The clock has stopped and the final total changed. Check the amount and complete again.');
     this.name = 'TotalChangedError';
     this.total = total;
     this.durationMs = durationMs;
@@ -183,16 +330,26 @@ export class TotalChangedError extends Error {
 }
 
 /**
- * Close the bill.
- * 1. If the clock is still running, stop it (server-stamped end time).
- * 2. In a transaction, re-read the session and bill exactly: fee from the stored start/end stamps.
+ * Pay the bill. Paying never ends a session by itself — only auto-stop reaching the booked time, or
+ * the cashier's own End Session, does that (see js/billing.js dueTableFee). So this only stops the
+ * clock when there's a reason to: Open Time (which must stop to know its final amount) or a Set Hours
+ * booking that has already ended. A Set Hours booking that's still running instead pays whatever is
+ * owed on the BOOKED length — the table fee balance, plus any items on the bill — and keeps going,
+ * exactly as if the cashier had just pressed "Pay balance" mid-session; the table stays In Use and the
+ * timer keeps counting down.
  * method: 'cash' (optional tendered → change), 'gcash', or 'split' (cashPart in cash, rest QRPH).
  * expectedTotal: the total the cashier saw; if the final total differs, nothing is saved and
- * TotalChangedError tells the UI to show the final amount (the clock stays stopped).
+ * TotalChangedError tells the UI to show the final amount.
  */
 export async function completeCheckout(tableId, { method, tendered, cashPart, gcashRef, expectedTotal = null }, user) {
   if (!PAYMENT_METHODS.includes(method) && method !== 'none') throw new Error('Choose a payment method.');
-  gcashRefFor(method, gcashRef); // check before the clock is stopped
+  gcashRefFor(method, gcashRef); // check up front, before anything is touched
+
+  const before = await db.get('tables', tableId);
+  if (before?.session && isTimed(before.session) && !before.session.ended && !before.session.cancelled) {
+    return payRunningBooking(tableId, { method, tendered, cashPart, gcashRef, expectedTotal }, user);
+  }
+
   await endSession(tableId);
 
   return db.transaction(async (tx) => {
@@ -255,6 +412,8 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, gc
         cancelledById: cancelled.byId, cancelledByName: cancelled.byName,
       } : {}),
       ...(s.transfers?.length ? { transfers: s.transfers } : {}),
+      // A prepaid booking: what was already paid (for the receipt) and the sale it was paid on.
+      ...(isPrepaid(s) ? { prepaidAmount: paidFee(s), prepaidTxId: s.prepaid.lastTxId } : {}),
     };
     tx.set('transactions', id, record);
     tx.update('tables', tableId, { status: 'available', session: null, lastTxId: id, updatedAt: SERVER_TIME });
@@ -263,13 +422,95 @@ export async function completeCheckout(tableId, { method, tendered, cashPart, gc
 }
 
 /**
- * Ring up a walk-in sale: items only, no table, no timer, no table fee. The cart lives only in the
- * view until checkout — stock is checked and deducted here, in the same transaction as the sale,
- * exactly like a table checkout, so two terminals still can't oversell stock.
+ * completeCheckout()'s path for a Set Hours booking that's still running: pays the table-fee balance
+ * for the BOOKED length (never on time actually played — see js/billing.js balanceDue) plus any items
+ * on the bill, all in one write, without stopping the clock or freeing the table. Items are cleared
+ * from the bill once paid (their stock is deducted here, same as any other sale); the table fee simply
+ * advances session.prepaid.paidMs. Nothing here can charge the same booked minute twice: the fee is
+ * always the schedule amount for the full booking minus what's already been paid.
  */
-export function completeQuickSale({ items, method, tendered, cashPart, gcashRef }, user) {
+async function payRunningBooking(tableId, { method, tendered, cashPart, gcashRef, expectedTotal }, user) {
+  return db.transaction(async (tx) => {
+    const t = await tx.get('tables', tableId);
+    const s = t?.session;
+    if (!s) throw new Error('This table has already been checked out.');
+    if (s.ended || s.cancelled || !isTimed(s)) {
+      throw new TotalChangedError(null, null, 'This table has changed — reload and try again.');
+    }
+    const items = s.items || [];
+    const products = await Promise.all(items.map((i) => tx.get('products', i.productId)));
+    items.forEach((i, k) => {
+      const p = products[k];
+      if (!p) throw new Error(`${i.name} no longer exists in inventory.`);
+      if (p.stock < i.qty) throw new Error(`Not enough ${i.name} in stock (${p.stock} left).`);
+    });
+
+    const already = paidMs(s);
+    const target = plannedMs(s);
+    const fee = round2(Math.max(0, tableFee(target) - paidFee(s)));
+    const lines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
+    const productTotal = itemsTotal(items);
+    const total = round2(fee + productTotal);
+    if (expectedTotal != null && round2(expectedTotal) !== total) {
+      throw new TotalChangedError(total, null, 'The bill changed. Check the amount and complete again.');
+    }
+
+    // Nothing owed at all (already fully paid, no items on the bill): nothing to record.
+    if (total === 0) return { id: null, total: 0, alreadyPaid: true };
+    if (method === 'none') throw new Error('Choose a payment method.');
+
+    let paid = null;
+    let payments;
+    if (method === 'cash') {
+      paid = tendered == null ? total : round2(tendered);
+      if (paid < total) throw new Error('Cash tendered is less than the total.');
+      payments = { cash: total, gcash: 0 };
+    } else if (method === 'gcash') {
+      payments = { cash: 0, gcash: total };
+    } else if (method === 'split') {
+      const cash = round2(Number(cashPart));
+      if (!(cash > 0) || cash >= total) {
+        throw new Error(`For a split payment, enter a cash amount between ₱0 and the ₱${total.toFixed(2)} total.`);
+      }
+      payments = { cash, gcash: round2(total - cash) };
+    } else {
+      throw new Error('Choose a payment method.');
+    }
+
+    items.forEach((i, k) => tx.update('products', i.productId, { stock: products[k].stock - i.qty, updatedAt: SERVER_TIME }));
+    const id = db.newId('transactions');
+    const record = {
+      tableId, tableName: t.name, pricing: { ...PRICING },
+      startedAt: s.startedAt, endedAt: null, durationMs: null,
+      plannedMs: target, billedMs: null, mode: 'timed', kind: 'prepay',
+      paidFromMs: already, paidToMs: target,
+      tableFee: fee, items: lines, productTotal, total, method, payments,
+      tendered: paid, change: paid == null ? null : round2(paid - total),
+      gcashRef: gcashRefFor(method, gcashRef),
+      cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
+    };
+    tx.set('transactions', id, record);
+    tx.update('tables', tableId, {
+      'session.prepaid': { paidMs: target, lastTxId: id, refunded: false },
+      'session.items': [],
+      updatedAt: SERVER_TIME,
+    });
+    return { id, ...record, createdAt: serverNow() };
+  });
+}
+
+/**
+ * Ring up a walk-in sale: products and/or cue sticks, no table, no timer, no table fee. One cart, one
+ * payment, one transaction — product stock is checked and deducted, and any cue sticks are marked sold
+ * (stock-counted, same as products — see the cueSticks catalog), all in the same transaction, so two
+ * terminals still can't oversell either kind. `items` and `cueItems` land in the sale's one combined
+ * `items` list for the receipt, but keep separate `productTotal`/`cueStickTotal` fields — Reports
+ * (js/reporting.js) always sums those separately, so mixing the cart on one screen never mixes the two
+ * in the books.
+ */
+export function completeQuickSale({ items = [], cueItems = [], method, tendered, cashPart, gcashRef }, user) {
   if (!PAYMENT_METHODS.includes(method)) throw new Error('Choose a payment method.');
-  if (!items || !items.length) throw new Error('Add at least one item to the sale.');
+  if (!items.length && !cueItems.length) throw new Error('Add at least one item to the sale.');
   const ref = gcashRefFor(method, gcashRef);
 
   return db.transaction(async (tx) => {
@@ -279,10 +520,21 @@ export function completeQuickSale({ items, method, tendered, cashPart, gcashRef 
       if (!p) throw new Error(`${i.name} no longer exists in inventory.`);
       if (p.stock < i.qty) throw new Error(`Not enough ${i.name} in stock (${p.stock} left).`);
     });
+    const cues = await Promise.all(cueItems.map((i) => tx.get('cueSticks', i.cueStickId)));
+    cues.forEach((c, k) => {
+      const i = cueItems[k];
+      if (!c) throw new Error(`${i.name} no longer exists in the cue stick catalog.`);
+      // A cue stick from before stock tracking existed may have no stock field yet — treat as 0.
+      const left = Number(c.stock) || 0;
+      if (left < i.qty) throw new Error(`Not enough ${i.name} in stock (${left} left).`);
+    });
 
-    const lines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
+    const productLines = items.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
+    const cueLines = cueItems.map((i) => ({ ...i, total: round2(i.price * i.qty) }));
+    const lines = [...productLines, ...cueLines];
     const productTotal = itemsTotal(items);
-    const total = productTotal;
+    const cueStickTotal = itemsTotal(cueItems);
+    const total = round2(productTotal + cueStickTotal);
 
     let paid = null;
     let payments;
@@ -301,12 +553,13 @@ export function completeQuickSale({ items, method, tendered, cashPart, gcashRef 
     }
 
     items.forEach((i, k) => tx.update('products', i.productId, { stock: products[k].stock - i.qty, updatedAt: SERVER_TIME }));
+    cueItems.forEach((i, k) => tx.update('cueSticks', i.cueStickId, { stock: (Number(cues[k].stock) || 0) - i.qty, updatedAt: SERVER_TIME }));
     const id = db.newId('transactions');
     const record = {
       tableId: null, tableName: null, pricing: null,
       startedAt: null, endedAt: null, durationMs: null,
       plannedMs: null, billedMs: null, mode: null, rounds: 0,
-      tableFee: 0, items: lines, productTotal, total, method, payments,
+      tableFee: 0, items: lines, productTotal, cueStickTotal, total, method, payments,
       tendered: paid, change: paid == null ? null : round2(paid - total),
       gcashRef: ref,
       cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
@@ -388,6 +641,21 @@ export const setGcashQr = (qrImage) =>
   db.set('settings', 'gcash', { qrImage, updatedAt: SERVER_TIME }, { merge: true });
 export const removeGcashQr = () => setGcashQr(null);
 
+/**
+ * Owner-added content for the Showcase TV slideshow (js/views/showcase.js): unlimited Champion
+ * Spotlight / Featured Cue-Product / Promo-Announcement entries — add as many as you like, each gets
+ * its own slide in the rotation. The Live Table Status slide is never editable here — it's always the
+ * real, live table data. Owner/superadmin-only to write; a Display account (the TV itself) can still
+ * read the collection (see firestore.rules showcaseItems/{id}).
+ */
+export function addShowcaseItem(type, data) {
+  return db.add('showcaseItems', { type, enabled: true, ...data, createdAt: SERVER_TIME, updatedAt: SERVER_TIME });
+}
+export function updateShowcaseItem(id, data) {
+  return db.update('showcaseItems', id, { ...data, updatedAt: SERVER_TIME });
+}
+export const removeShowcaseItem = (id) => db.remove('showcaseItems', id);
+
 /* ---------- tables (owner) ---------- */
 
 export function addTable({ name, number }) {
@@ -421,72 +689,36 @@ export function addStock(productId, qty, user) {
 }
 
 /* ---------- cue sticks ---------- */
-// A separate catalog from products: each cue stick is a unique physical item (not counted stock), so
-// selling one just flips it from 'available' to 'sold' rather than decrementing a quantity.
+// A separate catalog from products, but stock-counted the same way — one entry per cue MODEL (e.g.
+// "Predator Sport II"), with a quantity, not one entry per physical stick. Selling decreases stock,
+// exactly like a product; Add Stock tops it back up the same way too.
 
-export function addCueStick({ name, brand, weight, price, photo }) {
+export function addCueStick({ name, brand, weight, price, photo, description, stock, reorderLevel }) {
   return db.add('cueSticks', {
-    name, brand, weight, price, photo: photo || null, status: 'available', createdAt: SERVER_TIME, updatedAt: SERVER_TIME,
+    name, brand, weight, price, photo: photo || null, description: description || '',
+    stock, reorderLevel, createdAt: SERVER_TIME, updatedAt: SERVER_TIME,
   });
 }
 
-export function updateCueStick(cueStickId, { name, brand, weight, price, photo }) {
-  return db.update('cueSticks', cueStickId, { name, brand, weight, price, photo: photo || null, updatedAt: SERVER_TIME });
+export function updateCueStick(cueStickId, { name, brand, weight, price, photo, description, reorderLevel }) {
+  return db.update('cueSticks', cueStickId, {
+    name, brand, weight, price, photo: photo || null, description: description || '', reorderLevel, updatedAt: SERVER_TIME,
+  });
 }
 
-/**
- * Ring up a cue stick sale: one or more specific cues, no table, no timer. Kept apart from Quick
- * Sale/products so it gets its own total in reports. Each cue can only be sold once — the transaction
- * re-checks every one is still 'available' before marking it 'sold', so two terminals can't sell the
- * same physical cue twice.
- */
-export function completeCueStickSale({ items, method, tendered, cashPart, gcashRef }, user) {
-  if (!PAYMENT_METHODS.includes(method)) throw new Error('Choose a payment method.');
-  if (!items || !items.length) throw new Error('Add at least one cue stick to the sale.');
-  const ref = gcashRefFor(method, gcashRef);
-
+export function addCueStock(cueStickId, qty, user) {
   return db.transaction(async (tx) => {
-    const cues = await Promise.all(items.map((i) => tx.get('cueSticks', i.cueStickId)));
-    cues.forEach((c, k) => {
-      if (!c) throw new Error(`${items[k].name} no longer exists.`);
-      if (c.status !== 'available') throw new Error(`${c.name} has already been sold.`);
+    const c = await tx.get('cueSticks', cueStickId);
+    if (!c) throw new Error('Cue stick not found.');
+    // A cue stick added before stock tracking existed may have no stock field at all yet (it was a
+    // unique available/sold item back then) — treat that as 0 rather than writing NaN. This heals the
+    // record the first time anyone restocks it.
+    const before = Number(c.stock) || 0;
+    tx.update('cueSticks', cueStickId, { stock: before + qty, lastRestockedAt: SERVER_TIME, updatedAt: SERVER_TIME });
+    tx.set('restocks', db.newId('restocks'), {
+      cueStickId, cueStickName: c.name, qty, byId: user.uid, byName: user.name, createdAt: SERVER_TIME,
     });
-
-    const lines = items.map((i) => ({ ...i, qty: 1, total: round2(i.price) }));
-    const total = round2(lines.reduce((s, l) => s + l.total, 0));
-
-    let paid = null;
-    let payments;
-    if (method === 'cash') {
-      paid = tendered == null ? total : round2(tendered);
-      if (paid < total) throw new Error('Cash tendered is less than the total.');
-      payments = { cash: total, gcash: 0 };
-    } else if (method === 'gcash') {
-      payments = { cash: 0, gcash: total };
-    } else {
-      const cash = round2(Number(cashPart));
-      if (!(cash > 0) || cash >= total) {
-        throw new Error(`For a split payment, enter a cash amount between ₱0 and the ₱${total.toFixed(2)} total.`);
-      }
-      payments = { cash, gcash: round2(total - cash) };
-    }
-
-    const id = db.newId('transactions');
-    cues.forEach((c, k) => tx.update('cueSticks', items[k].cueStickId, {
-      status: 'sold', soldAt: SERVER_TIME, soldTxId: id, soldByName: user.name, updatedAt: SERVER_TIME,
-    }));
-    const record = {
-      tableId: null, tableName: null, pricing: null,
-      startedAt: null, endedAt: null, durationMs: null,
-      plannedMs: null, billedMs: null, mode: null, rounds: 0,
-      saleType: 'cue-stick',
-      tableFee: 0, productTotal: 0, cueStickTotal: total, items: lines, total, method, payments,
-      tendered: paid, change: paid == null ? null : round2(paid - total),
-      gcashRef: ref,
-      cashierId: user.uid, cashierName: user.name, createdAt: SERVER_TIME,
-    };
-    tx.set('transactions', id, record);
-    return { id, ...record, createdAt: serverNow() };
+    return before + qty;
   });
 }
 

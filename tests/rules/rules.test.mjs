@@ -446,11 +446,11 @@ test('cashiers can never raise stock', async () => {
   await assertFails(updateDoc(doc(as('joy'), 'products/beer'), { stock: 12, updatedAt: serverTimestamp() }));
 });
 
-/* ---------------- cue sticks (a separate catalog from products) ---------------- */
+/* ---------------- cue sticks (a separate catalog from products, stock-tracked like products) ---------------- */
 
 const cueStick = (overrides = {}) => ({
-  name: 'Predator Sport II', brand: 'Predator', weight: '19oz', price: 8500, photo: null,
-  status: 'available', createdAt: ts(Date.now() - MIN), updatedAt: ts(Date.now() - MIN), ...overrides,
+  name: 'Predator Sport II', brand: 'Predator', weight: '19oz', price: 8500, photo: null, description: '',
+  stock: 5, reorderLevel: 2, createdAt: ts(Date.now() - MIN), updatedAt: ts(Date.now() - MIN), ...overrides,
 });
 
 test('owner can add a cue stick; a cashier cannot', async () => {
@@ -463,75 +463,70 @@ test('a cue stick photo over ~900KB is rejected', async () => {
   await assertSucceeds(setDoc(doc(as('owner'), 'cueSticks/small'), cueStick({ photo: 'x'.repeat(1000) })));
 });
 
-test('a cashier can mark an available cue stick sold with a server timestamp, not a fabricated one', async () => {
-  await seed({ 'cueSticks/c1': cueStick() });
-  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
-    status: 'sold', soldAt: ts(Date.now() - MIN), soldTxId: 'x1', soldByName: 'Joy', updatedAt: serverTimestamp(),
-  }));
-  await assertSucceeds(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
-    status: 'sold', soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Joy', updatedAt: serverTimestamp(),
-  }));
+test('a cashier can sell a cue stick by lowering its stock, but never raise it', async () => {
+  await seed({ 'cueSticks/c1': cueStick({ stock: 5 }) });
+  await assertSucceeds(updateDoc(doc(as('joy'), 'cueSticks/c1'), { stock: 4, updatedAt: serverTimestamp() }));
+  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), { stock: 6, updatedAt: serverTimestamp() }));
 });
 
-test('a cashier cannot change any other field while marking a cue stick sold', async () => {
-  await seed({ 'cueSticks/c1': cueStick() });
-  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
-    status: 'sold', price: 1, soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Joy', updatedAt: serverTimestamp(),
-  }));
+test('a cashier cannot change any other field while selling down a cue stick’s stock', async () => {
+  await seed({ 'cueSticks/c1': cueStick({ stock: 5 }) });
+  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), { stock: 4, price: 1, updatedAt: serverTimestamp() }));
 });
 
-test('a cashier cannot sell the same cue stick twice, or un-sell one', async () => {
-  await seed({ 'cueSticks/c1': cueStick({ status: 'sold', soldAt: ts(Date.now() - MIN), soldTxId: 'x0', soldByName: 'Joy' }) });
-  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
-    status: 'sold', soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Bea', updatedAt: serverTimestamp(),
-  }));
-  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), {
-    status: 'available', soldAt: null, soldTxId: null, soldByName: null, updatedAt: serverTimestamp(),
-  }));
+test('a cashier cannot sell a cue stick past zero stock', async () => {
+  await seed({ 'cueSticks/c1': cueStick({ stock: 0 }) });
+  await assertFails(updateDoc(doc(as('joy'), 'cueSticks/c1'), { stock: -1, updatedAt: serverTimestamp() }));
 });
 
-test('the owner can still fix a cue stick’s details after it is sold; only the owner can delete one', async () => {
-  await seed({ 'cueSticks/c1': cueStick({ status: 'sold', soldAt: ts(Date.now() - MIN), soldTxId: 'x0', soldByName: 'Joy' }) });
-  await assertSucceeds(updateDoc(doc(as('owner'), 'cueSticks/c1'), { price: 8000, updatedAt: serverTimestamp() }));
+test('the owner can restock and fix a cue stick’s details; only the owner can delete one', async () => {
+  await seed({ 'cueSticks/c1': cueStick({ stock: 1 }) });
+  await assertSucceeds(updateDoc(doc(as('owner'), 'cueSticks/c1'), { price: 8000, stock: 6, updatedAt: serverTimestamp() }));
   await assertFails(deleteDoc(doc(as('joy'), 'cueSticks/c1')));
   await assertSucceeds(deleteDoc(doc(as('owner'), 'cueSticks/c1')));
 });
 
-/* ---------------- cue stick sale (its own walk-in sale type, apart from Quick Sale) ---------------- */
+/* ---------------- Quick Sale (walk-in, no table): products and cue sticks in one cart ----------------
+ * js/services.js completeQuickSale rings up products and/or cue sticks together; the cue stick catalog
+ * doc itself is independently marked 'sold' (see the cueSticks tests above), not cross-checked here,
+ * the same trust level a Quick Sale's product-stock deduction already gets. */
 
-function cueStickSale(fs, {
-  cueStickTotal = 8500, fee = 0, productTotal = 0, total = cueStickTotal, cashier = 'joy', createdAt = serverTimestamp(), txId = 'cs1', extra = {},
+const round2m = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+function mixedSale(fs, {
+  cueStickTotal = 8500, fee = 0, productTotal = 0, total = round2m(productTotal + cueStickTotal),
+  cashier = 'joy', createdAt = serverTimestamp(), txId = 'qs1', extra = {},
 }) {
+  const items = [];
+  if (productTotal) items.push({ productId: 'beer', name: 'Beer', category: 'Beverages', price: productTotal, qty: 1, total: productTotal });
+  if (cueStickTotal) items.push({ cueStickId: 'c1', name: 'Predator Sport II', brand: 'Predator', price: cueStickTotal, qty: 1, total: cueStickTotal });
   return setDoc(doc(fs, 'transactions', txId), {
     tableId: null, tableName: null, pricing: null,
     startedAt: null, endedAt: null, durationMs: null,
     plannedMs: null, billedMs: null, mode: null, rounds: 0,
-    saleType: 'cue-stick',
-    tableFee: fee, productTotal, cueStickTotal,
-    items: [{ cueStickId: 'c1', name: 'Predator Sport II', brand: 'Predator', price: 8500, qty: 1, total: 8500 }],
-    total, method: 'cash', payments: { cash: total, gcash: 0 }, tendered: total, change: 0,
+    tableFee: fee, productTotal, cueStickTotal, items, total,
+    method: 'cash', payments: { cash: total, gcash: 0 }, tendered: total, change: 0,
     cashierId: cashier, cashierName: 'Joy', createdAt, ...extra,
   });
 }
-
-test('cue stick sale: a walk-in sale with no table fee and no product total is allowed', async () => {
-  await assertSucceeds(cueStickSale(as('joy'), {}));
+test('quick sale: a cue-stick-only walk-in sale, no table fee, is allowed', async () => {
+  await assertSucceeds(mixedSale(as('joy'), {}));
 });
 
-test('cue stick sale: a fabricated table fee is rejected', async () => {
-  await assertFails(cueStickSale(as('joy'), { fee: 200, total: 8700 }));
+test('quick sale: a fabricated table fee is rejected — walk-ins never have one', async () => {
+  await assertFails(mixedSale(as('joy'), { fee: 200, total: 8700 }));
 });
 
-test('cue stick sale: total must equal cueStickTotal exactly', async () => {
-  await assertFails(cueStickSale(as('joy'), { total: 8000 }));
+test('quick sale: total must equal productTotal + cueStickTotal exactly', async () => {
+  await assertFails(mixedSale(as('joy'), { total: 8000 }));
 });
 
-test('cue stick sale: a fabricated product total is rejected — it stays apart from Quick Sale', async () => {
-  await assertFails(cueStickSale(as('joy'), { productTotal: 100, total: 8600 }));
+test('quick sale: a cart mixing a product and a cue stick is allowed, and both totals must add up', async () => {
+  await assertSucceeds(mixedSale(as('joy'), { productTotal: 85, cueStickTotal: 8500, total: 8585 }));
+  await assertFails(mixedSale(as('joy'), { productTotal: 85, cueStickTotal: 8500, total: 8600 }));
 });
 
-test('cue stick sale: cashier can’t record it under someone else’s name', async () => {
-  await assertFails(cueStickSale(as('joy'), { cashier: 'bea' }));
+test('quick sale: cashier can’t record it under someone else’s name', async () => {
+  await assertFails(mixedSale(as('joy'), { cashier: 'bea' }));
 });
 
 /* ---------------- transfer table ----------------
@@ -721,13 +716,37 @@ test('clock probe and presence must use server time', async () => {
 /* ---------------- display role (an unattended screen, e.g. a TV running Showcase) ---------------- */
 
 test('a display account can read tables and cue sticks, same as any staff', async () => {
-  await seed({ 'tables/t1': freeTable, 'cueSticks/c1': { name: 'Cue', status: 'available', price: 1000 } });
+  await seed({ 'tables/t1': freeTable, 'cueSticks/c1': { name: 'Cue', stock: 3, price: 1000 } });
   const tv = as('tv');
   await assertSucceeds(getDoc(doc(tv, 'tables/t1')));
   await assertSucceeds(getDoc(doc(tv, 'cueSticks/c1')));
 });
 
-test('a display account cannot read products, transactions, expenses, settings or other staff', async () => {
+// showcaseItems: the owner's unlimited Champion/Featured/Promo entries (js/dialogs.js
+// manageShowcaseDialog). A display account (the TV running Showcase) reads them; only owner-level writes.
+test('a display account can read (but not write) showcaseItems; the owner can add as many as they like', async () => {
+  await seed({ 'showcaseItems/s1': { type: 'champion', enabled: true, playerName: 'Test Player' } });
+  const tv = as('tv');
+  await assertSucceeds(getDoc(doc(tv, 'showcaseItems/s1')));
+  await assertFails(updateDoc(doc(tv, 'showcaseItems/s1'), { enabled: false }));
+  await assertFails(setDoc(doc(tv, 'showcaseItems/s2'), { type: 'promo', headline: 'x' }));
+  const owner = as('owner');
+  await assertSucceeds(setDoc(doc(owner, 'showcaseItems/s2'), { type: 'promo', enabled: true, headline: 'Exhibition game' }));
+  await assertSucceeds(setDoc(doc(owner, 'showcaseItems/s3'), { type: 'promo', enabled: true, headline: 'Another one' }));
+  await assertSucceeds(updateDoc(doc(owner, 'showcaseItems/s1'), { enabled: false }));
+  await assertSucceeds(deleteDoc(doc(owner, 'showcaseItems/s3')));
+});
+
+test('showcaseItems: a cashier can read but not write; an unknown type or an oversized photo is refused', async () => {
+  await seed({ 'showcaseItems/s1': { type: 'champion', enabled: true, playerName: 'Test Player' } });
+  await assertSucceeds(getDoc(doc(as('joy'), 'showcaseItems/s1')));
+  await assertFails(setDoc(doc(as('joy'), 'showcaseItems/s9'), { type: 'promo', headline: 'nope' }));
+  const owner = as('owner');
+  await assertFails(setDoc(doc(owner, 'showcaseItems/bad'), { type: 'banner', headline: 'x' }));
+  await assertFails(setDoc(doc(owner, 'showcaseItems/big'), { type: 'promo', headline: 'x', photo: 'a'.repeat(900001) }));
+});
+
+test('a display account cannot read products, transactions, expenses, other settings or other staff', async () => {
   await seed({
     'transactions/x1': { tableId: null, tableFee: 0, productTotal: 0, total: 0, method: 'none', cashierId: 'joy', cashierName: 'Joy', createdAt: ts(Date.now()) },
     'expenses/e1': { description: 'Ice', amount: 50, cashierId: 'joy', cashierName: 'Joy', createdAt: ts(Date.now()) },
@@ -742,12 +761,10 @@ test('a display account cannot read products, transactions, expenses, settings o
 });
 
 test('a display account cannot start, end or otherwise write a table, or sell a cue stick', async () => {
-  await seed({ 'tables/t1': freeTable, 'cueSticks/c1': { name: 'Cue', status: 'available', price: 1000 } });
+  await seed({ 'tables/t1': freeTable, 'cueSticks/c1': { name: 'Cue', stock: 3, price: 1000 } });
   const tv = as('tv');
   await assertFails(updateDoc(doc(tv, 'tables/t1'), { status: 'in_use', session: newSession(0), updatedAt: serverTimestamp() }));
-  await assertFails(updateDoc(doc(tv, 'cueSticks/c1'), {
-    status: 'sold', soldAt: serverTimestamp(), soldTxId: 'x1', soldByName: 'Lobby TV', updatedAt: serverTimestamp(),
-  }));
+  await assertFails(updateDoc(doc(tv, 'cueSticks/c1'), { stock: 2, updatedAt: serverTimestamp() }));
 });
 
 test('a display account can still update only its own presence, like any signed-in account', async () => {

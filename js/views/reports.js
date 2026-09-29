@@ -3,11 +3,12 @@
 //                   expense log, and the end-of-shift cash count. Cashiers see only this tab.
 //   Custom range  — totals, sales vs expenses by day, and every expense in a date range (owner).
 //   Monthly       — the month's totals, sales trend, revenue by table and top products (owner).
-// Every tab: pickers on the left, Export CSV / Print on the right, one row of number cards, plain tables.
+// Every tab: pickers on the left, Export Excel / Print on the right, one row of number cards, plain tables.
 import { db } from '../db.js';
 import { state, on } from '../state.js';
 import * as rep from '../reporting.js';
 import * as svc from '../services.js';
+import { reportSheet, downloadReportXlsx, money } from '../xlsx.js';
 import { barChart } from './charts.js';
 import { receiptDialog, printerDialog, thermalPreviewDialog, cashDrawerDialog, openDrawerDialog } from '../dialogs.js';
 import * as printer from '../printer.js';
@@ -85,15 +86,8 @@ const stat = (label, value) => `
 
 const hourLabel = (h) => new Date(2000, 0, 1, h).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
 const refNo = (id) => String(id).slice(-6).toUpperCase();
-const saleLabel = (x) => (x.tableId ? x.tableName : x.saleType === 'cue-stick' ? 'Cue Stick' : 'Walk-in');
+const saleLabel = rep.saleLabel;
 const longDate = (key) => rep.keyLabel(key, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-
-function paymentLabel(tx) {
-  const p = rep.paymentsOf(tx);
-  const ref = tx.gcashRef ? ` (Ref ${esc(tx.gcashRef)})` : '';
-  if (p.cash > 0 && p.gcash > 0) return `Cash ${peso(p.cash)} + QRPH ${peso(p.gcash)}${ref}`;
-  return `${METHOD_LABEL[tx.method] || esc(tx.method)}${ref}`;
-}
 
 /** Listen to sales and expenses in [start, end); calls back once both have loaded, and on every change. */
 function listenRange(start, end, cb) {
@@ -109,19 +103,14 @@ function listenRange(start, end, cb) {
   return () => offs.forEach((off) => off());
 }
 
-function downloadCsv(filename, rows) {
-  const blob = new Blob(['﻿', rep.toCsv(rows)], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+/** Build+download a formatted .xlsx from a reportSheet(), disabling the button while the (lazy-loaded)
+ * export library fetches and the file is written; busy() itself toasts an error if that fails (e.g. offline). */
+const exportXlsx = (btn, filename, sheetName, sheet, opts) =>
+  busy(btn, () => downloadReportXlsx(filename, sheetName, sheet, opts));
 
 const actionButtons = (thermal = false) => `
   <div class="report-controls__actions">
-    <button type="button" class="btn btn--neutral" data-action="csv">${icon('download')}Export CSV</button>
+    <button type="button" class="btn btn--neutral" data-action="xlsx">${icon('download')}Export Excel</button>
     ${thermal ? `
     <button type="button" class="btn btn--neutral" data-action="thermal-preview">${icon('eye')}Preview (thermal)</button>
     <button type="button" class="btn btn--neutral" data-action="thermal">${icon('receipt')}Print (thermal)</button>` : ''}
@@ -146,6 +135,8 @@ const payStrip = (t) => `
     <div><dt>QRPH collected</dt><dd class="num">${peso(t.gcash)}</dd></div>
     <div><dt>Total collected</dt><dd class="num">${peso(t.total)}</dd></div>
     <div><dt>Net after expenses</dt><dd class="num">${peso(t.net)}</dd></div>
+    <div class="pay-strip__split"><dt>Bar Counter sales</dt><dd class="num">${peso(t.productTotal)}</dd></div>
+    <div><dt>Cue Stick sales</dt><dd class="num">${peso(t.cueStickTotal)}</dd></div>
   </dl>`;
 
 function expenseTable(expenses, { owner, withDate = false, withShift = false }) {
@@ -197,11 +188,12 @@ function confirmRemoveExpense(expense) {
   });
 }
 
-/** Shared click handling for a tab: CSV, print, receipts, expense removal. */
-function wireCommon(panel, { csv, txs, expenses }) {
+/** Shared click handling for a tab: Excel export, print, receipts, expense removal. */
+function wireCommon(panel, { xlsx, txs, expenses }) {
   const handler = (e) => {
-    const action = e.target.closest('[data-action]')?.dataset.action;
-    if (action === 'csv') csv();
+    const actionBtn = e.target.closest('[data-action]');
+    const action = actionBtn?.dataset.action;
+    if (action === 'xlsx') xlsx(actionBtn);
     if (action === 'print') window.print();
     const txBtn = e.target.closest('[data-tx-id]');
     const tx = txBtn && txs()?.find((x) => x.id === txBtn.dataset.txId);
@@ -344,7 +336,7 @@ function dailyTab(panel, ctx) {
 
   function salesSheet() {
     const t = rep.totals(txs);
-    const cols = 12;
+    const cols = 14;
     return `
       <div class="table-wrap">
         <table class="sheet">
@@ -358,13 +350,16 @@ function dailyTab(panel, ctx) {
             <th scope="col" class="t-right">Table fee</th>
             <th scope="col" class="t-right">Products</th>
             <th scope="col" class="t-right">Paid</th>
-            <th scope="col">Payment</th>
+            <th scope="col" class="t-right">Cash</th>
+            <th scope="col" class="t-right">QRPH</th>
             <th scope="col">Staff</th>
             <th scope="col">Remarks</th>
             <th scope="col" class="no-print"><span class="sr-only">Receipt</span></th>
           </tr></thead>
           <tbody>
-            ${txs.length ? txs.map((x) => `
+            ${txs.length ? txs.map((x) => {
+              const p = rep.paymentsOf(x);
+              return `
             <tr>
               <th scope="row" class="cell-nowrap">${esc(saleLabel(x))}</th>
               <td class="cell-nowrap">${refNo(x.id)}</td>
@@ -373,13 +368,15 @@ function dailyTab(panel, ctx) {
               <td class="cell-nowrap">${x.tableId ? (x.plannedMs ? fmtBooking(x.plannedMs) : 'Open') : ''}</td>
               <td class="cell-nowrap">${x.tableId ? fmtHuman(x.durationMs || 0) : ''}</td>
               <td class="t-right num">${x.tableId ? peso(x.tableFee) : ''}</td>
-              <td class="t-right num">${x.productTotal || x.cueStickTotal ? peso(x.productTotal || x.cueStickTotal) : ''}</td>
+              <td class="t-right num">${x.productTotal || x.cueStickTotal ? peso((x.productTotal || 0) + (x.cueStickTotal || 0)) : ''}</td>
               <td class="t-right num">${peso(x.total)}</td>
-              <td class="cell-nowrap">${paymentLabel(x)}</td>
+              <td class="t-right num">${p.cash > 0 ? peso(p.cash) : ''}</td>
+              <td class="t-right num">${p.gcash > 0 ? `${peso(p.gcash)}${x.gcashRef ? `<span class="cell-sub">Ref ${esc(x.gcashRef)}</span>` : ''}` : ''}</td>
               <td class="cell-nowrap">${esc(x.cashierName)}</td>
               <td>${esc(rep.cancelInfo(x)?.remark ?? '')}</td>
               <td class="no-print"><button type="button" class="link-btn" data-tx-id="${esc(x.id)}" aria-label="View receipt ${refNo(x.id)}">Receipt</button></td>
-            </tr>`).join('') : `<tr><td colspan="${cols + 1}" class="sheet__empty">No sales ${shift === 'full' ? 'this business day' : 'this shift'} yet.</td></tr>`}
+            </tr>`;
+            }).join('') : `<tr><td colspan="${cols + 1}" class="sheet__empty">No sales ${shift === 'full' ? 'this business day' : 'this shift'} yet.</td></tr>`}
           </tbody>
           ${txs.length ? `
           <tfoot><tr>
@@ -387,7 +384,9 @@ function dailyTab(panel, ctx) {
             <td class="t-right num">${peso(t.tableFee)}</td>
             <td class="t-right num">${peso(t.productTotal + t.cueStickTotal)}</td>
             <td class="t-right num">${peso(t.total)}</td>
-            <td colspan="3"></td>
+            <td class="t-right num">${peso(t.cash)}</td>
+            <td class="t-right num">${peso(t.gcash)}</td>
+            <td colspan="2"></td>
             <td class="no-print"></td>
           </tr></tfoot>` : ''}
         </table>
@@ -440,7 +439,7 @@ function dailyTab(panel, ctx) {
       <div class="stats stats--6 no-print">
         ${stat('Table sessions', sessions)}
         ${stat('Table revenue', peso(t.tableFee))}
-        ${stat('Product sales', peso(t.productTotal))}
+        ${stat('Bar Counter sales', peso(t.productTotal))}
         ${stat('Cue stick sales', peso(t.cueStickTotal))}
         ${stat('Expenses', peso(t.expenses))}
         ${stat('Net sales', peso(t.net))}
@@ -457,32 +456,37 @@ function dailyTab(panel, ctx) {
       </section>`;
   }
 
-  function csv() {
+  function xlsx(btn) {
     if (!txs || !expenses) return;
     const t = rep.totals(txs, expenses);
     const withShift = twoShifts();
-    downloadCsv(`golden-break-daily-${key}${shift === 'full' ? '' : `-${shift}`}.csv`, [
-      [HALL], ['Daily Sales Report'], [`Date: ${longDate(key)}`, `Time: ${timeText()}`, shiftName()], [],
-      ['Table', 'Ref #', 'Start', 'End', 'Booked', 'Played (min)', 'Table fee', 'Products', 'Paid', 'Payment', 'Cash', 'QRPH', 'QRPH ref (last 5)', 'Staff', 'Remarks'],
-      ...txs.map((x) => {
-        const p = rep.paymentsOf(x);
-        return [
-          saleLabel(x), refNo(x.id), fmtTime(x.tableId ? x.startedAt : x.createdAt),
-          x.tableId ? fmtTime(x.endedAt) : '', x.tableId ? (x.plannedMs ? fmtBooking(x.plannedMs) : 'Open') : '',
-          x.tableId ? Math.round((x.durationMs || 0) / 60000) : '', x.tableId ? x.tableFee : '', x.productTotal || x.cueStickTotal || 0, x.total,
-          METHOD_LABEL[x.method] || x.method, p.cash, p.gcash, x.gcashRef || '', x.cashierName,
-          rep.cancelInfo(x)?.remark ?? '',
-        ];
-      }),
-      ['Totals', '', '', '', '', '', t.tableFee, t.productTotal + t.cueStickTotal, t.total, '', t.cash, t.gcash, '', '', ''],
-      [], ['Expenses'], ['Time', ...(withShift ? ['Shift'] : []), 'What for', 'Staff', 'Amount'],
-      ...expenses.map((e) => [fmtTime(e.createdAt), ...(withShift ? [rep.SHIFT_SHORT[rep.shiftOf(e.createdAt)]] : []), e.description, e.cashierName, e.amount]),
-      ['Total expenses', ...(withShift ? [''] : []), '', '', t.expenses],
-      [], ['Summary'],
-      ['Cash collected', t.cash], ['Expenses', t.expenses], ['Net cash (cash to count)', t.cashToCount],
-      ['QRPH collected', t.gcash], ['Total collected', t.total], ['Net after expenses', t.net],
-      ['Overall Sale', t.net],
-    ]);
+    const sheet = reportSheet()
+      .title(HALL).subtitle('Daily Sales Report').meta(`Date: ${longDate(key)}`, `Time: ${timeText()}`, shiftName()).blank()
+      .header('Table', 'Ref #', 'Start', 'End', 'Booked', 'Played (min)', 'Table fee', 'Products', 'Paid', 'Payment', 'Cash', 'QRPH', 'QRPH ref (last 5)', 'Staff', 'Remarks');
+    txs.forEach((x) => {
+      const p = rep.paymentsOf(x);
+      sheet.row(
+        saleLabel(x), refNo(x.id), fmtTime(x.tableId ? x.startedAt : x.createdAt),
+        x.tableId ? fmtTime(x.endedAt) : '', x.tableId ? (x.plannedMs ? fmtBooking(x.plannedMs) : 'Open') : '',
+        x.tableId ? Math.round((x.durationMs || 0) / 60000) : '', x.tableId ? money(x.tableFee) : '',
+        money((x.productTotal || 0) + (x.cueStickTotal || 0)), money(x.total),
+        METHOD_LABEL[x.method] || x.method, money(p.cash), money(p.gcash), x.gcashRef || '', x.cashierName,
+        rep.cancelInfo(x)?.remark ?? '',
+      );
+    });
+    sheet.total('Totals', '', '', '', '', '', money(t.tableFee), money(t.productTotal + t.cueStickTotal), money(t.total), '', money(t.cash), money(t.gcash), '', '', '')
+      .blank().section('Expenses').header('Time', ...(withShift ? ['Shift'] : []), 'What for', 'Staff', 'Amount');
+    expenses.forEach((e) => sheet.row(fmtTime(e.createdAt), ...(withShift ? [rep.SHIFT_SHORT[rep.shiftOf(e.createdAt)]] : []), e.description, e.cashierName, money(e.amount)));
+    sheet.total('Total expenses', ...(withShift ? [''] : []), '', '', money(t.expenses))
+      .blank().section('Summary')
+      // Bar Counter / Cue Stick sales sit to the right of the cash figures, same as the on-screen and
+      // printed pay-strip (see payStrip() above) — a blank column C keeps them visually separate.
+      .row('Cash collected', money(t.cash), '', 'Bar Counter sales', money(t.productTotal))
+      .row('Expenses', money(t.expenses), '', 'Cue Stick sales', money(t.cueStickTotal))
+      .row('Net cash (cash to count)', money(t.cashToCount))
+      .row('QRPH collected', money(t.gcash)).row('Total collected', money(t.total)).row('Net after expenses', money(t.net))
+      .total('Overall Sale', money(t.net));
+    exportXlsx(btn, `golden-break-daily-${key}${shift === 'full' ? '' : `-${shift}`}.xlsx`, 'Daily Sales', sheet);
   }
 
   /* ---------- events ---------- */
@@ -556,7 +560,7 @@ function dailyTab(panel, ctx) {
   panel.addEventListener('change', onChange);
   panel.addEventListener('input', onInput);
   panel.addEventListener('click', onClick);
-  const offCommon = wireCommon(panel, { csv, txs: () => txs, expenses: () => expenses });
+  const offCommon = wireCommon(panel, { xlsx, txs: () => txs, expenses: () => expenses });
 
   /** One shift → always the full business day. Two shifts → default to the shift on duty now. */
   const offSettings = on('settings', () => {
@@ -610,7 +614,7 @@ function chartCard(title, sub, days, today) {
         <div><h2 class="card-title">${title}</h2><p class="card-sub">${sub}</p></div>
         <ul class="legend" aria-label="Legend">
           <li><span class="swatch swatch--felt" aria-hidden="true"></span>Table revenue</li>
-          <li><span class="swatch swatch--amber" aria-hidden="true"></span>Product sales</li>
+          <li><span class="swatch swatch--amber" aria-hidden="true"></span>Bar Counter sales</li>
         </ul>
       </div>
       <div class="chart">${barChart(chartDays)}</div>
@@ -660,7 +664,7 @@ function rangeTab(panel, ctx) {
       <div class="stats stats--6">
         ${stat('Table sessions', sessions)}
         ${stat('Table revenue', peso(t.tableFee))}
-        ${stat('Product sales', peso(t.productTotal))}
+        ${stat('Bar Counter sales', peso(t.productTotal))}
         ${stat('Cue stick sales', peso(t.cueStickTotal))}
         ${stat('Total sales', peso(t.total))}
         ${stat('Expenses', peso(t.expenses))}
@@ -733,18 +737,20 @@ function rangeTab(panel, ctx) {
       </section>` : ''}`;
   }
 
-  function csv() {
+  function xlsx(btn) {
     if (!txs || !expenses) return;
     const t = rep.totals(txs, expenses);
-    downloadCsv(`golden-break-range-${fromKey}_to_${toKey}.csv`, [
-      [HALL], ['Sales Report'], [rangeLabel()], [],
-      ['Date', 'Table revenue', 'Product sales', 'Cue stick sales', 'Sales', 'Cash', 'QRPH', 'Expenses', 'Net'],
-      ...rep.byDay(txs, fromKey, toKey, expenses).map((d) => [d.key, d.tableFee, d.productTotal, d.cueStickTotal, d.total, d.cash, d.gcash, d.expenses, d.net]),
-      ['Total', t.tableFee, t.productTotal, t.cueStickTotal, t.total, t.cash, t.gcash, t.expenses, t.net],
-      [], ['Expenses'], ['Date', 'Time', 'What for', 'Staff', 'Amount'],
-      ...expenses.map((e) => [rep.dayKey(e.createdAt), fmtTime(e.createdAt), e.description, e.cashierName, e.amount]),
-      ['Total expenses', '', '', '', t.expenses],
-    ]);
+    const sheet = reportSheet()
+      .title(HALL).subtitle('Sales Report').meta(rangeLabel()).blank()
+      .header('Date', 'Table revenue', 'Bar Counter sales', 'Cue stick sales', 'Sales', 'Cash', 'QRPH', 'Expenses', 'Net');
+    rep.byDay(txs, fromKey, toKey, expenses).forEach((d) => sheet.row(
+      d.key, money(d.tableFee), money(d.productTotal), money(d.cueStickTotal), money(d.total), money(d.cash), money(d.gcash), money(d.expenses), money(d.net),
+    ));
+    sheet.total('Total', money(t.tableFee), money(t.productTotal), money(t.cueStickTotal), money(t.total), money(t.cash), money(t.gcash), money(t.expenses), money(t.net))
+      .blank().section('Expenses').header('Date', 'Time', 'What for', 'Staff', 'Amount');
+    expenses.forEach((e) => sheet.row(rep.dayKey(e.createdAt), fmtTime(e.createdAt), e.description, e.cashierName, money(e.amount)));
+    sheet.total('Total expenses', '', '', '', money(t.expenses));
+    exportXlsx(btn, `golden-break-range-${fromKey}_to_${toKey}.xlsx`, 'Sales Report', sheet);
   }
 
   function setRange(from, to) {
@@ -763,7 +769,7 @@ function rangeTab(panel, ctx) {
   }
   fromInput.addEventListener('change', () => setRange(fromInput.value, toInput.value || fromInput.value));
   toInput.addEventListener('change', () => setRange(fromInput.value || toInput.value, toInput.value));
-  const offCommon = wireCommon(panel, { csv, txs: () => txs, expenses: () => expenses });
+  const offCommon = wireCommon(panel, { xlsx, txs: () => txs, expenses: () => expenses });
 
   subscribe();
   return () => { unlisten(); offCommon(); };
@@ -833,7 +839,7 @@ function monthlyTab(panel) {
       <div class="stats stats--6">
         ${stat('Total sales', peso(t.total))}
         ${stat('Table revenue', peso(t.tableFee))}
-        ${stat('Product sales', peso(t.productTotal))}
+        ${stat('Bar Counter sales', peso(t.productTotal))}
         ${stat('Cue stick sales', peso(t.cueStickTotal))}
         ${stat('Expenses', peso(t.expenses))}
         ${stat('Net sales', peso(t.net))}
@@ -858,21 +864,23 @@ function monthlyTab(panel) {
       </section>`;
   }
 
-  function csv() {
+  function xlsx(btn) {
     if (!txs || !expenses) return;
     const t = rep.totals(txs, expenses);
     const [first, last] = bounds();
-    downloadCsv(`golden-break-monthly-${month}.csv`, [
-      [HALL], ['Monthly Report'], [monthLabel()], [],
-      ['Total sales', t.total], ['Table revenue', t.tableFee], ['Product sales', t.productTotal], ['Cue stick sales', t.cueStickTotal],
-      ['Expenses', t.expenses], ['Net sales', t.net], ['Hours played', (t.durationMs / 3600000).toFixed(1)],
-      [], ['Date', 'Table revenue', 'Product sales', 'Cue stick sales', 'Sales', 'Expenses', 'Net'],
-      ...rep.byDay(txs, first, last, expenses).map((d) => [d.key, d.tableFee, d.productTotal, d.cueStickTotal, d.total, d.expenses, d.net]),
-      [], ['Table', 'Sessions', 'Hours played', 'Revenue'],
-      ...byTable().map((r) => [r.name, r.sessions, (r.durationMs / 3600000).toFixed(1), r.revenue]),
-      [], ['Product', 'Qty', 'Revenue'],
-      ...rep.topProducts(txs, 1000).map((p) => [p.name, p.qty, p.revenue]),
-    ]);
+    const sheet = reportSheet()
+      .title(HALL).subtitle('Monthly Report').meta(monthLabel()).blank()
+      .section('Summary')
+      .row('Total sales', money(t.total)).row('Table revenue', money(t.tableFee)).row('Bar Counter sales', money(t.productTotal))
+      .row('Cue stick sales', money(t.cueStickTotal)).row('Expenses', money(t.expenses)).row('Net sales', money(t.net))
+      .row('Hours played', Number((t.durationMs / 3600000).toFixed(1)))
+      .blank().section('By day').header('Date', 'Table revenue', 'Bar Counter sales', 'Cue stick sales', 'Sales', 'Expenses', 'Net');
+    rep.byDay(txs, first, last, expenses).forEach((d) => sheet.row(d.key, money(d.tableFee), money(d.productTotal), money(d.cueStickTotal), money(d.total), money(d.expenses), money(d.net)));
+    sheet.blank().section('By table').header('Table', 'Sessions', 'Hours played', 'Revenue');
+    byTable().forEach((r) => sheet.row(r.name, r.sessions, Number((r.durationMs / 3600000).toFixed(1)), money(r.revenue)));
+    sheet.blank().section('Top products').header('Product', 'Qty', 'Revenue');
+    rep.topProducts(txs, 1000).forEach((p) => sheet.row(p.name, p.qty, money(p.revenue)));
+    exportXlsx(btn, `golden-break-monthly-${month}.xlsx`, 'Monthly Report', sheet);
   }
 
   monthInput.addEventListener('change', () => {
@@ -881,7 +889,7 @@ function monthlyTab(panel) {
     monthInput.value = month;
     subscribe();
   });
-  const offCommon = wireCommon(panel, { csv, txs: () => txs, expenses: () => expenses });
+  const offCommon = wireCommon(panel, { xlsx, txs: () => txs, expenses: () => expenses });
 
   subscribe();
   return () => { unlisten(); offCommon(); };

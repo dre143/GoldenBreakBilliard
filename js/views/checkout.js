@@ -1,10 +1,11 @@
 import { state, on } from '../state.js';
 import * as svc from '../services.js';
 import {
-  elapsedMs, tableFee, sessionFee, billSession, itemsTotal, itemsCount, round2, feeBreakdown, PRICING, PRICING_LABEL,
+  elapsedMs, tableFee, billSession, dueTableFee, itemsTotal, itemsCount, round2, feeBreakdown, PRICING, PRICING_LABEL,
   isTimed, plannedMs, remainingMs, overtimeMs, canCancelGame, cancelTimeLeft, canExtendEndedSession, bookingEndsAt,
+  isPrepaid, paidMs, balanceDue, paidFee,
 } from '../billing.js';
-import { receiptDialog, bookingDialog, cancelGameDialog } from '../dialogs.js';
+import { receiptDialog, bookingDialog, cancelGameDialog, bookingPaymentDialog } from '../dialogs.js';
 import * as printer from '../printer.js';
 import { updateTableTimers } from './shared.js';
 import { poolCard } from './pool-card.js';
@@ -119,6 +120,7 @@ function mountBill(el, ctx, tableId) {
               </div>
             </div>
             ${gcashRefField()}
+            <p class="field__hint" data-region="complete-hint" hidden></p>
             <button type="button" class="btn btn--amber btn--block btn--lg" data-action="complete">${icon('check')}Complete Transaction</button>
           </section>
         </aside>
@@ -147,6 +149,9 @@ function mountBill(el, ctx, tableId) {
         <div class="timer-panel__top">
           <span class="eyebrow">Elapsed time · ${esc(t.name)}</span>
           ${s.cancelled ? '<span class="badge badge--danger">Game cancelled</span>' : s.ended ? '<span class="badge badge--ended">Session Ended</span>' : statusBadge(t.status)}
+          ${isTimed(s) && !s.cancelled && isPrepaid(s)
+            ? (balanceDue(s) > 0 ? `<span class="badge badge--in-use">Balance ${peso(balanceDue(s))}</span>` : '<span class="badge badge--available">Paid</span>')
+            : ''}
         </div>
         ${s.cancelled ? `
         <p class="cancel-note">Cancelled by ${esc(s.cancelled.byName)} (${esc(s.cancelled.reason)}). No table fee. Take payment for the items below.</p>` : ''}
@@ -166,7 +171,7 @@ function mountBill(el, ctx, tableId) {
           ${isTimed(s) ? `<button type="button" class="btn btn--light" data-action="extend" data-fk="extend">${icon('clock')}Add time</button>` : ''}
           ${s.ended ? '<span class="timer-panel__hint">Added time starts now. Time spent waiting is not charged.</span>' : `
           <button type="button" class="btn btn--end" data-action="end" data-fk="end">${icon('stop')}End Session</button>
-          <span class="timer-panel__hint">Ending stops the clock for billing.</span>`}
+          <span class="timer-panel__hint">${isPrepaid(s) ? 'Unused prepaid time is forfeited (no refund) once the first 5 minutes have passed.' : 'Ending stops the clock for billing.'}</span>`}
         </div>`}`;
     });
   }
@@ -235,23 +240,34 @@ function mountBill(el, ctx, tableId) {
     const s = t.session;
     const ms = elapsedMs(t);
     if (canCancelGame(t) !== cancelShown) renderTimer(t); // the 5-minute cancel window just closed
-    const bill = billSession(s, ms); // the one authoritative calculation: fee, billed time, grace state
-    const billed = bill.billedMs; // = time actually played; the booking never raises the bill
-    const fee = bill.tableFee; // ₱0 once the game was cancelled
+    const bill = billSession(s, ms); // played-time details (grace, next fee step) — not the amount due
+    const stillRunning = isTimed(s) && !s.ended && !s.cancelled;
+    // What Complete Transaction will actually charge: for a Set Hours booking that's still running,
+    // that's the booked length's balance, not however little has been played so far (see dueTableFee
+    // in js/billing.js) — paying here never ends the session; only auto-stop or End Session does.
+    const fee = dueTableFee(s, ms);
     const total = round2(fee + itemsTotal(s.items));
     const setText = (key, v) => { const n = $(`[data-live=${key}]`); if (n) n.textContent = v; };
     setText('elapsed', fmtDuration(ms));
     setText('cancel-left', fmtCountdown(cancelTimeLeft(t)));
     setText('dur', isTimed(s) ? `${fmtDuration(ms)} played, ${fmtBooking(plannedMs(s))} booked` : `${fmtDuration(ms)} played`);
-    setText('breakdown', s.cancelled ? 'game cancelled, no charge' : feeBreakdown(billed));
+    setText('breakdown', s.cancelled ? 'game cancelled, no charge'
+      : stillRunning ? `${feeBreakdown(plannedMs(s))}${isPrepaid(s) ? ` · ${peso(paidFee(s))} already paid` : ''}`
+      : isPrepaid(s) ? `${feeBreakdown(bill.billedMs)} · ${peso(paidFee(s))} already paid` : feeBreakdown(bill.billedMs));
     setText('fee', peso(fee));
     if (isTimed(s)) {
       const over = overtimeMs(s, ms);
       setText('booking', over > 0 ? `Extra time +${fmtDuration(over)}${bill.inGrace ? ' · grace period, no extra charge yet' : ''}` : `Time left ${fmtDuration(remainingMs(s, ms))}`);
     }
-    // Tell staff when the fee next goes up, counted on the time actually played.
-    const nextAt = bill.nextIncreaseAtMs;
-    setText('next', `Goes up to ${peso(tableFee(nextAt))} at ${fmtDuration(nextAt)} · in ${fmtDuration(Math.max(0, nextAt - ms))}`);
+    const completeHint = $('[data-region=complete-hint]');
+    if (completeHint) {
+      completeHint.hidden = !stillRunning;
+      if (stillRunning) completeHint.textContent = 'Paying doesn’t end the session — it keeps running until the booked time is up, or you tap End Session.';
+    }
+    // "Goes up to ₱X at..." describes what happens if the clock keeps running past a fee bracket —
+    // not the amount due while paying is based on the booked length instead (see dueTableFee above),
+    // so it's only shown once the session has actually ended (or always, for Open Time).
+    setText('next', stillRunning ? '' : `Goes up to ${peso(tableFee(bill.nextIncreaseAtMs))} at ${fmtDuration(bill.nextIncreaseAtMs)} · in ${fmtDuration(Math.max(0, bill.nextIncreaseAtMs - ms))}`);
     setText('total', peso(total));
     const raw = $('#cash-tendered').value;
     const tendered = Number(raw);
@@ -352,32 +368,46 @@ function mountBill(el, ctx, tableId) {
     }
     const cashPart = method === 'split' ? Number(splitRaw) : null;
     const gcashRef = $('#gcash-ref').value;
-    const total = round2(sessionFee(t.session, elapsedMs(t)) + itemsTotal(t.session.items));
+    const total = round2(dueTableFee(t.session, elapsedMs(t)) + itemsTotal(t.session.items));
     if ((method === 'gcash' || method === 'split') && total > 0 && gcashRef.length !== 5) {
       toast('Enter the last 5 digits of the QRPH reference number.', 'error');
       $('#gcash-ref').focus();
       return;
     }
-    // The total on screen is an estimate while the clock runs; the server-stamped end time decides.
-    const expectedTotal = round2(sessionFee(t.session, elapsedMs(t)) + itemsTotal(t.session.items));
+    // The total on screen is a live estimate; the server re-checks it against the stored stamps
+    // (an ended session) or the booked length (a still-running one) before accepting the payment.
+    const expectedTotal = round2(dueTableFee(t.session, elapsedMs(t)) + itemsTotal(t.session.items));
     completing = true;
     btn.disabled = true;
     try {
       const record = await svc.completeCheckout(tableId, { method, tendered, cashPart, gcashRef, expectedTotal }, ctx.user);
+      if (record.id == null) {
+        // Nothing was owed at all (already fully paid, no items) — nothing to record or print.
+        completing = false;
+        btn.disabled = false;
+        render();
+        toast(`${t.name}: nothing owed.`);
+        return;
+      }
       // Cash changed hands: open the drawer (if the printer is connected and "On cash pay" is on).
       printer.kickDrawerForCash(record.payments?.cash).then((err) => err && toast(`Paid, but the drawer said: ${err}`, 'error'));
+      if (record.mode === 'timed' && record.endedAt == null) {
+        // Paid a still-running Set Hours booking: stays on this table, still In Use, still counting down.
+        completing = false;
+        btn.disabled = false;
+        render();
+        toast(`${t.name}: ${peso(record.total)} paid. Session keeps running.`);
+        receiptDialog(record, { fresh: true });
+        return;
+      }
       location.hash = '#/tables';
       receiptDialog(record, { fresh: true });
     } catch (err) {
       completing = false;
       btn.disabled = false;
       render();
-      if (err instanceof svc.TotalChangedError) {
-        toast(`Clock stopped at ${fmtDuration(err.durationMs)}. Final total is ${peso(err.total)}. Confirm the payment and press Complete again.`, 'error');
-        $('#cash-tendered')?.dispatchEvent(new Event('input'));
-      } else {
-        toast(err.message, 'error');
-      }
+      toast(err.message, 'error');
+      if (err instanceof svc.TotalChangedError) $('#cash-tendered')?.dispatchEvent(new Event('input'));
     }
   }
 
@@ -390,14 +420,28 @@ function mountBill(el, ctx, tableId) {
         if (!t?.session || !isTimed(t.session)) return undefined;
         const booked = plannedMs(t.session);
         const played = elapsedMs(t);
+        const prepaid = isPrepaid(t.session);
         return bookingDialog({
           title: `Add time · ${esc(t.name)}`,
           submitLabel: 'Add time',
           baseMs: booked,
           elapsedNow: played,
-          onPick: async (ms) => {
-            const total = await svc.extendSession(tableId, ms);
-            toast(`${t.name}: booked ${fmtBooking(total)}`);
+          paidThroughMs: prepaid ? paidMs(t.session) : null,
+          onPick: async (ms, payNow) => {
+            if (!payNow) {
+              const { planned } = await svc.extendSession(tableId, ms);
+              toast(`${t.name}: booked ${fmtBooking(planned)}`);
+              return;
+            }
+            const due = round2(tableFee(booked + ms) - tableFee(paidMs(t.session)));
+            bookingPaymentDialog({
+              title: `Pay for extra time · ${esc(t.name)}`,
+              due,
+              onPay: async (payment) => {
+                const { planned } = await svc.extendSession(tableId, ms, { payNow: true, ...payment, user: ctx.user });
+                toast(`${t.name}: booked ${fmtBooking(planned)}, extra time paid`);
+              },
+            });
           },
         });
       }

@@ -1,7 +1,7 @@
 import { db } from '../db.js';
 import { state, on } from '../state.js';
 import { isLowStock, activeSales } from '../billing.js';
-import { cancelledGames, cancelInfo } from '../reporting.js';
+import { cancelledGames, cancelInfo, saleLabel } from '../reporting.js';
 import { addStockDialog } from '../dialogs.js';
 import { roleLabel, visibleUsers } from '../roles.js';
 import { HALL_TZ } from '../clock.js';
@@ -28,7 +28,7 @@ export function mount(el, ctx) {
             </div>
             <ul class="legend" aria-label="Legend">
               <li><span class="swatch swatch--felt" aria-hidden="true"></span>Table revenue</li>
-              <li><span class="swatch swatch--amber" aria-hidden="true"></span>Product sales</li>
+              <li><span class="swatch swatch--amber" aria-hidden="true"></span>Bar Counter sales</li>
             </ul>
           </div>
           <div class="chart" data-region="chart"></div>
@@ -89,8 +89,11 @@ export function mount(el, ctx) {
       const up = pct >= 0;
       delta = `<span class="delta ${up ? 'delta--up' : 'delta--down'}"><span aria-hidden="true">${up ? '▲' : '▼'}</span> ${Math.abs(pct).toFixed(1)}% <span class="delta__ctx">vs this time yesterday</span></span>`;
     }
-    const itemsSold = today.filter((x) => x.saleType !== 'cue-stick').reduce((n, x) => n + (x.items || []).reduce((m, i) => m + i.qty, 0), 0);
-    const cueSticksSold = today.filter((x) => x.saleType === 'cue-stick').reduce((n, x) => n + (x.items || []).length, 0);
+    // Counted per line, not per sale: a Quick Sale can mix products and cue sticks in one cart
+    // (js/services.js completeQuickSale), so a transaction's saleType alone can't tell them apart —
+    // only cueStickId on the line can (older cue-stick-only sales still carry saleType, handled below).
+    const itemsSold = today.reduce((n, x) => n + (x.items || []).filter((i) => !i.cueStickId).reduce((m, i) => m + i.qty, 0), 0);
+    const cueSticksSold = today.reduce((n, x) => n + (x.items || []).filter((i) => i.cueStickId || x.saleType === 'cue-stick').reduce((m, i) => m + (i.qty ?? 1), 0), 0);
     stats.innerHTML = `
       <article class="stat stat--dark">
         <p class="stat__label">Total sales today</p>
@@ -103,7 +106,7 @@ export function mount(el, ctx) {
         <p class="stat__sub">${sessionsToday.length} session${sessionsToday.length === 1 ? '' : 's'} billed</p>
       </article>
       <article class="stat">
-        <p class="stat__label">Product sales</p>
+        <p class="stat__label">Bar Counter sales</p>
         <p class="stat__value num">${peso(sum(today, 'productTotal'))}</p>
         <p class="stat__sub">${itemsSold} item${itemsSold === 1 ? '' : 's'} sold</p>
       </article>
@@ -144,7 +147,7 @@ export function mount(el, ctx) {
       <li>
         <button type="button" class="tx-row" data-id="${esc(x.id)}">
           <span class="tx-row__main">
-            <span class="tx-row__title">${x.tableId ? esc(x.tableName) : `<span class="badge badge--neutral">${x.saleType === 'cue-stick' ? 'Cue Stick' : 'Walk-in'}</span>`}${cancelInfo(x) ? ' <span class="badge badge--danger">Cancelled</span>' : ''}</span>
+            <span class="tx-row__title">${x.tableId ? esc(x.tableName) : `<span class="badge badge--neutral">${esc(saleLabel(x))}</span>`}${cancelInfo(x) ? ' <span class="badge badge--danger">Cancelled</span>' : ''}</span>
             <span class="tx-row__sub">${fmtTime(x.createdAt)} · ${METHOD_LABEL[x.method] || esc(x.method)} · ${esc(x.cashierName)}</span>
           </span>
           <span class="tx-row__amount num">${peso(x.total)}</span>

@@ -33,7 +33,7 @@ open tables but keeps staff, tables and products.
 
 | | Cashier | Owner |
 |---|---|---|
-| Tables (Open Time / Set Hours / Add time / Stop & Bill) | ✓ | ✓ |
+| Tables (Open Time / Set Hours / Add time / Checkout) | ✓ | ✓ |
 | Checkout & complete transactions | ✓ | ✓ |
 | Quick Sale (walk-in items, no table) | ✓ | ✓ |
 | Inventory | view only | add products, edit, add stock |
@@ -80,8 +80,10 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
 ## Data model (Firestore)
 
 - `tables/{id}` — `name, number, light, status (available|in_use), session, lastTxId`
-  - `session = { startedAt, ended, endedAt, plannedMs, rounds, items[], openedBy, openedByName, transfers[] }`
+  - `session = { startedAt, ended, endedAt, plannedMs, rounds, items[], openedBy, openedByName, transfers[], prepaid }`
   - `plannedMs` is `0` for **Open Time**, or the booked length for **Set Hours** (15-minute steps; it can be extended, never cut)
+  - `prepaid` (optional) — `{ paidMs, lastTxId, refunded }` for a **prepaid Set Hours booking** paid without ending the
+    session — see below; absent for Open Time and an unpaid Set Hours booking
   - `transfers` (optional) is the table-move history for **Transfer Table** — see below; the timer, items and bill never reset when a session moves
   - `startedAt` and `endedAt` are **server timestamps**. Elapsed time = `endedAt − startedAt` once ended, otherwise
     server-synced now − `startedAt`.
@@ -89,7 +91,7 @@ For example, cashiers can only *decrease* product stock, and transactions are ap
 - `products/{id}` — `name, category, price, stock, reorderLevel, lastRestockedAt`
 - `restocks/{id}` — restock log (feeds "Restocked this week")
 - `cueSticks/{id}` — `name, brand, weight, price, photo, status (available|sold), soldAt, soldTxId, soldByName` — see **Cue Sticks** below
-- `transactions/{id}` — `tableId`/`tableName`, `startedAt`/`endedAt`/`durationMs` copied from the session, `mode` (open | timed), `plannedMs`, `billedMs`, `pricing` used, table fee, rounds, line items, totals, `method` (cash | gcash | split, or none for a ₱0 cancelled game), `payments {cash, gcash}`, cashier, `createdAt` (server time); a cancelled game also carries `gameCancelled`, `cancelReason`, `cancelNote`, `cancelledById`, `cancelledByName` (older sales may carry the retired `tableFeeVoided…` fields). While a game is open, a cancel is stored as `session.cancelled = { reason, note, byId, byName, at }`. A **Quick Sale** (walk-in) has `tableId: null` and no table-session fields — see below. A **Cue Sticks** sale instead carries `saleType: 'cue-stick'` and `cueStickTotal` (kept apart from `productTotal` so it reports separately). The stored field/value is still literally `gcash` (kept as the internal identifier so old records keep reading correctly) — everywhere the app displays it, the label is **QRPH**.
+- `transactions/{id}` — `tableId`/`tableName`, `startedAt`/`endedAt`/`durationMs` copied from the session, `mode` (open | timed), `plannedMs`, `billedMs`, `pricing` used, table fee, rounds, line items, totals, `method` (cash | gcash | split, or none for a ₱0 cancelled game), `payments {cash, gcash}`, cashier, `createdAt` (server time); a cancelled game also carries `gameCancelled`, `cancelReason`, `cancelNote`, `cancelledById`, `cancelledByName` (older sales may carry the retired `tableFeeVoided…` fields). While a game is open, a cancel is stored as `session.cancelled = { reason, note, byId, byName, at }`. A **Quick Sale** (walk-in) has `tableId: null` and no table-session fields — see below. A **Cue Sticks** sale instead carries `saleType: 'cue-stick'` and `cueStickTotal` (kept apart from `productTotal` so it reports separately). The stored field/value is still literally `gcash` (kept as the internal identifier so old records keep reading correctly) — everywhere the app displays it, the label is **QRPH**. A **prepaid Set Hours** payment instead carries `kind: 'prepay'` with `paidFromMs`/`paidToMs` (the table fee), and may also carry items when Complete Transaction settled the bill alongside it — see *Prepaid Set Hours bookings*; cancelling a prepaid booking within 5 minutes adds a linked `kind: 'refund'` sale with a negative amount, `refundOfTxId` pointing back at the payment.
 - `users/{uid}` — `name, email, role, active, online, lastSeen`
 - `expenses/{id}` — `description, amount, cashierId, cashierName, createdAt` (server time). Cash taken from the drawer. Nobody edits one; only the owner can delete one.
 - `settings/shifts` — `twoShifts` (owner-only). Off by default: one shift per business day.
@@ -171,6 +173,45 @@ without the grace field is read with the old round-up rule.
 Checkout shows the breakdown and when the fee next goes up. `firestore.rules` holds a copy of the same numbers (`feeOk`),
 so change both together, and **deploy the rules together with this change** (`npm run deploy:rules`), otherwise checkouts are rejected.
 
+### Prepaid Set Hours bookings (paying without ending the session)
+
+**Complete Transaction never ends a Set Hours booking by itself.** Coupling payment with ending the session — the old
+"Stop & Bill" idea — was a real point of confusion: a cashier paying a few minutes into a 1-hour booking would end it
+immediately, even though the customer meant to keep playing. There's one payment button, same as always: on a running
+Set Hours table, **Complete Transaction** charges the table fee for the *booked* length (plus anything on the bill)
+and leaves the table In Use, the timer running, and auto-stop armed. The table only actually stops for two reasons:
+auto-stop reaching the booked time, or the cashier's own **End Session**. Open Time is completely unaffected —
+Complete Transaction there still stops the clock first, because that's the only way to know an Open Time bill at all.
+
+- **What's tracked:** `session.prepaid = { paidMs, lastTxId, refunded }` — how much of the *booked* time
+  (`session.plannedMs`) already has its fee paid. The **balance** (`balanceDue()` in `js/billing.js`) is the schedule
+  fee for the full booking minus the fee for `paidMs`, so it's always based on booked time, never on time actually
+  played — extending the booking without paying opens up a balance even if the customer never plays the extra time.
+  `dueTableFee()` decides what Complete Transaction actually charges right now: the booking balance while the session
+  is still running, or the usual played-time fee once it's ended (or for Open Time) — the Bill summary always shows
+  exactly that number, so what's on screen always matches what gets charged (a 2-hour booking paid 10 seconds in
+  charges the full ₱400, not the ₱200 flat first-hour rate for however little has been played so far).
+- **Items included:** Complete Transaction on a running booking settles the table-fee balance and whatever's on the
+  bill together, in one payment, then clears the items — they're not carried forward to double-charge later.
+- **Add time, Pay Now or Pay Later:** extending a prepaid booking offers a choice. **Pay Now** charges only the extra
+  amount — the difference between the new and old booking's schedule fee — and settles the balance back to ₱0 in the
+  same write; the already-paid time is never charged again. **Pay Later** just grows the booking, leaving a visible
+  **Balance** badge on the table card and at Checkout, collected the next time Complete Transaction is pressed.
+- **At the booking's end:** if the booking is fully paid and nothing else is owed (no balance, no unpaid items),
+  auto-stop closes the table itself — the same ₱0 "nothing to pay" shape a cancelled game with no items already uses.
+  Otherwise the table shows **Session ended** and waits for a cashier to collect the balance and/or items, exactly
+  like an unpaid booking always has.
+- **Ending early:** a customer who leaves before the booked time is up forfeits the unused prepaid time — no
+  refund, same as walking out of an Open Time game early costs whatever was actually played. The table frees once
+  nothing else is owed.
+- **Cancel game, within the first 5 minutes:** cancelling a prepaid booking also refunds what was paid on it, in the
+  same write — a second, append-only **refund** transaction with a negative amount, linked back to the original
+  payment (the ledger is append-only, so nothing is edited). Past 5 minutes, cancel isn't offered and the prepaid
+  amount stands, same as the rest of Cancel game.
+- **Enforced on the server:** `firestore.rules` (`paysBooking`, `prepaySaleOk`, `refundOk`/`refundSaleOk`) recomputes
+  every payment and refund from the table's own before/after state, the same way it already re-checks every sale —
+  a booking's fee can never be charged twice, and a refund can't be forged or paid out twice.
+
 ## Time integrity (why a changed clock can't change a bill)
 
 - **Server timestamps:** session start, session end, sale time, cancel time and presence are written as server timestamps. The
@@ -196,7 +237,7 @@ receipt and freeing the table, so two terminals can't oversell stock or bill a t
 
 ## Screens: what lives where
 
-- **Tables grid.** Each card is a small top-down pool table, built so you can scan the floor and act in one tap. Navy cloth with a green LED means In Use; pale cloth with an unlit display means Available. The cards show no buttons: tap a table to open its actions. A free table offers **Open Time** or **Set Hours**; a running table offers **Stop & Bill**, which opens Checkout (on the Checkout screen, tapping a running table goes straight to its bill), and **Transfer Table** to move the game to another table (see below). Booked tables count down time left, then show extra time once it runs out. A running table also warns before each whole hour (see *Hour-mark alert*).
+- **Tables grid.** Each card is a small top-down pool table, built so you can scan the floor and act in one tap. Navy cloth with a green LED means In Use; pale cloth with an unlit display means Available. The cards show no buttons: tap a table to open its actions. A free table offers **Open Time** or **Set Hours**; a running table offers **Checkout** (on the Checkout screen, tapping a running table goes straight to its bill), and **Transfer Table** to move the game to another table (see below). Booked tables count down time left, then show extra time once it runs out. A running table also warns before each whole hour (see *Hour-mark alert*).
 - **Checkout** (one table). This is where you manage a running table: **Add time** for Set Hours bookings, End Session, **Add Item**, cancel a game in its first 5 minutes, and payment.
 - **Top bar (phones and tablets).** Phones and tablets, in either orientation, get a top bar with **refresh**, the **thermal printer** and the **cash drawer**; the sidebar becomes a slide-out menu. On a desktop with a mouse the sidebar keeps labeled printer and cash drawer buttons.
 - The navy "device display" look is used only for live table equipment (the table cards and the checkout timer). The rest of the app stays ivory and felt green, so a dark card always means a running table.
@@ -204,7 +245,9 @@ receipt and freeing the table, so two terminals can't oversell stock or bill a t
 ## Cancel game (first 5 minutes, before paying)
 
 A customer who changes their mind in the first **5 minutes** isn't charged the table fee. Nobody pays first to be
-refunded later: the cashier cancels on the table itself.
+refunded later — the cashier cancels on the table itself — *except* a **prepaid Set Hours booking**, which by
+definition already paid: cancelling one within the window also refunds it, via a linked append-only refund sale
+(see *Prepaid Set Hours bookings* above). Once past 5 minutes, there's no cancel and no refund either way.
 
 - **Where:** open the table (click it on Tables, which opens its Checkout page). While the game is 5 minutes or less,
   a **Cancel game** button shows with a countdown ("4:12 left"). A clock that was stopped within 5 minutes can still
@@ -230,7 +273,7 @@ customer something right away and bill them properly later, without keeping the 
   checkout from the actual time played. The ticket says as much ("not a receipt... give this to the customer; the
   cashier bills the table when they're done").
 - **The flow:** customer picks a table → start ticket prints, customer keeps it → they play → they bring the ticket
-  back to the cashier, who opens that table (**Stop & Bill**) and takes payment as usual, printing the normal
+  back to the cashier, who opens that table (**Checkout**) and takes payment as usual, printing the normal
   **payment receipt** (see *Thermal printer*) — two separate slips for the two separate moments.
 - Built the same way as the payment receipt: `js/printer.js` (`printStartTicket`/`previewStartTicket`), dialog in
   `js/dialogs.js` (`startTicketDialog`), wired into the Tables screen actions.
@@ -302,22 +345,33 @@ unique physical item (not counted stock), with its own photo so it can be shown 
 
 ### Showcase (TV display)
 
-A fullscreen, chrome-free slideshow — table status, then the cue stick catalog — meant for a screen
-behind the counter or near the tables, not a screen staff use day to day.
+A fullscreen, chrome-free digital-signage loop — built for a 36" 16:9 screen viewed from across the
+room — meant for a screen behind the counter or near the tables, not a screen staff use day to day.
 
 - **Where it lives:** `#/showcase` (`js/views/showcase.js`), reached from the **Open Showcase** link on
   the Cue Sticks page, or as the forced landing screen for a **Display** account (below). It's a real
   route but deliberately left out of the sidebar, since nobody needs it in their daily nav.
-- **What it shows, on a loop:** one **Table Status** slide, then one slide per *available* cue stick
-  (sold ones drop out) — photo, name, brand/weight, price. Auto-advances every 7 seconds, with a small
-  dot indicator. A cue with no photo yet falls back to a plain cue icon rather than leaving a gap.
-- **Table Status is the real thing, not a summary:** it's `poolCard()` (`js/views/pool-card.js`), the
-  exact same card the Tables screen itself uses — timer, bill, rate, the hour-mark warning, all of it —
-  kept ticking live once a second by the same `updateTableTimers()` helper the Tables screen uses. If
-  it's on the floor grid, it's on the TV.
-- **Live, not a slideshow file:** it reads the same `state.tables`/`state.cueSticks` as the rest of the
-  app, so a table freeing up, a new cue, or one selling out updates the loop on its own — nothing here is
-  ever exported or re-uploaded by hand.
+- **Four slide types rotate,** every ~9 seconds, with a smooth crossfade (two stacked layers whose
+  opacity swaps, not a hard cut) and a dot indicator:
+  - **Live Table Status** — always first, always real. It's `poolCard()` (`js/views/pool-card.js`), the
+    exact same card the Tables screen itself uses — timer, bill, rate, the hour-mark warning, all of it —
+    kept ticking live once a second by the same `updateTableTimers()` helper. A table nearing its time
+    limit gets an extra slow pulse here, purely for TV-distance legibility; the ordinary Tables screen is
+    untouched. **This slide is never edited** — it's always the live data, exactly as before.
+  - **Champion Spotlight, Featured Cue/Product, Promo/Announcement** — owner-set content; see below.
+- **Owner-controlled content, unlimited:** Cue Sticks → **Customize Showcase** (owner and superadmin
+  only; `js/dialogs.js` `manageShowcaseDialog`) is a list where you keep adding champions, featured
+  cues/products and announcements — as many as you like. Each entry is its own document in `showcaseItems`
+  and its own slide (photo, text, a "Show on the TV" switch, and — for announcements — an editable label
+  such as "Coming up" or "Happy hour" instead of a fixed "Happening now"). Entries rotate oldest first.
+  **Featured** falls back to the newest available cue stick while there are no featured entries, so that
+  slot is never empty out of the box.
+- **Live, not a slideshow file:** it reads the same `state.tables`/`state.cueSticks`/`state.showcaseItems`
+  as the rest of the app, so a table freeing up, a new cue, or an owner edit updates the loop on its own —
+  nothing here is ever exported or re-uploaded by hand.
+- **A display account can read `showcaseItems`** — the one exception to the Display role's
+  tables/cueSticks-only rules (see below), so the TV itself can show what the owner added. Only owner-level
+  accounts can write it; each entry's photo is size-capped so no one document nears Firestore's 1 MiB limit.
 - **How the fullscreen works:** the view adds a `showcase-mode` class to the app's `.shell` element,
   which is what actually hides the sidebar/top bar and lets the page fill the screen (see `css/styles.css`);
   the class comes off again when the view unmounts. A staff account sees a small "Back to app" link
@@ -338,9 +392,11 @@ so that screen never needs to borrow a real staff member's login (and everything
   else, even by typing a different URL.
 - **Enforced on the server, not just hidden on screen:** `firestore.rules`' `isWorkingStaff()` is
   `isStaff()` minus the Display role, and gates every collection except `tables` and `cueSticks` (which
-  stay on the broader `isStaff()`, since that's the whole point). A Display account's credentials, if
-  anyone ever got hold of them, can read table status and the cue stick catalog and nothing more — no
-  transactions, expenses, other staff's names, settings, or write access of any kind.
+  stay on the broader `isStaff()`, since that's the whole point) — plus the `showcaseItems` collection,
+  so the TV can also show the owner's Champion/Featured/Promo content (see
+  *Showcase* above). A Display account's credentials, if anyone ever got hold of them, can read table
+  status, the cue stick catalog and the Showcase entries, and nothing more — no transactions,
+  expenses, other staff's names, other settings, or write access of any kind.
 
 ## Hour-mark alert (table cards)
 

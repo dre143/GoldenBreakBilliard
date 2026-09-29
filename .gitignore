@@ -7,3 +7,6 @@ android-app/build/
 android-app/app/build/
 android-app/local.properties
 android-app/releases/
+
+# local portable JDK + scratch export samples, not part of the app
+.tools/

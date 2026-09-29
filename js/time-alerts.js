@@ -22,10 +22,14 @@ import { esc, fmtCountdown } from './ui.js';
 // Dynamic, not a static import: services.js pulls in db.js, which touches browser-only globals
 // (location, localStorage) at module load — fine in the app, fatal if this file is imported by the
 // Node test runner (see tests/unit/time-alerts.test.mjs, which only exercises alertFor()).
-let endSessionFn = null;
+let finishAutoStopFn = null;
 async function autoEndSession(tableId, session) {
-  if (!endSessionFn) ({ endSession: endSessionFn } = await import('./services.js'));
-  return endSessionFn(tableId, { expiredBooking: plannedMs(session), startedAt: session.startedAt });
+  if (!finishAutoStopFn) ({ finishAutoStop: finishAutoStopFn } = await import('./services.js'));
+  // finishAutoStop() stops the clock like End Session always has, and — only for a Set Hours booking
+  // that's already fully paid with nothing else owed — also closes the table right here, the same ₱0
+  // "nothing to pay" shape a cancelled game with no items already uses (see js/services.js). state.user
+  // credits the closing sale to whichever signed-in device's tick happened to notice the expiry.
+  return finishAutoStopFn(tableId, { expiredBooking: plannedMs(session), startedAt: session.startedAt }, state.user);
 }
 
 const MIN = 60 * 1000;

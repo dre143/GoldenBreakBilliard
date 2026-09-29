@@ -4,6 +4,7 @@ export const state = {
   tables: [],
   products: [],
   cueSticks: [],
+  showcaseItems: [], // owner-added Champion/Featured/Promo entries for the Showcase TV slideshow
   users: [],
   restocks: [],
   settings: {},
@@ -34,6 +35,7 @@ export function reset() {
   state.tables = [];
   state.products = [];
   state.cueSticks = [];
+  state.showcaseItems = [];
   state.users = [];
   state.restocks = [];
   state.settings = {};
